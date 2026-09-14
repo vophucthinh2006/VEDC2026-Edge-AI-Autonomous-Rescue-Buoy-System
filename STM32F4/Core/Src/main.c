@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "bno055.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,7 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define BNO055_READ_PERIOD_MS  10U   /* fusion output data rate 100 Hz (Table 3-14) */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,7 +44,12 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+BNO055_HandleTypeDef hbno055;
+BNO055_Status_t      bno055_init_status;
+BNO055_Status_t      bno055_read_status;
+BNO055_Euler_t       bno055_euler;
+BNO055_CalibStatus_t bno055_calib;
+static uint32_t      bno055_last_tick;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -89,7 +94,13 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-
+  hbno055.hi2c            = &hi2c1;
+  hbno055.address         = BNO055_I2C_ADDR_COM3_HIGH;   /* ADR floating -> 0x29 */
+  hbno055.rst_port        = BNO055_RST_GPIO_Port;
+  hbno055.rst_pin         = BNO055_RST_Pin;
+  hbno055.mode            = BNO055_OPR_MODE_NDOF;
+  hbno055.use_ext_crystal = true;                        /* 32.768 kHz on GY-BNO055 */
+  bno055_init_status = BNO055_Init(&hbno055);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -99,6 +110,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    if ((bno055_init_status == BNO055_OK) &&
+        ((HAL_GetTick() - bno055_last_tick) >= BNO055_READ_PERIOD_MS))
+    {
+      bno055_last_tick = HAL_GetTick();
+      bno055_read_status = BNO055_ReadEuler(&hbno055, &bno055_euler);
+      (void)BNO055_ReadCalibStatus(&hbno055, &bno055_calib);
+    }
   }
   /* USER CODE END 3 */
 }
