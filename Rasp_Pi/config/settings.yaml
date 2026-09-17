@@ -1,0 +1,45 @@
+serial:
+  stm32_port: /dev/serial0
+  stm32_baud: 115200
+  lidar_port: /dev/ttyAMA3
+  lidar_baud: 115200
+vehicle:
+  lidar_yaw_offset_deg: 0.0  # calibrate: LD14 angle zero -> bow; positive clockwise
+  boat_radius_m: 0.35
+  safety_margin_m: 0.40
+  max_speed_mps: 0.50
+  approach_speed_mps: 0.20
+  stop_distance_m: 1.00
+  slow_distance_m: 2.00
+  influence_distance_m: 3.00
+  arrive_radius_m: 4.0
+  target_standoff_m: 1.5
+  target_timeout_s: 2.0
+  max_turn_rate_deg_s: 35.0
+  max_pitch_deg: 35.0
+  max_roll_deg: 35.0
+  nav_ttl_ms: 300
+  lidar_stale_s: 0.50
+  imu_stale_s: 0.30
+  gps_stale_s: 2.0
+planner:
+  attractive_gain: 1.0
+  repulsive_gain: 0.75
+  bias_gain: 0.22
+  preferred_side: starboard
+  front_fov_deg: 110.0
+  cluster_gap_m: 0.25
+camera:
+  enabled: true
+  device: 0
+  horizontal_fov_deg: 100.0
+  model_path: models/person_detector.tflite
+  confidence_threshold: 0.80
+  detection_hold_s: 0.40
+  report_cooldown_s: 10.0
+  lidar_association_half_angle_deg: 8.0
+  min_target_distance_m: 1.0
+  max_target_distance_m: 8.0
+logging:
+  level: INFO
+  directory: logs

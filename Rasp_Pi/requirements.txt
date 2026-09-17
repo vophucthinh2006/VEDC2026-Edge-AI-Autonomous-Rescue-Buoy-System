@@ -1,0 +1,5 @@
+numpy>=1.24,<3
+pyserial>=3.5,<4
+PyYAML>=6.0,<7
+opencv-python-headless>=4.8,<5
+tflite-runtime>=2.14
