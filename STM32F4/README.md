@@ -15,6 +15,8 @@ từ Raspberry Pi, đọc BNO055 / GPS / RC receiver, áp dụng watchdog an to�
 ```
 STM32F4/
 ├── STM32F4.ioc            cấu hình CubeMX — NGUỒN SỰ THẬT cho pinout và clock
+├── STM32F4.pdf            báo cáo cấu hình do CubeMX sinh (sơ đồ + clock tree)
+├── STM32F4.txt            bảng chân dạng văn bản, cùng báo cáo
 ├── Core/                  code CubeMX sinh ra (main.c, gpio.c, i2c.c, tim.c, usart.c, adc.c)
 ├── Drivers/               CMSIS + STM32F4xx HAL
 ├── Modules/               mỗi thư mục con là MỘT ngoại vi / thiết bị
@@ -28,7 +30,7 @@ STM32F4/
 │   ├── imu.c/.h           lớp đệm trên driver BNO055
 │   └── app_config.h       ngưỡng, timeout, hằng số PWM
 ├── Tools/                 dump calibration, dashboard STM32CubeMonitor
-├── docs/                  ảnh pinout
+├── docs/                  ảnh pinout trích từ STM32F4.pdf
 ├── build.bat              cmake + ninja → build/Debug/STM32F4.elf
 └── flash.bat              nạp qua ST-LINK
 ```
@@ -59,29 +61,32 @@ khiển. Nhờ vậy `Modules/BNO055/` vẫn là driver thuần.
 
 ![Pinout STM32F407VGTx](docs/pinout.png)
 
-Chữ trên ảnh hơi mờ ở vài chân. **Bảng dưới đây và `STM32F4.ioc` mới là căn cứ**, ảnh
-chỉ để nhìn tổng thể.
+Ảnh trích từ báo cáo CubeMX nên chữ sắc nét. Nguồn sự thật vẫn là `STM32F4.ioc`;
+`STM32F4.txt` là bảng chân dạng văn bản do CubeMX sinh, tiện để đối chiếu nhanh.
 
 ### Xuất lại ảnh khi đổi pinout
 
 CubeMX **không có lệnh xuất sơ đồ chip ra file ảnh**. Menu `Pinout → Export pinout with /
-without Alt. Functions` (`Ctrl+U`) chỉ ra **CSV danh sách chân**, không phải ảnh.
+without Alt. Functions` (`Ctrl+U`) chỉ ra CSV danh sách chân, không phải ảnh.
 
-Cách lấy ảnh nét nhất là đi qua báo cáo PDF, vì sơ đồ trong đó là vector:
+Đường đi cho ảnh nét là qua báo cáo PDF, vì sơ đồ trong đó là vector:
 
-1. Trong CubeMX: **Project → Generate Reports** → sinh ra `STM32F4.pdf` và `STM32F4.txt`
-2. Trang đầu PDF chứa sơ đồ pinout. Trích ra PNG ở DPI cao:
+1. Trong CubeMX: **Project → Generate Reports** → ghi đè `STM32F4.pdf` và `STM32F4.txt`
+2. Sơ đồ nằm ở **trang 3** của PDF. Trích ra PNG 300 DPI:
 
 ```
-pdftoppm -png -r 200 -f 1 -l 1 STM32F4.pdf docs/pinout
+pdftoppm -png -r 300 -f 3 -l 3 STM32F4.pdf docs/raw
 ```
 
-3. Đổi tên file vừa sinh thành `docs/pinout.png`
+3. Cắt bỏ tiêu đề trang và lề trắng, rồi lưu thành `docs/pinout.png`
+4. Xoá file `docs/raw-03.png`
+5. Cập nhật bảng dưới đây cho khớp
 
-Chụp màn hình cũng được nhưng chữ sẽ mờ như ảnh hiện tại. Nếu buộc phải chụp, phóng to
-sơ đồ bằng `Ctrl` + con lăn chuột rồi mới chụp.
+Chụp màn hình cũng ra ảnh nhưng chữ sẽ mờ tới mức đọc nhầm `TIM4_CH1` thành `TIM1_CH1` —
+mà PB6 không hề có TIM1. Đừng dùng cách đó cho tài liệu.
 
-`STM32F4.txt` trong cùng báo cáo là bảng chân dạng văn bản, tiện để đối chiếu với bảng trên.
+`STM32F4.pdf` và `STM32F4.txt` được commit cùng repo để người chưa cài CubeMX vẫn tra được
+cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và bảng tiêu thụ điện.
 
 | Chức năng | Peripheral | Chân | Tham số | Nối tới |
 |---|---|---|---|---|
@@ -421,7 +426,8 @@ Theo `AGENTS.md`:
 Trước khi mở PR, kiểm tra tối thiểu:
 
 - `build.bat` chạy sạch, chỉ còn warning `clamp_us`
-- Nếu sửa `.ioc`: đã xuất lại `docs/pinout.png` và cập nhật bảng mục 2
+- Nếu sửa `.ioc`: đã chạy **Project → Generate Reports**, commit `STM32F4.pdf` +
+  `STM32F4.txt` mới, trích lại `docs/pinout.png`, và cập nhật bảng mục 2
 - Nếu thêm hoặc bớt biến toàn cục: đã kiểm tra lại địa chỉ trong
   `Tools/CubeMonitor/BNO055_Flow.json`
 - Nếu đổi chân: đã ghi rõ trong PR rằng **phần cứng phải đổi dây**
