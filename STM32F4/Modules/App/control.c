@@ -11,7 +11,9 @@ void Control_Init(controller_t *control) { memset(control, 0, sizeof(*control));
 void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_state_t *rc, const bno055_euler_t *imu, const actuator_driver_t *actuators, uint32_t now_ms) {
     bool rc_fresh = rc->valid && (uint32_t)(now_ms - rc->last_rx_ms) <= RC_TIMEOUT_MS;
     bool imu_fresh = imu->valid && (uint32_t)(now_ms - control->last_imu_ms) <= IMU_TIMEOUT_MS;
-    control->estop = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET;
+    /* Normally-closed contact to GND against an internal pull-up: released
+       reads low, pressed reads high, and a cut wire also reads high. */
+    control->estop = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == GPIO_PIN_SET;
     control->overturned = imu->valid && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
     bool arm_requested = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD && rc->channel[RC_CH_THROTTLE] <= 1050U;
