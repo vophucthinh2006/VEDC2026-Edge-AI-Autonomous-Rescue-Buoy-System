@@ -18,7 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
 #include "i2c.h"
+#include "tim.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -100,6 +103,12 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
+  MX_ADC1_Init();
+  MX_TIM3_Init();
+  MX_TIM4_Init();
+  MX_USART1_UART_Init();
+  MX_USART3_UART_Init();
+  MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
   hbno055.hi2c            = &hi2c1;
   hbno055.address         = BNO055_I2C_ADDR_COM3_HIGH;   /* ADR floating -> 0x29 */
