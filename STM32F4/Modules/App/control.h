@@ -1,7 +1,7 @@
 #pragma once
 
 #include "actuators.h"
-#include "bno055.h"
+#include "imu.h"
 #include "gps_nmea.h"
 #include "ibus.h"
 #include "uart_protocol.h"
