@@ -62,8 +62,26 @@ khiển. Nhờ vậy `Modules/BNO055/` vẫn là driver thuần.
 Chữ trên ảnh hơi mờ ở vài chân. **Bảng dưới đây và `STM32F4.ioc` mới là căn cứ**, ảnh
 chỉ để nhìn tổng thể.
 
-Xuất lại ảnh khi đổi pinout: mở `STM32F4.ioc` trong CubeMX → tab **Pinout & Configuration**
-→ menu **Pinout** → **Export pinout image** → lưu đè `docs/pinout.png`.
+### Xuất lại ảnh khi đổi pinout
+
+CubeMX **không có lệnh xuất sơ đồ chip ra file ảnh**. Menu `Pinout → Export pinout with /
+without Alt. Functions` (`Ctrl+U`) chỉ ra **CSV danh sách chân**, không phải ảnh.
+
+Cách lấy ảnh nét nhất là đi qua báo cáo PDF, vì sơ đồ trong đó là vector:
+
+1. Trong CubeMX: **Project → Generate Reports** → sinh ra `STM32F4.pdf` và `STM32F4.txt`
+2. Trang đầu PDF chứa sơ đồ pinout. Trích ra PNG ở DPI cao:
+
+```
+pdftoppm -png -r 200 -f 1 -l 1 STM32F4.pdf docs/pinout
+```
+
+3. Đổi tên file vừa sinh thành `docs/pinout.png`
+
+Chụp màn hình cũng được nhưng chữ sẽ mờ như ảnh hiện tại. Nếu buộc phải chụp, phóng to
+sơ đồ bằng `Ctrl` + con lăn chuột rồi mới chụp.
+
+`STM32F4.txt` trong cùng báo cáo là bảng chân dạng văn bản, tiện để đối chiếu với bảng trên.
 
 | Chức năng | Peripheral | Chân | Tham số | Nối tới |
 |---|---|---|---|---|
