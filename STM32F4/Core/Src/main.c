@@ -26,8 +26,14 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "bno055.h"
-#include "bno055_calib_profile.h"
+#include "actuators.h"
+#include "app_config.h"
+#include "control.h"
+#include "gps_nmea.h"
+#include "ibus.h"
+#include "imu.h"
+#include "uart_protocol.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,18 +54,13 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-BNO055_HandleTypeDef hbno055;
-BNO055_Status_t      bno055_init_status;
-BNO055_Status_t      bno055_read_status;
-BNO055_Euler_t       bno055_euler;
-BNO055_CalibStatus_t bno055_calib;
-static uint32_t      bno055_last_tick;
-#if BNO055_CALIB_PROFILE_VALID
-static const uint8_t bno055_calib_profile[BNO055_CALIB_PROFILE_SIZE] = BNO055_CALIB_PROFILE_DATA;
-#endif
-/* Captured once fully calibrated, read by Tools/bno055_dump_calib */
-uint8_t              bno055_calib_captured[BNO055_CALIB_PROFILE_SIZE];
-uint8_t              bno055_calib_captured_valid;
+static uint8_t pi_rx_byte, gps_rx_byte, ibus_rx_byte;
+static pi_command_t pi_command;
+static ibus_state_t ibus;
+static gps_state_t gps;
+static bno055_euler_t imu;
+static controller_t control;
+static actuator_driver_t actuators;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,7 +71,19 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void send_telemetry(uint16_t sequence)
+{
+  char payload[128];
+  uint32_t now = HAL_GetTick();
+  bool imu_ok = imu.valid && (uint32_t)(now - control.last_imu_ms) <= IMU_TIMEOUT_MS;
 
+  snprintf(payload, sizeof(payload), "%u,%.2f,%.2f,%.2f,%u,%u", sequence, imu.pitch_deg, imu.roll_deg, imu.heading_deg, imu_ok ? 1U : 0U, control.overturned ? 1U : 0U);
+  Protocol_Send(&huart1, "IMU", payload);
+  snprintf(payload, sizeof(payload), "%u,%.6f,%.6f,%u,%.1f,%.2f,%.1f", sequence, gps.latitude_deg, gps.longitude_deg, gps.fix, gps.hdop, gps.speed_mps, gps.course_deg);
+  Protocol_Send(&huart1, "GPS", payload);
+  snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U);
+  Protocol_Send(&huart1, "SYS", payload);
+}
 /* USER CODE END 0 */
 
 /**
@@ -110,19 +123,20 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-  hbno055.hi2c            = &hi2c1;
-  hbno055.address         = BNO055_I2C_ADDR_COM3_HIGH;   /* ADR floating -> 0x29 */
-  hbno055.rst_port        = BNO055_RST_GPIO_Port;
-  hbno055.rst_pin         = BNO055_RST_Pin;
-  hbno055.mode            = BNO055_OPR_MODE_NDOF;
-  hbno055.use_ext_crystal = true;                        /* 32.768 kHz on GY-BNO055 */
-#if BNO055_CALIB_PROFILE_VALID
-  hbno055.calib_profile   = bno055_calib_profile;        /* from git, bno055_calib_profile.h */
-#else
-  hbno055.calib_profile   = NULL;
-#endif
-  bno055_init_status = BNO055_Init(&hbno055);
-  /* USER CODE END 2 */
+  Protocol_Init(&pi_command);
+  IBUS_Init(&ibus);
+  GPS_Init(&gps);
+  Control_Init(&control);
+  Actuators_Init(&actuators, &htim3, &htim4);
+  (void)IMU_Init();
+
+  HAL_UART_Receive_IT(&huart1, &pi_rx_byte, 1U);
+  HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
+  HAL_UART_Receive_IT(&huart6, &ibus_rx_byte, 1U);
+
+  uint32_t last_control = 0U, last_telemetry = 0U;
+  uint16_t sequence = 0U;
+/* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -131,22 +145,28 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if ((bno055_init_status == BNO055_OK) &&
-        ((HAL_GetTick() - bno055_last_tick) >= BNO055_READ_PERIOD_MS))
-    {
-      bno055_last_tick = HAL_GetTick();
-      bno055_read_status = BNO055_ReadEuler(&hbno055, &bno055_euler);
-      (void)BNO055_ReadCalibStatus(&hbno055, &bno055_calib);
+    uint32_t now = HAL_GetTick();
 
-      if ((bno055_calib_captured_valid == 0U) &&
-          (bno055_calib.sys == 3U) && (bno055_calib.gyr == 3U) &&
-          (bno055_calib.acc == 3U) && (bno055_calib.mag == 3U))
+    if ((uint32_t)(now - last_control) >= CONTROL_PERIOD_MS)
+    {
+      last_control = now;
+      if (IMU_Read(&imu)) control.last_imu_ms = now;
+      Control_Tick(&control, &pi_command, &ibus, &imu, &actuators, now);
+      HAL_GPIO_WritePin(SOS_GPIO_Port, SOS_Pin, pi_command.sos_on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+      if (pi_command.txd_pending)
       {
-        if (BNO055_ReadCalibProfile(&hbno055, bno055_calib_captured) == BNO055_OK)
-        {
-          bno055_calib_captured_valid = 1U;
-        }
+        char ack[40];
+        snprintf(ack, sizeof(ack), "%u,TXD,ACCEPTED", pi_command.txd_sequence);
+        Protocol_Send(&huart1, "ACK", ack);
+        pi_command.txd_pending = false;
       }
+    }
+
+    if ((uint32_t)(now - last_telemetry) >= TELEMETRY_PERIOD_MS)
+    {
+      last_telemetry = now;
+      send_telemetry(++sequence);
     }
   }
   /* USER CODE END 3 */
@@ -199,7 +219,26 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  uint32_t now = HAL_GetTick();
 
+  if (huart == &huart1)
+  {
+    Protocol_FeedByte(&pi_command, pi_rx_byte, now);
+    HAL_UART_Receive_IT(&huart1, &pi_rx_byte, 1U);
+  }
+  else if (huart == &huart3)
+  {
+    GPS_FeedByte(&gps, gps_rx_byte, now);
+    HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
+  }
+  else if (huart == &huart6)
+  {
+    IBUS_FeedByte(&ibus, ibus_rx_byte, now);
+    HAL_UART_Receive_IT(&huart6, &ibus_rx_byte, 1U);
+  }
+}
 /* USER CODE END 4 */
 
 /**

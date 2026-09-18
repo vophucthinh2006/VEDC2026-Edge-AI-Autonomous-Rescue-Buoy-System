@@ -5,11 +5,20 @@
 #include "main.h"
 
 static BNO055_HandleTypeDef hbno055;
-static bool imu_ready;
 
 #if BNO055_CALIB_PROFILE_VALID
 static const uint8_t imu_calib_profile[BNO055_CALIB_PROFILE_SIZE] = BNO055_CALIB_PROFILE_DATA;
 #endif
+
+/* Kept non-static and under these exact names: Tools/CubeMonitor/BNO055_Flow.json
+   plots them live, and Tools/bno055_dump_calib.ps1 resolves the last two out of
+   the ELF to read a finished calibration off a running target. */
+BNO055_Status_t      bno055_init_status = BNO055_ERR_PARAM;
+BNO055_Status_t      bno055_read_status = BNO055_ERR_PARAM;
+BNO055_Euler_t       bno055_euler;
+BNO055_CalibStatus_t bno055_calib;
+uint8_t              bno055_calib_captured[BNO055_CALIB_PROFILE_SIZE];
+uint8_t              bno055_calib_captured_valid;
 
 bool IMU_Init(void) {
     hbno055.hi2c = &hi2c1;
@@ -23,25 +32,40 @@ bool IMU_Init(void) {
 #else
     hbno055.calib_profile = NULL;
 #endif
-    imu_ready = (BNO055_Init(&hbno055) == BNO055_OK);
-    return imu_ready;
+    bno055_init_status = BNO055_Init(&hbno055);
+    return bno055_init_status == BNO055_OK;
 }
 
 bool IMU_Read(bno055_euler_t *out) {
-    BNO055_Euler_t euler;
-    BNO055_CalibStatus_t calib;
-
-    if (!imu_ready || BNO055_ReadEuler(&hbno055, &euler) != BNO055_OK) {
+    if (bno055_init_status != BNO055_OK) {
         out->valid = false;
         return false;
     }
 
-    out->heading_deg = euler.yaw;
-    out->roll_deg = euler.roll;
-    out->pitch_deg = euler.pitch;
-    if (BNO055_ReadCalibStatus(&hbno055, &calib) == BNO055_OK) {
-        out->calibration = calib.sys;
+    bno055_read_status = BNO055_ReadEuler(&hbno055, &bno055_euler);
+    if (bno055_read_status != BNO055_OK) {
+        out->valid = false;
+        return false;
     }
+
+    out->heading_deg = bno055_euler.yaw;
+    out->roll_deg = bno055_euler.roll;
+    out->pitch_deg = bno055_euler.pitch;
+
+    if (BNO055_ReadCalibStatus(&hbno055, &bno055_calib) == BNO055_OK) {
+        out->calibration = bno055_calib.sys;
+
+        /* Snapshot the offsets the first time the sensor reports a complete
+           calibration, so the operator can dump and commit a new profile. */
+        if ((bno055_calib_captured_valid == 0U) &&
+            (bno055_calib.sys == 3U) && (bno055_calib.gyr == 3U) &&
+            (bno055_calib.acc == 3U) && (bno055_calib.mag == 3U)) {
+            if (BNO055_ReadCalibProfile(&hbno055, bno055_calib_captured) == BNO055_OK) {
+                bno055_calib_captured_valid = 1U;
+            }
+        }
+    }
+
     out->valid = true;
     return true;
 }
