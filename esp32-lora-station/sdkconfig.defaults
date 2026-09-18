@@ -1,0 +1,2 @@
+# Bắt buộc phải bật để esp_http_server hỗ trợ WebSocket (httpd_ws_*)
+CONFIG_HTTPD_WS_SUPPORT=y

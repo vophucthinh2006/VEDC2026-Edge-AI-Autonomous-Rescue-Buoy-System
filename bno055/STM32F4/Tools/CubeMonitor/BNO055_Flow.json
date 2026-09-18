@@ -1,0 +1,961 @@
+[
+    {
+        "id": "b055000000000001",
+        "type": "tab",
+        "label": "BNO055",
+        "disabled": false,
+        "info": "# BNO055 Roll / Pitch / Yaw\n\nDirect acquisition of firmware globals over ST-LINK (SWD).\n\n1. Select the ST-LINK probe in **myProbe_Out** and **myProbe_In**.\n2. Deploy, open Dashboard, press START Acquisition.\n\nVariable addresses come from build/Debug/STM32F4.elf. Re-check them after changing firmware:\n`arm-none-eabi-nm build/Debug/STM32F4.elf | findstr bno055`"
+    },
+    {
+        "id": "b055000000000010",
+        "type": "subflow",
+        "name": "BNO055 single value",
+        "info": "Extract one variable from processing node output and limit to 10 msg/s (copy of STM32CubeMonitor Basic Flow 'Single value').",
+        "category": "",
+        "in": [
+            {
+                "x": 40,
+                "y": 60,
+                "wires": [
+                    {
+                        "id": "b055000000000011"
+                    }
+                ]
+            }
+        ],
+        "out": [
+            {
+                "x": 780,
+                "y": 140,
+                "wires": [
+                    {
+                        "id": "b055000000000015",
+                        "port": 0
+                    }
+                ]
+            }
+        ],
+        "env": [
+            {
+                "name": "varfilter",
+                "type": "str",
+                "value": "",
+                "ui": {
+                    "icon": "font-awesome/fa-filter",
+                    "label": {
+                        "en-US": "Variable"
+                    },
+                    "type": "input",
+                    "opts": {
+                        "types": [
+                            "str"
+                        ]
+                    }
+                }
+            }
+        ],
+        "color": "#3CB4E6"
+    },
+    {
+        "id": "b055000000000011",
+        "type": "switch",
+        "z": "b055000000000010",
+        "name": "filter variable",
+        "property": "payload.variablename",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "varfilter",
+                "vt": "env"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 1,
+        "x": 170,
+        "y": 60,
+        "wires": [
+            [
+                "b055000000000012"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000012",
+        "type": "change",
+        "z": "b055000000000010",
+        "name": "keep only table of duplets",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.variabledata",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 430,
+        "y": 60,
+        "wires": [
+            [
+                "b055000000000013"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000013",
+        "type": "split",
+        "z": "b055000000000010",
+        "name": "split duplets",
+        "splt": "\\n",
+        "spltType": "str",
+        "arraySplt": 1,
+        "arraySpltType": "len",
+        "stream": false,
+        "addname": "",
+        "x": 680,
+        "y": 60,
+        "wires": [
+            [
+                "b055000000000014"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000014",
+        "type": "delay",
+        "z": "b055000000000010",
+        "name": "",
+        "pauseType": "rate",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "10",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": true,
+        "x": 200,
+        "y": 140,
+        "wires": [
+            [
+                "b055000000000015"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000015",
+        "type": "change",
+        "z": "b055000000000010",
+        "name": "keep only value",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.y",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 490,
+        "y": 140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "b055000000000002",
+        "type": "ui_tab",
+        "name": "BNO055",
+        "icon": "explore",
+        "disabled": false,
+        "hidden": false
+    },
+    {
+        "id": "b055000000000003",
+        "type": "ui_group",
+        "name": "Euler angles",
+        "tab": "b055000000000002",
+        "order": 1,
+        "disp": true,
+        "width": 15,
+        "collapse": false
+    },
+    {
+        "id": "b055000000000004",
+        "type": "ui_group",
+        "name": "Angles",
+        "tab": "b055000000000002",
+        "order": 2,
+        "disp": true,
+        "width": 6,
+        "collapse": false
+    },
+    {
+        "id": "b055000000000005",
+        "type": "ui_group",
+        "name": "Status",
+        "tab": "b055000000000002",
+        "order": 3,
+        "disp": true,
+        "width": 6,
+        "collapse": false
+    },
+    {
+        "id": "b055000000000020",
+        "type": "ui_button",
+        "z": "b055000000000001",
+        "name": "",
+        "group": "b055000000000003",
+        "order": 1,
+        "width": 5,
+        "height": 1,
+        "passthru": false,
+        "label": "START Acquisition",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "icon": "",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "start",
+        "x": 130,
+        "y": 80,
+        "wires": [
+            [
+                "b055000000000030",
+                "b055000000000031"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000021",
+        "type": "ui_button",
+        "z": "b055000000000001",
+        "name": "",
+        "group": "b055000000000003",
+        "order": 2,
+        "width": 5,
+        "height": 1,
+        "passthru": true,
+        "label": "STOP Acquisition",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "icon": "",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "stop",
+        "x": 130,
+        "y": 160,
+        "wires": [
+            [
+                "b055000000000030",
+                "b055000000000031"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000022",
+        "type": "ui_button",
+        "z": "b055000000000001",
+        "name": "",
+        "group": "b055000000000003",
+        "order": 3,
+        "width": 5,
+        "height": 1,
+        "passthru": false,
+        "label": "Clear Graphs",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "icon": "",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "clear",
+        "x": 470,
+        "y": 440,
+        "wires": [
+            [
+                "b055000000000042"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000030",
+        "type": "variables",
+        "z": "b055000000000001",
+        "groupname": "BNO055_Euler",
+        "accesspoint": 0,
+        "execonfig": "",
+        "variablelist": [
+            {
+                "name": "bno055_euler.roll",
+                "address": "0x20000048",
+                "type": 9,
+                "checked": false
+            },
+            {
+                "name": "bno055_euler.pitch",
+                "address": "0x2000004c",
+                "type": 9,
+                "checked": false
+            },
+            {
+                "name": "bno055_euler.yaw",
+                "address": "0x20000050",
+                "type": 9,
+                "checked": false
+            }
+        ],
+        "triggerstartmode": "manual",
+        "triggername": "",
+        "triggerthreshold": "",
+        "frequency": "",
+        "frequencyType": "100",
+        "snapshotheader": "",
+        "mode": "direct",
+        "lastImportedTime": -1,
+        "openStatus": true,
+        "x": 370,
+        "y": 80,
+        "wires": [
+            [
+                "b055000000000032"
+            ],
+            [
+                "b055000000000034"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000031",
+        "type": "variables",
+        "z": "b055000000000001",
+        "groupname": "BNO055_Status",
+        "accesspoint": 0,
+        "execonfig": "",
+        "variablelist": [
+            {
+                "name": "bno055_init_status",
+                "address": "0x20000044",
+                "type": 1,
+                "checked": false
+            },
+            {
+                "name": "bno055_read_status",
+                "address": "0x20000045",
+                "type": 1,
+                "checked": false
+            },
+            {
+                "name": "bno055_calib.sys",
+                "address": "0x20000054",
+                "type": 1,
+                "checked": false
+            },
+            {
+                "name": "bno055_calib.gyr",
+                "address": "0x20000055",
+                "type": 1,
+                "checked": false
+            },
+            {
+                "name": "bno055_calib.acc",
+                "address": "0x20000056",
+                "type": 1,
+                "checked": false
+            },
+            {
+                "name": "bno055_calib.mag",
+                "address": "0x20000057",
+                "type": 1,
+                "checked": false
+            },
+            {
+                "name": "hbno055.ext_crystal_active",
+                "address": "0x20000040",
+                "type": 1,
+                "checked": false
+            },
+            {
+                "name": "hbno055.sys_err",
+                "address": "0x20000041",
+                "type": 1,
+                "checked": false
+            }
+        ],
+        "triggerstartmode": "manual",
+        "triggername": "",
+        "triggerthreshold": "",
+        "frequency": "",
+        "frequencyType": "10",
+        "snapshotheader": "",
+        "mode": "direct",
+        "lastImportedTime": -1,
+        "openStatus": true,
+        "x": 370,
+        "y": 160,
+        "wires": [
+            [
+                "b055000000000032"
+            ],
+            [
+                "b055000000000034"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000032",
+        "type": "acquisition out",
+        "z": "b055000000000001",
+        "name": "myProbe_Out",
+        "probeconfig": "",
+        "x": 640,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "b055000000000034",
+        "type": "ui_toast",
+        "z": "b055000000000001",
+        "position": "top right",
+        "displayTime": "3",
+        "highlight": "",
+        "sendall": true,
+        "outputs": 0,
+        "ok": "OK",
+        "cancel": "",
+        "raw": false,
+        "topic": "",
+        "name": "",
+        "x": 630,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "b055000000000033",
+        "type": "acquisition in",
+        "z": "b055000000000001",
+        "name": "myProbe_In",
+        "probeconfig": "",
+        "x": 130,
+        "y": 320,
+        "wires": [
+            [
+                "b055000000000040",
+                "b055000000000041"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "b055000000000040",
+        "type": "processing",
+        "z": "b055000000000001",
+        "groupname": "BNO055_Euler",
+        "groupid": "b055000000000030",
+        "expressions": [],
+        "statistics": [],
+        "logmode": "no",
+        "x": 380,
+        "y": 320,
+        "wires": [
+            [
+                "b055000000000042",
+                "b055000000000050",
+                "b055000000000051",
+                "b055000000000052"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "b055000000000042",
+        "type": "ui_chartst",
+        "z": "b055000000000001",
+        "group": "b055000000000003",
+        "name": "Roll / Pitch / Yaw (deg)",
+        "order": 4,
+        "width": 15,
+        "height": 9,
+        "chartType": "line",
+        "curveType": "linear",
+        "duration": "10",
+        "ymin": "-180",
+        "ymax": "360",
+        "x": 700,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "b055000000000050",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "roll",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_euler.roll",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 380,
+        "wires": [
+            [
+                "b055000000000053"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000051",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "pitch",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_euler.pitch",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 420,
+        "wires": [
+            [
+                "b055000000000054"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000052",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "yaw",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_euler.yaw",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 460,
+        "wires": [
+            [
+                "b055000000000055",
+                "b055000000000056"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000053",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000004",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Roll (deg)",
+        "format": "{{msg.payload | number:1}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 380,
+        "wires": []
+    },
+    {
+        "id": "b055000000000054",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000004",
+        "order": 2,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Pitch (deg)",
+        "format": "{{msg.payload | number:1}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "b055000000000055",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000004",
+        "order": 3,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Yaw (deg)",
+        "format": "{{msg.payload | number:1}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "b055000000000056",
+        "type": "function",
+        "z": "b055000000000001",
+        "name": "yaw -> 8-point compass",
+        "func": "// Heading 0..360 deg, clockwise increases (BNO055 data sheet Table 3-13)\n// 8 sectors of 45 deg: N 337.5..22.5, NE 22.5..67.5, E, SE, S, SW, W, NW\nconst yaw = Number(msg.payload);\nif (!Number.isFinite(yaw)) {\n    return null;\n}\nconst heading = ((yaw % 360) + 360) % 360;\nconst dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];\nmsg.payload = dirs[Math.floor((heading + 22.5) / 45) % 8] + ' (' + heading.toFixed(1) + '\\u00b0)';\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 960,
+        "y": 500,
+        "wires": [
+            [
+                "b055000000000057"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000057",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000004",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Direction",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 1170,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "b055000000000041",
+        "type": "processing",
+        "z": "b055000000000001",
+        "groupname": "BNO055_Status",
+        "groupid": "b055000000000031",
+        "expressions": [],
+        "statistics": [],
+        "logmode": "no",
+        "x": 380,
+        "y": 560,
+        "wires": [
+            [
+                "b055000000000060",
+                "b055000000000061",
+                "b055000000000062",
+                "b055000000000063",
+                "b055000000000064",
+                "b055000000000065",
+                "b055000000000066",
+                "b055000000000067"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "b055000000000060",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "init_status",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_init_status",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 540,
+        "wires": [
+            [
+                "b055000000000070"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000061",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "read_status",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_read_status",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 580,
+        "wires": [
+            [
+                "b055000000000071"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000062",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "calib.sys",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_calib.sys",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 620,
+        "wires": [
+            [
+                "b055000000000072"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000063",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "calib.gyr",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_calib.gyr",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 660,
+        "wires": [
+            [
+                "b055000000000073"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000064",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "calib.acc",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_calib.acc",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 700,
+        "wires": [
+            [
+                "b055000000000074"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000065",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "calib.mag",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "bno055_calib.mag",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 740,
+        "wires": [
+            [
+                "b055000000000075"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000066",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "ext_crystal",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "hbno055.ext_crystal_active",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 780,
+        "wires": [
+            [
+                "b055000000000076"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000067",
+        "type": "subflow:b055000000000010",
+        "z": "b055000000000001",
+        "name": "sys_err",
+        "env": [
+            {
+                "name": "varfilter",
+                "value": "hbno055.sys_err",
+                "type": "str"
+            }
+        ],
+        "x": 690,
+        "y": 820,
+        "wires": [
+            [
+                "b055000000000077"
+            ]
+        ]
+    },
+    {
+        "id": "b055000000000070",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000005",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Init status (0 = OK)",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "b055000000000071",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000005",
+        "order": 2,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Read status (0 = OK)",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "b055000000000072",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000005",
+        "order": 3,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Calib SYS (0..3)",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 620,
+        "wires": []
+    },
+    {
+        "id": "b055000000000073",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000005",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Calib GYR (0..3)",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "b055000000000074",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000005",
+        "order": 5,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Calib ACC (0..3)",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 700,
+        "wires": []
+    },
+    {
+        "id": "b055000000000075",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000005",
+        "order": 6,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Calib MAG (0..3)",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 740,
+        "wires": []
+    },
+    {
+        "id": "b055000000000076",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000005",
+        "order": 7,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "Ext crystal (1 = on)",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 780,
+        "wires": []
+    },
+    {
+        "id": "b055000000000077",
+        "type": "ui_text",
+        "z": "b055000000000001",
+        "group": "b055000000000005",
+        "order": 8,
+        "width": 6,
+        "height": 1,
+        "name": "",
+        "label": "SYS_ERR code",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 950,
+        "y": 820,
+        "wires": []
+    }
+]
