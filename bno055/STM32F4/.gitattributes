@@ -1,2 +1,0 @@
-# cmd.exe needs CRLF for reliable goto/labels
-*.bat text eol=crlf
