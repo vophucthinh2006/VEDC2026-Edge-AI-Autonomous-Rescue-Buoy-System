@@ -59,6 +59,9 @@ khiển. Nhờ vậy `Modules/BNO055/` vẫn là driver thuần.
 
 ![Pinout STM32F407VGTx](docs/pinout.png)
 
+Chữ trên ảnh hơi mờ ở vài chân. **Bảng dưới đây và `STM32F4.ioc` mới là căn cứ**, ảnh
+chỉ để nhìn tổng thể.
+
 Xuất lại ảnh khi đổi pinout: mở `STM32F4.ioc` trong CubeMX → tab **Pinout & Configuration**
 → menu **Pinout** → **Export pinout image** → lưu đè `docs/pinout.png`.
 
