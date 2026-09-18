@@ -4,15 +4,16 @@
 #include "i2c.h"
 #include "main.h"
 
-static BNO055_HandleTypeDef hbno055;
-
 #if BNO055_CALIB_PROFILE_VALID
 static const uint8_t imu_calib_profile[BNO055_CALIB_PROFILE_SIZE] = BNO055_CALIB_PROFILE_DATA;
 #endif
 
 /* Kept non-static and under these exact names: Tools/CubeMonitor/BNO055_Flow.json
    plots them live, and Tools/bno055_dump_calib.ps1 resolves the last two out of
-   the ELF to read a finished calibration off a running target. */
+   the ELF to read a finished calibration off a running target. The handle itself
+   is exposed for the same reason - the dashboard shows ext_crystal_active and
+   sys_err from it. */
+BNO055_HandleTypeDef hbno055;
 BNO055_Status_t      bno055_init_status = BNO055_ERR_PARAM;
 BNO055_Status_t      bno055_read_status = BNO055_ERR_PARAM;
 BNO055_Euler_t       bno055_euler;

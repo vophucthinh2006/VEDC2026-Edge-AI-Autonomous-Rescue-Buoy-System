@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "BNO055",
         "disabled": false,
-        "info": "# BNO055 Roll / Pitch / Yaw\n\nDirect acquisition of firmware globals over ST-LINK (SWD).\n\n1. Select the ST-LINK probe in **myProbe_Out** and **myProbe_In**.\n2. Deploy, open Dashboard, press START Acquisition.\n\nVariable addresses come from build/Debug/STM32F4.elf. Re-check them after changing firmware:\n`arm-none-eabi-nm build/Debug/STM32F4.elf | findstr bno055`"
+        "info": "# BNO055 Roll / Pitch / Yaw\n\nDirect acquisition of firmware globals over ST-LINK (SWD).\n\n1. Select the ST-LINK probe in **myProbe_Out** and **myProbe_In**.\n2. Deploy, open Dashboard, press START Acquisition.\n\nAddresses below were taken from `build/Debug/STM32F4.elf` and they move whenever RAM layout changes, so re-read them after any firmware change that adds or removes globals:\n\n```\narm-none-eabi-gdb --batch -ex \"print/x (int)&bno055_euler.roll\" build/Debug/STM32F4.elf\n```\n\nOr point each `variables` node at the ELF and let CubeMonitor resolve the names itself, which is what the Import button does.\n"
     },
     {
         "id": "b055000000000010",
@@ -303,19 +303,19 @@
         "variablelist": [
             {
                 "name": "bno055_euler.roll",
-                "address": "0x20000048",
+                "address": "0x2000060c",
                 "type": 9,
                 "checked": false
             },
             {
                 "name": "bno055_euler.pitch",
-                "address": "0x2000004c",
+                "address": "0x20000610",
                 "type": 9,
                 "checked": false
             },
             {
                 "name": "bno055_euler.yaw",
-                "address": "0x20000050",
+                "address": "0x20000614",
                 "type": 9,
                 "checked": false
             }
@@ -350,49 +350,49 @@
         "variablelist": [
             {
                 "name": "bno055_init_status",
-                "address": "0x20000044",
+                "address": "0x20000009",
                 "type": 1,
                 "checked": false
             },
             {
                 "name": "bno055_read_status",
-                "address": "0x20000045",
+                "address": "0x2000000a",
                 "type": 1,
                 "checked": false
             },
             {
                 "name": "bno055_calib.sys",
-                "address": "0x20000054",
+                "address": "0x20000618",
                 "type": 1,
                 "checked": false
             },
             {
                 "name": "bno055_calib.gyr",
-                "address": "0x20000055",
+                "address": "0x20000619",
                 "type": 1,
                 "checked": false
             },
             {
                 "name": "bno055_calib.acc",
-                "address": "0x20000056",
+                "address": "0x2000061a",
                 "type": 1,
                 "checked": false
             },
             {
                 "name": "bno055_calib.mag",
-                "address": "0x20000057",
+                "address": "0x2000061b",
                 "type": 1,
                 "checked": false
             },
             {
                 "name": "hbno055.ext_crystal_active",
-                "address": "0x20000040",
+                "address": "0x20000608",
                 "type": 1,
                 "checked": false
             },
             {
                 "name": "hbno055.sys_err",
-                "address": "0x20000041",
+                "address": "0x20000609",
                 "type": 1,
                 "checked": false
             }
