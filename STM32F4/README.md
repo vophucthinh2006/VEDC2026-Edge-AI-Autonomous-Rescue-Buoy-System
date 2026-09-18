@@ -10,17 +10,33 @@ STM32F4/
 ├── STM32F4.ioc          cấu hình CubeMX (nguồn sự thật cho pinout)
 ├── Core/                code CubeMX sinh — không sửa ngoài block USER CODE
 ├── Drivers/             CMSIS + STM32F4xx HAL
-├── Modules/
-│   ├── BNO055/          driver BNO055 (I2C, HAL) + calibration profile
-│   └── App/             logic ứng dụng, độc lập với CubeMX
+├── Modules/             mỗi thư mục con là một thiết bị ngoại vi
+│   ├── Actuators/       ESC + servo qua TIM PWM
+│   ├── BNO055/          driver BNO055 (I2C) + calibration profile
+│   ├── GPS/             bộ phân tích NMEA
+│   ├── IBUS/            bộ phân tích khung iBUS của FS-iA6B
+│   └── PiLink/          mã hoá/giải mã khung với Raspberry Pi
+├── App/                 tầng ứng dụng
+│   ├── control.c        vòng điều khiển + watchdog an toàn
+│   ├── imu.c            lớp đệm trên driver BNO055
+│   └── app_config.h     ngưỡng, timeout, hằng số PWM
 ├── Tools/               dump calibration, dashboard STM32CubeMonitor
 ├── build.bat            cmake + ninja → build/Debug/STM32F4.elf
 └── flash.bat            nạp qua ST-LINK
 ```
 
-`Modules/App/imu.c` là lớp đệm giữa driver BNO055 và vòng điều khiển: nó giữ
+Phân tầng: `main.c` chỉ gọi API của `App/`, `App/` gọi xuống `Modules/`, và
+`Modules/` không biết gì về tầng ứng dụng — trừ `app_config.h`, xem ghi chú dưới.
+
+`App/imu.c` là lớp đệm giữa driver BNO055 và vòng điều khiển: nó giữ
 `bno055_euler_t` phẳng mà `control.c` dùng, và map `yaw` của cảm biến thành
-`heading_deg` của bộ điều khiển.
+`heading_deg` của bộ điều khiển. Nhờ vậy `Modules/BNO055/` vẫn là driver thuần,
+bê sang dự án khác được ngay.
+
+> `App/app_config.h` hiện được `Modules/Actuators` và `Modules/PiLink` include
+> (hằng số `ESC_*`, `SERVO_*`, `NAV_TIMEOUT_MS`), tức là có một mũi tên ngược từ
+> Modules lên App. Chấp nhận được ở quy mô này; nếu sau cần tách sạch thì đưa
+> hằng số phần cứng của từng module về chính thư mục module đó.
 
 ## Pinout
 
@@ -87,7 +103,7 @@ thì đổi RCC sang `BYPASS Clock Source`, vẫn 8 MHz.
   giả định STM32 là **duy nhất** phát PWM. Giữ Pixhawk tách khỏi đường signal
   hoặc chuyển toàn bộ quyền điều khiển sang Pixhawk; không chạy hai autopilot song song.
 - Mặc định `ACTUATORS_ENABLED` bằng 0. Sau khi xác nhận chiều motor/servo trên
-  giá đỡ, đổi sang 1 trong `Modules/App/app_config.h`, build và hiệu chuẩn ESC.
+  giá đỡ, đổi sang 1 trong `App/app_config.h`, build và hiệu chuẩn ESC.
   Không tháo chân vịt khi kiểm thử bàn.
 
 ## Giao thức khớp Raspberry Pi
