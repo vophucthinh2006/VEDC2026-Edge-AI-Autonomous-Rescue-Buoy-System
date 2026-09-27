@@ -119,7 +119,7 @@ static void write_escs(void) {
 void Actuators_Apply(const actuator_cmd_t *cmd, uint32_t now_ms) {
     uint32_t elapsed = now_ms - last_apply_ms;
     last_apply_ms = now_ms;
-    if (elapsed > 100U) elapsed = 100U;   /* first call after a stop */
+    if (elapsed > 2U * CONTROL_PERIOD_MS) elapsed = CONTROL_PERIOD_MS;   /* first call, or a stalled loop */
     float step = ESC_RAMP_PER_S * (float)elapsed / 1000.0f;
 
     actuator_debug.cmd = *cmd;
