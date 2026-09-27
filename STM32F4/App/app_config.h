@@ -2,7 +2,8 @@
 
 #include <stdint.h>
 
-/* Safety first: set to 1 only after dry-run calibration without propellers. */
+/* Safety first: set to 1 only after dry-run calibration without propellers.
+   At 0 the ESCs hold stop while the rudders still follow the commands. */
 #define ACTUATORS_ENABLED          0
 #define NAV_TIMEOUT_MS             300U
 #define HBT_TIMEOUT_MS             500U
@@ -30,6 +31,22 @@
 #define SERVO_CENTER_FRONT_US      1280U
 #define SERVO_CENTER_RIGHT_US      1460U
 #define SERVO_CENTER_LEFT_US       1280U
+/* Rudder swing at full steer, the same each way so the boat tracks straight
+   with the stick centred. The front and left rudders only have about 280 us
+   to the right. */
+#define RUDDER_SPAN_US             250U
+/* Pulse direction for positive steer (bow right). The front pod and the two
+   rear pods swing opposite ways, like four-wheel steering. Check on the stand:
+   stick right must pull the bow right and push the stern left. */
+#define RUDDER_DIR_FRONT           (-1)
+#define RUDDER_DIR_REAR            (+1)
+#define RUDDER_FRONT_GAIN          1.0f    /* front swing relative to the rear ones */
+
+/* ESC command ramp, both modes: speed-ups take at least 0.5 s from stop to
+   full, cuts are immediate. The front ESC rests at neutral this long before
+   it spins the other way. */
+#define ESC_RAMP_PER_S             2.0f
+#define ESC_FRONT_REVERSE_DELAY_MS 200U
 
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
    instead of the control loop. ESC output is capped and time-limited. */

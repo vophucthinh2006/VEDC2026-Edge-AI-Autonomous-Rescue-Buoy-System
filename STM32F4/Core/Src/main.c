@@ -62,7 +62,6 @@ static ibus_state_t ibus;
 static gps_state_t gps;
 static bno055_euler_t imu;
 static controller_t control;
-static actuator_driver_t actuators;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -133,14 +132,11 @@ int main(void)
   IBUS_Init(&ibus);
   GPS_Init(&gps);
   Control_Init(&control);
-  /* Actuators module still assumes the old map (TIM3 CH1-3 = ESC, TIM4 = servo).
-   * Until it is remapped, drive only TIM3 (servos) and leave TIM2 (ESC) stopped:
-   * passing &htim2 here would put 1500 us on ESC1/ESC3 at boot. */
 #if HW_TEST_ENABLED
   HwTest_Init();
-  (void)actuators;
 #else
-  Actuators_Init(&actuators, &htim3, &htim3);
+  Actuators_Init();
+  Actuators_StartEscs();   /* stop signal from boot so the ESCs arm */
 #endif
   (void)IMU_Init();
 
@@ -169,7 +165,7 @@ int main(void)
 #if HW_TEST_ENABLED
       HwTest_Tick(now);
 #else
-      Control_Tick(&control, &pi_command, &ibus, &imu, &actuators, now);
+      Control_Tick(&control, &pi_command, &ibus, &imu, now);
 #endif
       /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
 
