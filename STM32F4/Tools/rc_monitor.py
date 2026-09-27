@@ -18,6 +18,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -53,17 +54,21 @@ def symbols(elf):
 
 class OpenOcd:
     def __init__(self):
+        # OpenOCD keeps logging while it runs; a pipe nobody reads fills up
+        # and stalls it, so its output goes to a file instead.
+        self.log = tempfile.TemporaryFile()
         self.proc = subprocess.Popen(
             [find_tool("openocd"), "-f", "interface/stlink.cfg", "-f", "target/stm32f4x.cfg",
              "-c", "tcl_port 6666", "-c", "gdb_port disabled", "-c", "telnet_port disabled", "-c", "init"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            stdout=self.log, stderr=subprocess.STDOUT)
         for _ in range(50):
             try:
-                self.sock = socket.create_connection(("127.0.0.1", 6666), timeout=2)
+                self.sock = socket.create_connection(("127.0.0.1", 6666), timeout=5)
                 return
             except OSError:
                 if self.proc.poll() is not None:
-                    sys.exit("openocd failed:\n" + self.proc.stderr.read().decode(errors="replace"))
+                    self.log.seek(0)
+                    sys.exit("openocd failed:\n" + self.log.read().decode(errors="replace"))
                 time.sleep(0.2)
         sys.exit("openocd did not open its Tcl port")
 
@@ -84,6 +89,7 @@ class OpenOcd:
         except OSError:
             pass
         self.proc.terminate()
+        self.proc.wait()
 
 
 def snapshot(ocd, sym):
@@ -132,7 +138,13 @@ def main():
         end = time.time() + args.log if args.log else None
         previous = None
         while end is None or time.time() < end:
-            s = snapshot(ocd, sym)
+            try:
+                s = snapshot(ocd, sym)
+            except (OSError, ValueError) as e:
+                print(time.strftime("%H:%M:%S"), f"probe read failed ({e}), reconnecting", flush=True)
+                ocd.close()
+                ocd = OpenOcd()
+                continue
             if args.log:
                 # Channel jitter of a few us is not a change worth a line.
                 key = (s["rc"], tuple(v // 25 for v in s["ch"]), s["armed"], s["estop"], s["imu"], s["esc"], s["servo"])
