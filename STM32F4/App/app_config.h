@@ -50,7 +50,7 @@
 
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
    instead of the control loop. ESC output is capped and time-limited. */
-#define HW_TEST_ENABLED            1
+#define HW_TEST_ENABLED            0
 #define HW_TEST_ESC_MAX_US         1500U   /* props stay on: about DShot 1047, half throttle */
 #define HW_TEST_ESC_FRONT_SPAN_US  150U    /* front ESC: neutral +/- this, about 30 % each way; water-cooled, keep runs short */
 #define HW_TEST_ESC_MAX_RUN_MS     60000U  /* motors on a stand; a lost debugger still stops them */
