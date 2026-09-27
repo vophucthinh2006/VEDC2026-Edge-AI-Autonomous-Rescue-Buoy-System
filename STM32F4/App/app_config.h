@@ -14,6 +14,13 @@
 /* Arming needs fresh BNO055 data. 0 only while the IMU is not wired yet:
    the overturn check is then off too. Set back to 1 before any water run. */
 #define ARM_REQUIRES_IMU           0
+/* E-stop on PE4 stops the motors. 0 only on the bench while the button is
+   still on its NO contact: the pin is read and reported but ignored.
+   Must be 1 before ACTUATORS_ENABLED goes to 1. */
+#define ESTOP_ENABLED              0
+#if ACTUATORS_ENABLED && !ESTOP_ENABLED
+#error "ESTOP_ENABLED must be 1 when the ESCs are live"
+#endif
 #define MAX_PITCH_DEG              35.0f
 #define MAX_ROLL_DEG               35.0f
 

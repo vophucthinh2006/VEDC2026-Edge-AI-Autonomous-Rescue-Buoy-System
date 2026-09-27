@@ -20,7 +20,7 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
     bool was_armed = control->armed;
     bool arm_switch = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD;
-    bool safe = rc_fresh && (imu_fresh || !ARM_REQUIRES_IMU) && !control->estop && !control->overturned;
+    bool safe = rc_fresh && (imu_fresh || !ARM_REQUIRES_IMU) && (!control->estop || !ESTOP_ENABLED) && !control->overturned;
     /* Each arming needs the switch seen off first, so a link that comes back,
        a cleared E-stop or a reset never re-arms with the switch left on. */
     if (rc_fresh && !arm_switch) control->arm_switch_released = true;
