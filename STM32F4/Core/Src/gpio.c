@@ -52,8 +52,10 @@ void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, RELAY1_Pin|RELAY2_Pin|LORA_RST_Pin|BNO055_RST_Pin
-                          |GPS_SW_LED_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOC, RELAY2_Pin|RELAY1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, LORA_RST_Pin|BNO055_RST_Pin|GPS_SW_LED_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_SET);
@@ -70,15 +72,10 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(ESTOP_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RELAY1_Pin RELAY2_Pin */
-  GPIO_InitStruct.Pin = RELAY1_Pin|RELAY2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : LORA_RST_Pin BNO055_RST_Pin GPS_SW_LED_Pin */
-  GPIO_InitStruct.Pin = LORA_RST_Pin|BNO055_RST_Pin|GPS_SW_LED_Pin;
+  /*Configure GPIO pins : RELAY2_Pin RELAY1_Pin LORA_RST_Pin BNO055_RST_Pin
+                           GPS_SW_LED_Pin */
+  GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin|LORA_RST_Pin|BNO055_RST_Pin
+                          |GPS_SW_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
