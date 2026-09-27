@@ -14,12 +14,15 @@
 /* Arming needs fresh BNO055 data. 0 only while the IMU is not wired yet:
    the overturn check is then off too. Set back to 1 before any water run. */
 #define ARM_REQUIRES_IMU           0
-/* E-stop on PE4 stops the motors. 0 only on the bench while the button is
-   still on its NO contact: the pin is read and reported but ignored.
-   Must be 1 before ACTUATORS_ENABLED goes to 1. */
-#define ESTOP_ENABLED              0
-#if ACTUATORS_ENABLED && !ESTOP_ENABLED
-#error "ESTOP_ENABLED must be 1 when the ESCs are live"
+/* E-stop contact on PE4, internal pull-up. 1 = normally closed, the design:
+   pressed or a cut wire reads high and stops. 0 = normally open, bench only:
+   pressed reads low and stops, but a cut wire reads as released. */
+#define ESTOP_CONTACT_NC           0
+#if ACTUATORS_ENABLED && !ESTOP_CONTACT_NC
+#warning "E-stop on its NO contact: a cut wire does not stop the motors. Bench only."
+#endif
+#if ACTUATORS_ENABLED && !ARM_REQUIRES_IMU
+#warning "Arming without the IMU: no overturn stop. Bench only."
 #endif
 #define MAX_PITCH_DEG              35.0f
 #define MAX_ROLL_DEG               35.0f

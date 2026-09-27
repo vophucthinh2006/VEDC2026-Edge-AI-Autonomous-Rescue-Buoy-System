@@ -13,14 +13,15 @@ void Control_Init(controller_t *control) { memset(control, 0, sizeof(*control));
 void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_state_t *rc, const bno055_euler_t *imu, uint32_t now_ms) {
     bool rc_fresh = rc->valid && (uint32_t)(now_ms - rc->last_rx_ms) <= RC_TIMEOUT_MS;
     bool imu_fresh = imu->valid && (uint32_t)(now_ms - control->last_imu_ms) <= IMU_TIMEOUT_MS;
-    /* Normally-closed contact to GND against an internal pull-up: released
-       reads low, pressed reads high, and a cut wire also reads high. */
-    control->estop = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == GPIO_PIN_SET;
+    /* Contact to GND against an internal pull-up. Normally closed: released
+       reads low, pressed and a cut wire read high. Normally open reads the
+       other way round and cannot tell released from a cut wire. */
+    control->estop = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == (ESTOP_CONTACT_NC ? GPIO_PIN_SET : GPIO_PIN_RESET);
     control->overturned = imu->valid && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
     bool was_armed = control->armed;
     bool arm_switch = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD;
-    bool safe = rc_fresh && (imu_fresh || !ARM_REQUIRES_IMU) && (!control->estop || !ESTOP_ENABLED) && !control->overturned;
+    bool safe = rc_fresh && (imu_fresh || !ARM_REQUIRES_IMU) && !control->estop && !control->overturned;
     /* Each arming needs the switch seen off first, so a link that comes back,
        a cleared E-stop or a reset never re-arms with the switch left on. */
     if (rc_fresh && !arm_switch) control->arm_switch_released = true;
