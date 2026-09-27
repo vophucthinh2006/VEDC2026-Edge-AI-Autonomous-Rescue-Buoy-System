@@ -126,6 +126,7 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM8_Init();
   MX_UART4_Init();
+  MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
   Protocol_Init(&pi_command);
   IBUS_Init(&ibus);
