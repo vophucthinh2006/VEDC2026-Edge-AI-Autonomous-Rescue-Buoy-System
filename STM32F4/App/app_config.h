@@ -11,6 +11,9 @@
 #define IMU_TIMEOUT_MS             100U
 #define CONTROL_PERIOD_MS          10U
 #define TELEMETRY_PERIOD_MS        100U
+/* Arming needs fresh BNO055 data. 0 only while the IMU is not wired yet:
+   the overturn check is then off too. Set back to 1 before any water run. */
+#define ARM_REQUIRES_IMU           0
 #define MAX_PITCH_DEG              35.0f
 #define MAX_ROLL_DEG               35.0f
 
