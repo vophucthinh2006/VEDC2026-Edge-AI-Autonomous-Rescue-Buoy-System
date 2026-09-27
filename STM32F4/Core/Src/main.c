@@ -79,11 +79,11 @@ static void send_telemetry(uint16_t sequence)
   bool imu_ok = imu.valid && (uint32_t)(now - control.last_imu_ms) <= IMU_TIMEOUT_MS;
 
   snprintf(payload, sizeof(payload), "%u,%.2f,%.2f,%.2f,%u,%u", sequence, imu.pitch_deg, imu.roll_deg, imu.heading_deg, imu_ok ? 1U : 0U, control.overturned ? 1U : 0U);
-  Protocol_Send(&huart1, "IMU", payload);
+  Protocol_Send(&huart4, "IMU", payload);
   snprintf(payload, sizeof(payload), "%u,%.6f,%.6f,%u,%.1f,%.2f,%.1f", sequence, gps.latitude_deg, gps.longitude_deg, gps.fix, gps.hdop, gps.speed_mps, gps.course_deg);
-  Protocol_Send(&huart1, "GPS", payload);
+  Protocol_Send(&huart4, "GPS", payload);
   snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U);
-  Protocol_Send(&huart1, "SYS", payload);
+  Protocol_Send(&huart4, "SYS", payload);
 }
 /* USER CODE END 0 */
 
@@ -131,12 +131,16 @@ int main(void)
   IBUS_Init(&ibus);
   GPS_Init(&gps);
   Control_Init(&control);
-  Actuators_Init(&actuators, &htim3, &htim4);
+  /* Actuators module still assumes the old map (TIM3 CH1-3 = ESC, TIM4 = servo).
+   * Until it is remapped, drive only TIM3 (servos) and leave TIM2 (ESC) stopped:
+   * passing &htim2 here would put 1500 us on ESC1/ESC3 at boot. */
+  Actuators_Init(&actuators, &htim3, &htim3);
   (void)IMU_Init();
 
-  HAL_UART_Receive_IT(&huart1, &pi_rx_byte, 1U);
+  HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
   HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
-  HAL_UART_Receive_IT(&huart6, &ibus_rx_byte, 1U);
+  HAL_HalfDuplex_EnableReceiver(&huart2);
+  HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
 
   uint32_t last_control = 0U, last_telemetry = 0U;
   uint16_t sequence = 0U;
@@ -156,13 +160,13 @@ int main(void)
       last_control = now;
       if (IMU_Read(&imu)) control.last_imu_ms = now;
       Control_Tick(&control, &pi_command, &ibus, &imu, &actuators, now);
-      HAL_GPIO_WritePin(SOS_GPIO_Port, SOS_Pin, pi_command.sos_on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+      /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
 
       if (pi_command.txd_pending)
       {
         char ack[40];
         snprintf(ack, sizeof(ack), "%u,TXD,ACCEPTED", pi_command.txd_sequence);
-        Protocol_Send(&huart1, "ACK", ack);
+        Protocol_Send(&huart4, "ACK", ack);
         pi_command.txd_pending = false;
       }
     }
@@ -227,20 +231,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   uint32_t now = HAL_GetTick();
 
-  if (huart == &huart1)
+  if (huart == &huart4)
   {
     Protocol_FeedByte(&pi_command, pi_rx_byte, now);
-    HAL_UART_Receive_IT(&huart1, &pi_rx_byte, 1U);
+    HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
   }
   else if (huart == &huart3)
   {
     GPS_FeedByte(&gps, gps_rx_byte, now);
     HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
   }
-  else if (huart == &huart6)
+  else if (huart == &huart2)
   {
     IBUS_FeedByte(&ibus, ibus_rx_byte, now);
-    HAL_UART_Receive_IT(&huart6, &ibus_rx_byte, 1U);
+    HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
   }
 }
 /* USER CODE END 4 */
