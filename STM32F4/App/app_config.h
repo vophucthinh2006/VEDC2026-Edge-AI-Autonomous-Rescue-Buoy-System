@@ -57,10 +57,19 @@
 #define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (DShot rear, neutral front) so the ESCs arm */
 #define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */
 
-/* iBUS: channels are 1000..2000 approximately, channel indexes start at zero. */
-#define RC_CH_THROTTLE             2U
-#define RC_CH_YAW                  3U
-#define RC_CH_MODE                 4U
-#define RC_CH_ARM                  5U
+/* iBUS: channels are 1000..2000 approximately, channel indexes start at zero.
+   FS-i6 in stick mode 2, SwB and SwD set as the aux sources of CH5 and CH6. */
+#define RC_CH_STEER                0U      /* CH1, right stick sideways */
+#define RC_CH_SPEED                1U      /* CH2, right stick up/down: forward/reverse */
+#define RC_CH_POWER                2U      /* CH3, left stick up/down: power limit */
+#define RC_CH_MODE                 4U      /* CH5, SwB */
+#define RC_CH_ARM                  5U      /* CH6, SwD */
 #define RC_MODE_AUTO_THRESHOLD     1600U
 #define RC_ARM_THRESHOLD           1800U
+#define RC_POWER_MIN_US            1050U   /* power stick at or below this is zero, and needed to arm */
+#define RC_STICK_DEADBAND_US       30U     /* around 1500 on the self-centring sticks */
+
+/* Manual caps, fractions of full ESC output. Start low, raise after water runs. */
+#define MANUAL_REAR_MAX            0.50f
+#define MANUAL_FRONT_FWD_GAIN      0.0f    /* front motor share when going forward; try 0.5 later */
+#define MANUAL_FRONT_REV_MAX       0.30f   /* front motor in reverse, also the brake */

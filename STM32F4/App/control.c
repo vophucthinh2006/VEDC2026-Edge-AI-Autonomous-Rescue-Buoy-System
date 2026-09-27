@@ -1,5 +1,6 @@
 #include "control.h"
 #include "app_config.h"
+#include "manual.h"
 #include <math.h>
 #include <string.h>
 
@@ -16,14 +17,13 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
     control->estop = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == GPIO_PIN_SET;
     control->overturned = imu->valid && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
-    bool arm_requested = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD && rc->channel[RC_CH_THROTTLE] <= 1050U;
+    bool arm_requested = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD && rc->channel[RC_CH_POWER] <= RC_POWER_MIN_US;
     if (!arm_requested || control->estop || control->overturned || !imu_fresh) control->armed = false;
     else if (!control->armed && arm_requested) control->armed = true;
     if (!control->armed || control->estop || control->overturned || !rc_fresh) { Actuators_Stop(); return; }
     if (!auto_requested) {
-        float throttle = clamp(((float)rc->channel[RC_CH_THROTTLE] - 1000.0f) / 1000.0f, 0.0f, 1.0f);
-        float yaw = clamp(((float)rc->channel[RC_CH_YAW] - 1500.0f) / 500.0f, -1.0f, 1.0f);
-        actuator_cmd_t cmd = { throttle - yaw, throttle + yaw, 0.0f, 0.0f };
+        actuator_cmd_t cmd;
+        Manual_Mix(rc, &cmd);
         Actuators_Apply(&cmd, now_ms);
         return;
     }

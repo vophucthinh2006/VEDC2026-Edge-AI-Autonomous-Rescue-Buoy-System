@@ -52,6 +52,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/PiLink/uart_protocol.c
     Modules/DShot/dshot.c
     App/control.c
+    App/manual.c
     App/imu.c
     App/hw_test.c
 )
