@@ -80,8 +80,13 @@ class OpenOcd:
         return data[:-1].decode()
 
     def read(self, addr, size):
-        words = self.cmd(f"read_memory 0x{addr:08x} 8 {size}").split()
-        return bytes(int(w, 0) for w in words)
+        # Whole 32-bit words, so a counter the MCU bumps mid-read (uwTick,
+        # last_rx_ms) is never stitched from bytes of two different values.
+        # addr must be word-aligned; every symbol read here is.
+        count = (size + 3) // 4
+        words = self.cmd(f"read_memory 0x{addr:08x} 32 {count}").split()
+        data = b"".join(int(w, 0).to_bytes(4, "little") for w in words)
+        return data[:size]
 
     def close(self):
         try:
