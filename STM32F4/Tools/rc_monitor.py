@@ -93,8 +93,12 @@ class OpenOcd:
 
 
 def snapshot(ocd, sym):
-    ch = struct.unpack("<14H", ocd.read(sym["ibus"], 28))
-    last_rx, valid = struct.unpack("<IB", ocd.read(sym["ibus"] + 28, 5))
+    # Tick right after the RC timestamp: each probe read takes tens of ms,
+    # and reading the tick last made a healthy link look stale.
+    ibus = ocd.read(sym["ibus"], 33)
+    now = struct.unpack("<I", ocd.read(sym["uwTick"], 4))[0]
+    ch = struct.unpack("<14H", ibus[:28])
+    last_rx, valid = struct.unpack("<IB", ibus[28:33])
     c = ocd.read(sym["control"], 16)
     armed, released, ready, overturned, _fault, estop = c[:6]
     last_imu = struct.unpack("<I", c[12:16])[0]
@@ -102,13 +106,13 @@ def snapshot(ocd, sym):
     cmd = struct.unpack("<4f", d[:16])
     esc = struct.unpack("<3H", d[16:22])
     servo = struct.unpack("<4H", d[22:30])
-    now = struct.unpack("<I", ocd.read(sym["uwTick"], 4))[0]
-    rc_age = now - last_rx if valid else None
+    rc_age = (now - last_rx) & 0xFFFFFFFF if valid else None
     return {
         "rc": "OK" if valid and rc_age <= 250 else ("STALE" if valid else "NONE"),
+        "rc_age": rc_age,
         "ch": ch[:6],
         "armed": armed, "sw_released": released, "manual_ready": ready,
-        "estop": estop, "overturned": overturned, "imu": "OK" if now - last_imu <= 100 else "STALE",
+        "estop": estop, "overturned": overturned, "imu": "OK" if (now - last_imu + 2**31) % 2**32 - 2**31 <= 100 else "STALE",
         "cmd": cmd, "esc": esc, "servo": servo,
     }
 
@@ -116,7 +120,7 @@ def snapshot(ocd, sym):
 def fmt(s):
     ch = " ".join(f"{v:4d}" for v in s["ch"])
     cmd = "rearL %.2f rearR %.2f front %+.2f steer %+.2f" % s["cmd"]
-    return (f"RC {s['rc']:5s} CH1-6 [{ch}] | ARM {s['armed']} (sw_off_seen {s['sw_released']}, ready {s['manual_ready']}) "
+    return (f"RC {s['rc']:5s} {s['rc_age'] if s['rc_age'] is not None else '-':>4} ms CH1-6 [{ch}] | ARM {s['armed']} (sw_off_seen {s['sw_released']}, ready {s['manual_ready']}) "
             f"E-stop {s['estop']} IMU {s['imu']} lat {s['overturned']} | {cmd} | "
             f"ESC F/R/L {s['esc'][0]}/{s['esc'][1]}/{s['esc'][2]} | rudder F/R/L {s['servo'][1]}/{s['servo'][2]}/{s['servo'][3]}")
 
