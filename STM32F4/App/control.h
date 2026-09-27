@@ -10,6 +10,8 @@
 
 typedef struct {
     bool armed;
+    bool arm_switch_released;   /* arm switch seen off since the last arming */
+    bool manual_ready;          /* speed stick centred since entering MANUAL */
     bool overturned;
     bool motor_fault;
     bool estop;

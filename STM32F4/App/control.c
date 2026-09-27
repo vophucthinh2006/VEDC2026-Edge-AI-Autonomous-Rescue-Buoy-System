@@ -17,17 +17,31 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
     control->estop = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == GPIO_PIN_SET;
     control->overturned = imu->valid && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
-    bool arm_requested = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD && rc->channel[RC_CH_POWER] <= RC_POWER_MIN_US;
-    if (!arm_requested || control->estop || control->overturned || !imu_fresh) control->armed = false;
-    else if (!control->armed && arm_requested) control->armed = true;
-    if (!control->armed || control->estop || control->overturned || !rc_fresh) { Actuators_Stop(); return; }
+    bool arm_switch = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD;
+    bool safe = rc_fresh && imu_fresh && !control->estop && !control->overturned;
+    /* Each arming needs the switch seen off first, so a link that comes back,
+       a cleared E-stop or a reset never re-arms with the switch left on. */
+    if (rc_fresh && !arm_switch) control->arm_switch_released = true;
+    if (!arm_switch || !safe) control->armed = false;
+    else if (!control->armed && control->arm_switch_released && !auto_requested &&
+             rc->channel[RC_CH_POWER] <= RC_POWER_MIN_US && Manual_SpeedCentred(rc)) {
+        control->armed = true;
+        control->arm_switch_released = false;
+        control->manual_ready = true;
+    }
+    if (!control->armed) { Actuators_Stop(); return; }
     if (!auto_requested) {
+        /* Back from AUTO, wait for the speed stick to be centred once, or a
+           stick held forward would launch the boat on the switch flip. */
+        if (!control->manual_ready) control->manual_ready = Manual_SpeedCentred(rc);
+        if (!control->manual_ready) { Actuators_Stop(); return; }
         actuator_cmd_t cmd;
         Manual_Mix(rc, &cmd);
         Actuators_Apply(&cmd, now_ms);
         return;
     }
-    bool nav_fresh = pi->mode == NAV_AUTO && pi->ttl_ms > 0U && (uint32_t)(now_ms - pi->last_nav_ms) <= pi->ttl_ms;
+    control->manual_ready = false;
+    bool nav_fresh =pi->mode == NAV_AUTO && pi->ttl_ms > 0U && (uint32_t)(now_ms - pi->last_nav_ms) <= pi->ttl_ms;
     bool hbt_fresh = pi->pi_link_ok && (uint32_t)(now_ms - pi->last_hbt_ms) <= HBT_TIMEOUT_MS;
     if (!nav_fresh || !hbt_fresh) { Actuators_Stop(); return; }
     float error = heading_error(pi->heading_deg, imu->heading_deg);
