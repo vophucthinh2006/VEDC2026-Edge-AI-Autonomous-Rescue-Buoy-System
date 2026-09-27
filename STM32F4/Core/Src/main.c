@@ -28,6 +28,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "actuators.h"
+#include "buzzer.h"
 #include "app_config.h"
 #include "control.h"
 #include "gps_nmea.h"
@@ -137,6 +138,8 @@ int main(void)
 #else
   Actuators_Init();
   Actuators_StartEscs();   /* stop signal from boot so the ESCs arm */
+  Buzzer_Init();
+  Buzzer_Beep(1U);         /* firmware is up */
 #endif
   (void)IMU_Init();
 
@@ -166,6 +169,7 @@ int main(void)
       HwTest_Tick(now);
 #else
       Control_Tick(&control, &pi_command, &ibus, &imu, now);
+      Buzzer_Tick(now);
 #endif
       /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
 

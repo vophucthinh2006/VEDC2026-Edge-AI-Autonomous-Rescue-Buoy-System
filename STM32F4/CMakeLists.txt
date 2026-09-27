@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/IBUS/ibus.c
     Modules/PiLink/uart_protocol.c
     Modules/DShot/dshot.c
+    Modules/Buzzer/buzzer.c
     App/control.c
     App/manual.c
     App/imu.c
@@ -66,6 +67,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/IBUS
     Modules/PiLink
     Modules/DShot
+    Modules/Buzzer
     App
 )
 

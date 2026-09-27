@@ -1,5 +1,6 @@
 #include "control.h"
 #include "app_config.h"
+#include "buzzer.h"
 #include "manual.h"
 #include <math.h>
 #include <string.h>
@@ -17,6 +18,7 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
     control->estop = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == GPIO_PIN_SET;
     control->overturned = imu->valid && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
+    bool was_armed = control->armed;
     bool arm_switch = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD;
     bool safe = rc_fresh && imu_fresh && !control->estop && !control->overturned;
     /* Each arming needs the switch seen off first, so a link that comes back,
@@ -29,6 +31,7 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
         control->arm_switch_released = false;
         control->manual_ready = true;
     }
+    if (control->armed != was_armed) Buzzer_Beep(control->armed ? 1U : 2U);
     if (!control->armed) { Actuators_Stop(); return; }
     if (!auto_requested) {
         /* Back from AUTO, wait for the speed stick to be centred once, or a
