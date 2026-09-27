@@ -50,6 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/GPS/gps_nmea.c
     Modules/IBUS/ibus.c
     Modules/PiLink/uart_protocol.c
+    Modules/DShot/dshot.c
     App/control.c
     App/imu.c
 )
@@ -63,6 +64,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/IBUS
     Modules/PiLink
     App
+    Modules/DShot
 )
 
 # Add project symbols (macros)
