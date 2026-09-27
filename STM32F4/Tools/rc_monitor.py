@@ -68,9 +68,9 @@ class OpenOcd:
             except OSError:
                 if self.proc.poll() is not None:
                     self.log.seek(0)
-                    sys.exit("openocd failed:\n" + self.log.read().decode(errors="replace"))
+                    raise ConnectionError("openocd failed:\n" + self.log.read().decode(errors="replace"))
                 time.sleep(0.2)
-        sys.exit("openocd did not open its Tcl port")
+        raise ConnectionError("openocd did not open its Tcl port")
 
     def cmd(self, text):
         self.sock.sendall(text.encode() + b"\x1a")
@@ -110,6 +110,7 @@ def snapshot(ocd, sym):
     return {
         "rc": "OK" if valid and rc_age <= 250 else ("STALE" if valid else "NONE"),
         "rc_age": rc_age,
+        "uptime_ms": now,
         "ch": ch[:6],
         "armed": armed, "sw_released": released, "manual_ready": ready,
         "estop": estop, "overturned": overturned, "imu": "OK" if (now - last_imu + 2**31) % 2**32 - 2**31 <= 100 else "STALE",
@@ -134,21 +135,35 @@ def main():
     args = ap.parse_args()
 
     sym = symbols(args.elf)
-    ocd = OpenOcd()
+    try:
+        ocd = OpenOcd()
+    except ConnectionError as e:
+        sys.exit(str(e))
     try:
         if args.once:
             print(fmt(snapshot(ocd, sym)))
             return
         end = time.time() + args.log if args.log else None
         previous = None
+        last_uptime = None
         while end is None or time.time() < end:
             try:
                 s = snapshot(ocd, sym)
             except (OSError, ValueError) as e:
                 print(time.strftime("%H:%M:%S"), f"probe read failed ({e}), reconnecting", flush=True)
                 ocd.close()
-                ocd = OpenOcd()
+                # The probe drops off USB when the board browns out; keep
+                # trying so the log carries on once it is back.
+                while True:
+                    try:
+                        ocd = OpenOcd()
+                        break
+                    except ConnectionError:
+                        time.sleep(1.0)
                 continue
+            if last_uptime is not None and s["uptime_ms"] < last_uptime:
+                print(time.strftime("%H:%M:%S"), f"MCU RESET: up {s['uptime_ms']} ms, was {last_uptime} ms", flush=True)
+            last_uptime = s["uptime_ms"]
             if args.log:
                 # Channel jitter of a few us is not a change worth a line.
                 key = (s["rc"], tuple(v // 25 for v in s["ch"]), s["armed"], s["estop"], s["imu"], s["esc"], s["servo"])
