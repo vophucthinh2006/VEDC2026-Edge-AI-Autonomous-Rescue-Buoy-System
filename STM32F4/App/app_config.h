@@ -13,12 +13,32 @@
 #define MAX_PITCH_DEG              35.0f
 #define MAX_ROLL_DEG               35.0f
 
-/* Standard one-direction ESC. Change only after verifying the actual ESC protocol. */
+/* Rear ESCs: one-direction BLHeli_S, driven over DShot; the microsecond range
+   below is kept as the command scale. */
 #define ESC_STOP_US                1000U
 #define ESC_MAX_US                 2000U
+/* Front ESC (ZTW Shark G2 50A) is bidirectional: 1500 us is stop, 1000 us is
+   full reverse. It stays on plain PWM (TIM5_CH2, PA1). */
+#define ESC_FRONT_NEUTRAL_US       1500U
 #define SERVO_MIN_US               1000U
 #define SERVO_CENTER_US            1500U
 #define SERVO_MAX_US               2000U
+/* Straight-ahead pulse per rudder servo, trimmed on the bench.
+   Lower pulse turns the pod right. The left one sits far from 1500 because
+   of how its horn is mounted, which leaves it little travel to the right;
+   the same goes for the front one. */
+#define SERVO_CENTER_FRONT_US      1280U
+#define SERVO_CENTER_RIGHT_US      1460U
+#define SERVO_CENTER_LEFT_US       1280U
+
+/* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
+   instead of the control loop. ESC output is capped and time-limited. */
+#define HW_TEST_ENABLED            1
+#define HW_TEST_ESC_MAX_US         1500U   /* props stay on: about DShot 1047, half throttle */
+#define HW_TEST_ESC_FRONT_SPAN_US  150U    /* front ESC: neutral +/- this, about 30 % each way; water-cooled, keep runs short */
+#define HW_TEST_ESC_MAX_RUN_MS     60000U  /* motors on a stand; a lost debugger still stops them */
+#define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (DShot rear, neutral front) so the ESCs arm */
+#define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */
 
 /* iBUS: channels are 1000..2000 approximately, channel indexes start at zero. */
 #define RC_CH_THROTTLE             2U

@@ -53,6 +53,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/DShot/dshot.c
     App/control.c
     App/imu.c
+    App/hw_test.c
 )
 
 # Add include paths
@@ -63,8 +64,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/GPS
     Modules/IBUS
     Modules/PiLink
-    App
     Modules/DShot
+    App
 )
 
 # Add project symbols (macros)

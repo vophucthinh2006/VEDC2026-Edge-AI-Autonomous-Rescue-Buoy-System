@@ -33,6 +33,7 @@
 #include "gps_nmea.h"
 #include "ibus.h"
 #include "imu.h"
+#include "hw_test.h"
 #include "uart_protocol.h"
 #include <stdio.h>
 /* USER CODE END Includes */
@@ -135,7 +136,12 @@ int main(void)
   /* Actuators module still assumes the old map (TIM3 CH1-3 = ESC, TIM4 = servo).
    * Until it is remapped, drive only TIM3 (servos) and leave TIM2 (ESC) stopped:
    * passing &htim2 here would put 1500 us on ESC1/ESC3 at boot. */
+#if HW_TEST_ENABLED
+  HwTest_Init();
+  (void)actuators;
+#else
   Actuators_Init(&actuators, &htim3, &htim3);
+#endif
   (void)IMU_Init();
 
   HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
@@ -160,7 +166,11 @@ int main(void)
     {
       last_control = now;
       if (IMU_Read(&imu)) control.last_imu_ms = now;
+#if HW_TEST_ENABLED
+      HwTest_Tick(now);
+#else
       Control_Tick(&control, &pi_command, &ibus, &imu, &actuators, now);
+#endif
       /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
 
       if (pi_command.txd_pending)
