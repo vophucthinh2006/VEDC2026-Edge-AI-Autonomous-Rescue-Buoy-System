@@ -110,6 +110,7 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 | SOS / relay | GPIO_Output | PD13 | khởi tạo mức thấp | qua transistor, không nối tải trực tiếp |
 | Chip select accelerometer | GPIO_Output | PE3 | **giữ mức cao** | không nối gì — xem mục 3 |
 | Battery sense | ADC1_IN4 | PA4 | rank 1, 3 cycles — **chưa dùng trong code** | qua cầu chia áp |
+| LoRa RA-02 (SX1278) | SPI2 | PB13 SCK, PB14 MISO, PB15 MOSI | mode 0, ~2.6 Mbit/s | NSS → PB12, RST → PC4, DIO0/1/2 → PE11/PE12/PE13 (DIO chưa dùng), 3.3 V, GND, **anten 433 MHz** |
 | Debug | SWD | PA13 SWDIO, PA14 SWCLK | — | ST-LINK trên board (CN1) |
 | Thạch anh | RCC | PH0, PH1 | khai báo sẵn, **chưa dùng** | xem mục 5 |
 
@@ -462,3 +463,39 @@ trong `App/app_config.h`.
 gạt cần phải sang phải thì bánh lái phải kéo mũi sang phải và đẩy đuôi sang trái (sai thì
 đổi dấu `RUDDER_DIR_FRONT` / `RUDDER_DIR_REAR`), và `actuator_debug.esc_us` phải đúng như
 bảng trên khi đẩy / kéo cần phải.
+
+
+---
+
+## 14. LoRa: phát vị trí về trạm bờ
+
+`App/lora_beacon.c` + `Modules/LoRa/sx127x.c` phát vị trí GPS về trạm bờ (ESP32-S3) mỗi
+`LORA_BEACON_PERIOD_MS` (5 giây). Không chặn: mỗi vòng lặp chỉ làm vài lệnh SPI ngắn, gói ~0.4 giây
+trên không được theo dõi bằng máy trạng thái nên `Control_Tick` (10 ms) không bị trễ.
+
+Tham số radio (`App/app_config.h`) **phải khớp trạm** (`esp32-lora-station/main/main.c`):
+433 MHz, SF9, BW 125 kHz, CR 4/5, sync word `0xF3`, PA_BOOST 17 dBm, CRC payload bật.
+
+Khung gửi, một dòng text:
+
+```
+id=PHAO-01,10.762622,106.660172,hdop=0.9,seq=12      có fix
+id=PHAO-01,NO_FIX,seq=13                             chưa có fix hoặc GPS im lặng quá LORA_GPS_STALE_MS
+```
+
+Trạm lấy `id=`, rồi hai số thập phân đầu (không có dấu `=`) làm lat/lon và đẩy lên dashboard.
+`LORA_BUOY_ID` là tên hiển thị trên dashboard, đổi nếu có nhiều thuyền.
+
+**Gắn anten 433 MHz vào RA-02 trước khi cấp nguồn/nạp firmware**: phát không anten có thể làm hỏng tầng công suất.
+
+### Kiểm tra trên thuyền
+
+Không có UART log ra máy tính, nên đọc RAM qua ST-LINK (firmware vẫn chạy, không halt):
+
+```
+python Tools/lora_monitor.py --once
+```
+
+Kết quả mong đợi: `chip 0x12 OK`, `tx` tăng đều mỗi 5 giây, `fail 0`. Nếu `chip 0x00`/`0xFF` là sai dây SPI/NSS,
+thiếu nguồn 3.3 V hoặc chưa cắm module. Nếu `GPS ... last sentence never` là USART3 không nhận được câu GGA,
+thường do sai baud (xem bảng lỗi ở mục 9).
