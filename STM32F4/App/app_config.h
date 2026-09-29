@@ -86,3 +86,17 @@
 #define MANUAL_REAR_MAX            0.50f
 #define MANUAL_FRONT_FWD_GAIN      0.0f    /* front motor share when going forward; try 0.5 later */
 #define MANUAL_FRONT_REV_MAX       0.30f   /* front motor in reverse, also the brake */
+
+/* LoRa: the boat sends its GPS position to the shore station (App/lora_beacon.c).
+   The radio settings MUST match the station (esp32-lora-station/main/main.c). Fit the
+   433 MHz antenna on the RA-02 before enabling: transmitting without one can damage the PA. */
+#define LORA_ENABLED               1
+#define LORA_BUOY_ID               "PHAO-01"   /* name shown on the dashboard; change it if there are several boats */
+#define LORA_FREQUENCY_HZ          433000000UL
+#define LORA_SF                    9U
+#define LORA_BW_HZ                 125000UL
+#define LORA_CR                    5U          /* 4/5 */
+#define LORA_SYNC_WORD             0xF3U
+#define LORA_TX_POWER_DBM          17U         /* PA_BOOST; 17 dBm is the most that needs no PA_DAC */
+#define LORA_BEACON_PERIOD_MS      5000U
+#define LORA_GPS_STALE_MS          3000U       /* GPS silent for this long: send NO_FIX */

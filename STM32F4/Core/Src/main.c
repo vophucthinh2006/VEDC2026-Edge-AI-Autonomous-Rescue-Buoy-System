@@ -35,6 +35,7 @@
 #include "ibus.h"
 #include "imu.h"
 #include "hw_test.h"
+#include "lora_beacon.h"
 #include "uart_protocol.h"
 #include <stdio.h>
 /* USER CODE END Includes */
@@ -132,6 +133,7 @@ int main(void)
   Protocol_Init(&pi_command);
   IBUS_Init(&ibus);
   GPS_Init(&gps);
+  LoraBeacon_Init(&hspi2, &gps);   /* SPI2 + NSS PB12 + RST PC4, non-blocking after this call */
   Control_Init(&control);
 #if HW_TEST_ENABLED
   HwTest_Init();
@@ -160,6 +162,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     uint32_t now = HAL_GetTick();
+    LoraBeacon_Tick(now);
 
     if ((uint32_t)(now - last_control) >= CONTROL_PERIOD_MS)
     {
@@ -257,6 +260,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     IBUS_FeedByte(&ibus, ibus_rx_byte, now);
     HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
   }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  /* An overrun makes HAL abort the interrupt reception. Re-arm the GPS byte so the
+     fix source does not stay silent until the next reset (BUSY if HAL kept it armed). */
+  if (huart == &huart3) (void)HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
 }
 /* USER CODE END 4 */
 

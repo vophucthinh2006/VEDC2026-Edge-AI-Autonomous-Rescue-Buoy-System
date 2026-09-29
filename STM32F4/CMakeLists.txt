@@ -52,10 +52,12 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/PiLink/uart_protocol.c
     Modules/DShot/dshot.c
     Modules/Buzzer/buzzer.c
+    Modules/LoRa/sx127x.c
     App/control.c
     App/manual.c
     App/imu.c
     App/hw_test.c
+    App/lora_beacon.c
 )
 
 # Add include paths
@@ -68,6 +70,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/PiLink
     Modules/DShot
     Modules/Buzzer
+    Modules/LoRa
     App
 )
 
