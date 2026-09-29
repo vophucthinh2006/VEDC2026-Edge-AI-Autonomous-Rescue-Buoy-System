@@ -1,0 +1,13 @@
+{
+  "name": "phao-tram-bo-cloud",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test:auth": "node test/auth.test.mjs",
+    "dev:idp": "node test/dev-idp.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}
