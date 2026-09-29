@@ -1,2 +1,5 @@
-# Bắt buộc phải bật để esp_http_server hỗ trợ WebSocket (httpd_ws_*)
-CONFIG_HTTPD_WS_SUPPORT=y
+# Tram bo la client HTTPS gui du lieu len Cloudflare: can bundle chung chi de xac thuc TLS
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
