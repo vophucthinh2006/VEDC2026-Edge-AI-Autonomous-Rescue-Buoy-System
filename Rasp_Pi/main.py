@@ -81,7 +81,14 @@ def main() -> int:
 
     workers: list[threading.Thread] = [uart, lidar]
     if config["camera"]["enabled"] and not args.no_camera:
-        workers.append(VisionWorker(config["camera"], state, stop_event, person_confirmed))
+        cam_sequence = 0
+
+        def send_pan(pan_deg: float) -> None:
+            nonlocal cam_sequence
+            cam_sequence = (cam_sequence + 1) & 0xFFFF
+            uart.send("CAM", cam_sequence, f"{pan_deg:.1f}")
+
+        workers.append(VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, float(config["vehicle"]["target_standoff_m"])))
     for worker in workers:
         worker.start()
 

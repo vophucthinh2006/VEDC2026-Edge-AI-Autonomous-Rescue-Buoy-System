@@ -10,6 +10,8 @@
 
 typedef struct {
     bool armed;
+    bool arm_switch_released;   /* arm switch seen off since the last arming */
+    bool manual_ready;          /* speed stick centred since entering MANUAL */
     bool overturned;
     bool motor_fault;
     bool estop;
@@ -18,4 +20,5 @@ typedef struct {
 } controller_t;
 
 void Control_Init(controller_t *control);
-void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_state_t *rc, const bno055_euler_t *imu, const actuator_driver_t *actuators, uint32_t now_ms);
+void Camera_Tick(const pi_command_t *pi);
+void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_state_t *rc, const bno055_euler_t *imu, uint32_t now_ms);

@@ -18,8 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "adc.h"
+#include "dma.h"
 #include "i2c.h"
+#include "spi.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -27,11 +28,14 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "actuators.h"
+#include "buzzer.h"
 #include "app_config.h"
 #include "control.h"
 #include "gps_nmea.h"
 #include "ibus.h"
 #include "imu.h"
+#include "hw_test.h"
+#include "lora_beacon.h"
 #include "uart_protocol.h"
 #include <stdio.h>
 /* USER CODE END Includes */
@@ -60,7 +64,6 @@ static ibus_state_t ibus;
 static gps_state_t gps;
 static bno055_euler_t imu;
 static controller_t control;
-static actuator_driver_t actuators;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -71,6 +74,7 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#if !PI_LINK_TEST_ENABLED
 static void send_telemetry(uint16_t sequence)
 {
   char payload[128];
@@ -78,12 +82,13 @@ static void send_telemetry(uint16_t sequence)
   bool imu_ok = imu.valid && (uint32_t)(now - control.last_imu_ms) <= IMU_TIMEOUT_MS;
 
   snprintf(payload, sizeof(payload), "%u,%.2f,%.2f,%.2f,%u,%u", sequence, imu.pitch_deg, imu.roll_deg, imu.heading_deg, imu_ok ? 1U : 0U, control.overturned ? 1U : 0U);
-  Protocol_Send(&huart1, "IMU", payload);
+  Protocol_Send(&huart4, "IMU", payload);
   snprintf(payload, sizeof(payload), "%u,%.6f,%.6f,%u,%.1f,%.2f,%.1f", sequence, gps.latitude_deg, gps.longitude_deg, gps.fix, gps.hdop, gps.speed_mps, gps.course_deg);
-  Protocol_Send(&huart1, "GPS", payload);
+  Protocol_Send(&huart4, "GPS", payload);
   snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U);
-  Protocol_Send(&huart1, "SYS", payload);
+  Protocol_Send(&huart4, "SYS", payload);
 }
+#endif
 /* USER CODE END 0 */
 
 /**
@@ -115,28 +120,41 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_I2C1_Init();
-  MX_ADC1_Init();
-  MX_TIM3_Init();
-  MX_TIM4_Init();
-  MX_USART1_UART_Init();
+  MX_SPI2_Init();
   MX_USART3_UART_Init();
-  MX_USART6_UART_Init();
+  MX_USART1_UART_Init();
+  MX_USART2_UART_Init();
+  MX_TIM2_Init();
+  MX_TIM3_Init();
+  MX_TIM8_Init();
+  MX_UART4_Init();
+  MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
   Protocol_Init(&pi_command);
   IBUS_Init(&ibus);
   GPS_Init(&gps);
+  LoraBeacon_Init(&hspi2, &gps);   /* SPI2 + NSS PB12 + RST PC4, non-blocking after this call */
   Control_Init(&control);
-  Actuators_Init(&actuators, &htim3, &htim4);
+#if HW_TEST_ENABLED
+  HwTest_Init();
+#else
+  Actuators_Init();
+  Actuators_StartEscs();   /* stop signal from boot so the ESCs arm */
+  Buzzer_Init();
+  Buzzer_Beep(1U);         /* firmware is up */
+#endif
   (void)IMU_Init();
 
-  HAL_UART_Receive_IT(&huart1, &pi_rx_byte, 1U);
+  HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
   HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
-  HAL_UART_Receive_IT(&huart6, &ibus_rx_byte, 1U);
+  HAL_HalfDuplex_EnableReceiver(&huart2);
+  HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
 
   uint32_t last_control = 0U, last_telemetry = 0U;
   uint16_t sequence = 0U;
-/* USER CODE END 2 */
+  /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -146,19 +164,26 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     uint32_t now = HAL_GetTick();
+    LoraBeacon_Tick(now);
 
     if ((uint32_t)(now - last_control) >= CONTROL_PERIOD_MS)
     {
       last_control = now;
       if (IMU_Read(&imu)) control.last_imu_ms = now;
-      Control_Tick(&control, &pi_command, &ibus, &imu, &actuators, now);
-      HAL_GPIO_WritePin(SOS_GPIO_Port, SOS_Pin, pi_command.sos_on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+#if HW_TEST_ENABLED
+      HwTest_Tick(now);
+#else
+      Control_Tick(&control, &pi_command, &ibus, &imu, now);
+      Camera_Tick(&pi_command);
+      Buzzer_Tick(now);
+#endif
+      /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
 
       if (pi_command.txd_pending)
       {
         char ack[40];
         snprintf(ack, sizeof(ack), "%u,TXD,ACCEPTED", pi_command.txd_sequence);
-        Protocol_Send(&huart1, "ACK", ack);
+        Protocol_Send(&huart4, "ACK", ack);
         pi_command.txd_pending = false;
       }
     }
@@ -166,7 +191,13 @@ int main(void)
     if ((uint32_t)(now - last_telemetry) >= TELEMETRY_PERIOD_MS)
     {
       last_telemetry = now;
+#if PI_LINK_TEST_ENABLED
+      char payload[48];
+      snprintf(payload, sizeof(payload), "%u,%lu,HELLO_PI", ++sequence, (unsigned long)now);
+      Protocol_Send(&huart4, "TST", payload);
+#else
       send_telemetry(++sequence);
+#endif
     }
   }
   /* USER CODE END 3 */
@@ -223,21 +254,30 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   uint32_t now = HAL_GetTick();
 
-  if (huart == &huart1)
+  if (huart == &huart4)
   {
     Protocol_FeedByte(&pi_command, pi_rx_byte, now);
-    HAL_UART_Receive_IT(&huart1, &pi_rx_byte, 1U);
+    HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
   }
   else if (huart == &huart3)
   {
     GPS_FeedByte(&gps, gps_rx_byte, now);
     HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
   }
-  else if (huart == &huart6)
+  else if (huart == &huart2)
   {
     IBUS_FeedByte(&ibus, ibus_rx_byte, now);
-    HAL_UART_Receive_IT(&huart6, &ibus_rx_byte, 1U);
+    HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
   }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  /* An overrun makes HAL abort the interrupt reception. Re-arm the GPS byte so the
+     fix source does not stay silent until the next reset (BUSY if HAL kept it armed). */
+  if (huart == &huart3) (void)HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
+  /* Same for the Pi link: without this one overrun leaves UART4 deaf until reset. */
+  else if (huart == &huart4) (void)HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
 }
 /* USER CODE END 4 */
 

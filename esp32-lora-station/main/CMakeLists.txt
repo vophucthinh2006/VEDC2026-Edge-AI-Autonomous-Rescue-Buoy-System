@@ -1,6 +1,5 @@
 idf_component_register(
-    SRCS "main.c"
+    SRCS "main.c" "nmea_gps.c"
     INCLUDE_DIRS "."
-    EMBED_TXTFILES "dashboard.html"
-    REQUIRES esp_wifi esp_event esp_netif esp_http_server nvs_flash sx127x
+    REQUIRES esp_driver_uart esp_wifi esp_event esp_netif esp_http_client mbedtls nvs_flash sx127x
 )

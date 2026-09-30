@@ -20,13 +20,16 @@ STM32F4/
 ├── Core/                  code CubeMX sinh ra (main.c, gpio.c, i2c.c, tim.c, usart.c, adc.c)
 ├── Drivers/               CMSIS + STM32F4xx HAL
 ├── Modules/               mỗi thư mục con là MỘT ngoại vi / thiết bị
-│   ├── Actuators/         ESC + servo qua TIM PWM
+│   ├── Actuators/         ESC (DShot sau, PWM trước) + servo bánh lái, ramp và đảo chiều
+│   ├── DShot/             DShot300 trên TIM2 bằng DMA burst
 │   ├── BNO055/            driver IMU (I2C) + calibration profile
 │   ├── GPS/               bộ phân tích NMEA
 │   ├── IBUS/              bộ phân tích khung iBUS của FS-iA6B
 │   └── PiLink/            mã hoá / giải mã khung với Raspberry Pi
 ├── App/                   tầng ứng dụng
-│   ├── control.c/.h       vòng điều khiển + watchdog an toàn
+│   ├── control.c/.h       vòng điều khiển + watchdog an toàn, arm/disarm
+│   ├── manual.c/.h        trộn kênh iBUS thành lệnh lái tay kiểu xe RC
+│   ├── hw_test.c/.h       test bàn servo / ESC / còi qua debugger
 │   ├── imu.c/.h           lớp đệm trên driver BNO055
 │   └── app_config.h       ngưỡng, timeout, hằng số PWM
 ├── Tools/                 dump calibration, dashboard STM32CubeMonitor
@@ -47,7 +50,7 @@ main.c  →  App/  →  Modules/  →  HAL
   ứng dụng** — bê sang dự án khác phải chạy được ngay.
 
 > **Ngoại lệ đang tồn tại:** `Modules/Actuators` và `Modules/PiLink` đang include
-> `App/app_config.h` để lấy `ESC_*`, `SERVO_*`, `NAV_TIMEOUT_MS`. Đây là một mũi tên
+> `App/app_config.h` để lấy `ESC_*`, `SERVO_*`, `RUDDER_*`, `NAV_TIMEOUT_MS`. Đây là một mũi tên
 > ngược chiều, chấp nhận được ở quy mô hiện tại. Muốn dọn sạch thì đưa hằng số phần cứng
 > của từng module về chính thư mục module đó, chỉ giữ ngưỡng điều khiển ở `App/`.
 
@@ -92,23 +95,26 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 |---|---|---|---|---|
 | UART Raspberry Pi | USART1 | PA9 TX, PA10 RX | 115200 8N1, RX interrupt | Pi GPIO15/RXD0 ← PA9; Pi GPIO14/TXD0 → PA10 |
 | GPS Holybro M10 V2 | USART3 | PB10 TX, PB11 RX | 9600 8N1, RX interrupt | GPS TX → PB11; GPS RX ← PB10 |
-| RC receiver FS-iA6B | USART6 | PC6 TX, PC7 RX | 115200 8N1, RX interrupt | iBUS → PC7 |
+| RC receiver FS-iA6B | USART2 | PA2 (single-wire half-duplex) | 115200 8N1, RX interrupt | cổng i-BUS SERVO: S → PA2, + → 5 V, − → GND |
 | IMU BNO055 | I2C1 | PB8 SCL, PB9 SDA | Fast Mode 400 kHz | địa chỉ 0x29 (ADR thả nổi) |
 | Reset BNO055 | GPIO_Output | PB5 | mức cao khi chạy | chân nRESET của module |
-| ESC trái | TIM3_CH1 | PA6 | PWM 50 Hz, khởi tạo 1000 µs | chỉ dây signal + GND |
-| ESC phải | TIM3_CH2 | PA7 | PWM 50 Hz, khởi tạo 1000 µs | chỉ dây signal + GND |
-| ESC trước | TIM3_CH3 | PB0 | PWM 50 Hz, khởi tạo 1000 µs | chỉ dây signal + GND |
-| Servo 1 | TIM3_CH4 | PB1 | PWM 50 Hz, khởi tạo 1500 µs | cấp nguồn servo độc lập |
-| Servo 2 | TIM4_CH1 | PB6 | PWM 50 Hz, khởi tạo 1500 µs | cấp nguồn servo độc lập |
-| Servo 3 | TIM4_CH2 | PB7 | PWM 50 Hz, khởi tạo 1500 µs | cấp nguồn servo độc lập |
-| E-stop | GPIO_Input | PA2 | **pull-up**, tiếp điểm thường đóng | nút NC → GND |
+| ESC sau trái | TIM2_CH1 | PA5 | DShot300, một chiều, dừng = DShot 0 | chỉ dây signal + GND |
+| ESC sau phải | TIM2_CH4 | PA3 | DShot300, một chiều, dừng = DShot 0 | chỉ dây signal + GND |
+| ESC trước | TIM5_CH2 | PA1 | PWM 50 Hz, **hai chiều**, dừng = 1500 µs | chỉ dây signal + GND |
+| Servo camera | TIM3_CH1 | PA6 | PWM 50 Hz, 1500 µs | cấp nguồn servo độc lập |
+| Bánh lái trước | TIM3_CH2 | PA7 | PWM 50 Hz, tâm `SERVO_CENTER_FRONT_US` | cấp nguồn servo độc lập |
+| Bánh lái trái | TIM3_CH3 | PB0 | PWM 50 Hz, tâm `SERVO_CENTER_LEFT_US` | cấp nguồn servo độc lập |
+| Bánh lái phải | TIM3_CH4 | PB1 | PWM 50 Hz, tâm `SERVO_CENTER_RIGHT_US` | cấp nguồn servo độc lập |
+| Còi | TIM8_CH3 | PC8 | PWM 4 kHz | qua transistor |
+| E-stop | GPIO_EXTI | PE4 | **pull-up**, tiếp điểm thường đóng | nút NC → GND |
 | SOS / relay | GPIO_Output | PD13 | khởi tạo mức thấp | qua transistor, không nối tải trực tiếp |
 | Chip select accelerometer | GPIO_Output | PE3 | **giữ mức cao** | không nối gì — xem mục 3 |
 | Battery sense | ADC1_IN4 | PA4 | rank 1, 3 cycles — **chưa dùng trong code** | qua cầu chia áp |
+| LoRa RA-02 (SX1278) | SPI2 | PB13 SCK, PB14 MISO, PB15 MOSI | mode 0, ~2.6 Mbit/s | NSS → PB12, RST → PC4, DIO0/1/2 → PE11/PE12/PE13 (DIO chưa dùng), 3.3 V, GND, **anten 433 MHz** |
 | Debug | SWD | PA13 SWDIO, PA14 SWCLK | — | ST-LINK trên board (CN1) |
 | Thạch anh | RCC | PH0, PH1 | khai báo sẵn, **chưa dùng** | xem mục 5 |
 
-### Vì sao TIM3/TIM4 dùng prescaler 83 và period 19999
+### Vì sao TIM3/TIM5 dùng prescaler 83 và period 19999
 
 APB1 chạy 42 MHz, hệ số chia khác 1 nên **timer clock của APB1 là 84 MHz**:
 
@@ -147,10 +153,10 @@ tiên. **Không bật I2S2/I2S3** vì PC7 và PB10 dính vào codec và micro ME
 
 ## 4. E-stop: bắt buộc đấu thường đóng
 
-PA2 bật pull-up nội và firmware coi **mức cao là E-stop tác động**. Nút phải là loại
-**thường đóng (NC)** nối PA2 xuống GND:
+PE4 bật pull-up nội và firmware coi **mức cao là E-stop tác động**. Nút phải là loại
+**thường đóng (NC)** nối PE4 xuống GND:
 
-| Tình huống | PA2 | Kết quả |
+| Tình huống | PE4 | Kết quả |
 |---|---|---|
 | Bình thường, tiếp điểm đóng | thấp | chạy |
 | Nhấn nút, tiếp điểm mở | cao | dừng |
@@ -159,7 +165,7 @@ PA2 bật pull-up nội và firmware coi **mức cao là E-stop tác động**. 
 Đấu ngược lại (nút thường mở kéo lên 3.3 V) sẽ khiến dây đứt bị hiểu là "không nhấn" và
 chân vịt vẫn quay — đúng cái mà E-stop sinh ra để chống.
 
-Chưa có nút thì khi test tạm nối PA2 thẳng xuống GND bằng một sợi dây. Rút dây ra là mô
+Chưa có nút thì khi test tạm nối PE4 thẳng xuống GND bằng một sợi dây. Rút dây ra là mô
 phỏng đứt dây, phải thấy trạng thái dừng.
 
 ---
@@ -169,7 +175,7 @@ phỏng đứt dây, phải thấy trạng thái dừng.
 Hiện chạy **HSI 16 MHz** → PLL (M=8, N=168, P=2) → **168 MHz**. APB1 42 MHz, APB2 84 MHz.
 
 HSI được trim ±1% ở 25 °C và trôi thêm theo nhiệt độ. UART bất đồng bộ có tổng ngân sách
-sai lệch khoảng 3% chia cho cả hai đầu, nên ở 115200 (USART1 với Pi, USART6 với iBUS) biên
+sai lệch khoảng 3% chia cho cả hai đầu, nên ở 115200 (với Pi, và USART2 với iBUS) biên
 còn lại khá mỏng — mà phao phơi nắng rồi xuống nước là môi trường trôi nhiệt độ mạnh.
 
 **Việc cần làm trước khi thử ngoài nước:** chuyển sang HSE 8 MHz trong CubeMX
@@ -259,16 +265,7 @@ build.bat Release
 
 Kết quả: `build/Debug/STM32F4.elf`. Script tự chạy `cmake` rồi `ninja`.
 
-Hiện có đúng **một warning được coi là bình thường**:
-
-```
-Modules/Actuators/actuators.c:4: warning: 'clamp_us' defined but not used
-```
-
-`clamp_us` chỉ được gọi trong thân `#if ACTUATORS_ENABLED`, mà cờ đó đang là 0.
-**Warning này là dấu hiệu chốt an toàn đang bật** — đừng dập nó bằng `(void)clamp_us` hay
-`__attribute__((unused))`, vì làm vậy là mất luôn tín hiệu. Nó tự biến mất khi bật
-`ACTUATORS_ENABLED`.
+Build phải sạch, không có warning.
 
 ### D. Nạp
 
@@ -360,7 +357,7 @@ Triệu chứng khác:
 
 | Hiện tượng | Nguyên nhân thường gặp |
 |---|---|
-| Xuồng không bao giờ arm được | `ibus.valid` false — sai baud USART6, hoặc dây iBUS không vào PC7 |
+| Xuồng không bao giờ arm được | `ibus.valid` false — dây iBUS không vào PA2 hoặc cắm nhầm cổng SENS; hoặc chưa gạt SwD về OFF trước khi arm, CH3 chưa thấp nhất, cần phải chưa về giữa, SwB đang ở AUTO — xem mục 13 |
 | GPS không có fix, `gps.fix` = 0 | baud USART3. Holybro M10 nhiều khả năng mặc định **38400** chứ không phải 9600 — xác minh bằng u-center |
 | PWM ESC trái méo hoặc mất | PE3 không ở mức cao → LIS3DSH đang đẩy tín hiệu vào PA6 |
 | `bno055_read_status` thỉnh thoảng nhảy 2 | nhiễu I2C — dây dài, thiếu pull-up ở PB8 |
@@ -378,11 +375,12 @@ Triệu chứng khác:
 - **Pixhawk 4 không được nối PWM điều khiển song song với STM32.** Firmware này giả định
   STM32 là **nguồn phát PWM duy nhất**. Giữ Pixhawk tách khỏi đường signal, hoặc chuyển
   toàn bộ quyền điều khiển sang Pixhawk. Không chạy hai autopilot song song.
-- **`ACTUATORS_ENABLED` mặc định bằng 0.** Ở trạng thái này mọi lệnh ga đều rơi về
-  `Actuators_Stop()`. Chỉ đổi sang 1 sau khi đã xác nhận chiều quay motor và chiều servo
+- **`ACTUATORS_ENABLED` mặc định bằng 0.** Ở trạng thái này ESC luôn nhận tín hiệu dừng,
+  còn bánh lái vẫn chạy theo lệnh; giá trị ESC lẽ ra được phát nằm trong `actuator_debug`
+  để kiểm tra bằng debugger. Chỉ đổi sang 1 sau khi đã xác nhận chiều quay motor và chiều servo
   trên giá đỡ, và **không tháo chân vịt khi kiểm thử bàn**.
 - Khi test IMU hoặc UART, **đừng cắm ESC**. PWM vẫn phát thật trên
-  PA6/PA7/PB0/PB1/PB6/PB7.
+  PA1/PA3/PA5 (ESC) và PA6/PA7/PB0/PB1 (servo).
 
 ---
 
@@ -414,7 +412,7 @@ quá `MAX_PITCH_DEG` / `MAX_ROLL_DEG`, hoặc receiver mất link — output ESC
 
 ## 12. Quy ước đóng góp
 
-Theo `AGENTS.md`:
+Theo các skill của Claude trong `.claude/skills/` (`stm32-cubemx-first`, `git-commit-pr`):
 
 1. **Cấu hình CubeMX trước, code sau.** Việc gì làm được trong `.ioc` thì làm ở đó, đừng
    sửa tay `Core/`.
@@ -425,9 +423,78 @@ Theo `AGENTS.md`:
 
 Trước khi mở PR, kiểm tra tối thiểu:
 
-- `build.bat` chạy sạch, chỉ còn warning `clamp_us`
+- `build.bat` chạy sạch, không có warning
 - Nếu sửa `.ioc`: đã chạy **Project → Generate Reports**, commit `STM32F4.pdf` +
   `STM32F4.txt` mới, trích lại `docs/pinout.png`, và cập nhật bảng mục 2
 - Nếu thêm hoặc bớt biến toàn cục: đã kiểm tra lại địa chỉ trong
   `Tools/CubeMonitor/BNO055_Flow.json`
 - Nếu đổi chân: đã ghi rõ trong PR rằng **phần cứng phải đổi dây**
+
+---
+
+## 13. Lái tay bằng FS-i6 / FS-iA6B
+
+Receiver xuất iBUS qua cổng **i-BUS SERVO** vào PA2. Tay phát đặt **stick mode 2**, type
+**Airplane**, Aux channels: CH5 = **SwB**, CH6 = **SwD**. Reverse, sub-trim, trim để 0,
+end points 100 %, Mix / Throttle hold tắt. Failsafe **bắt buộc** ghi cho cả 6 kênh ở tư thế
+an toàn: cần ga thấp nhất, cần phải về giữa, SwB và SwD gạt lên.
+
+| Kênh | Điều khiển | Tác dụng |
+|---|---|---|
+| CH1 | cần phải ngang | lái cả ba pod; pod trước quay ngược chiều hai pod sau |
+| CH2 | cần phải dọc, tự về giữa | lên: hai motor sau tiến. Xuống: motor sau tắt, motor trước lùi (cũng là phanh). Thả tay: dừng |
+| CH3 | cần trái dọc | **giới hạn công suất** cho CH2, không tự chạy motor |
+| CH4 | cần trái ngang | chưa dùng |
+| CH5 | SwB | lên MANUAL, xuống AUTO |
+| CH6 | SwD | lên DISARM, xuống ARM |
+
+**Arm** chỉ xảy ra khi gạt SwD từ OFF sang ON trong lúc: CH3 thấp nhất, cần phải ở giữa, SwB ở
+MANUAL, iBUS và IMU đang có dữ liệu, E-stop nhả, xuồng không lật. Sau đó chỉ SwD hoặc
+một điều kiện an toàn mới disarm. Mất link, E-stop hay lật xong **không tự arm lại** —
+phải gạt SwD về OFF rồi lên lại. Từ AUTO về MANUAL, motor đứng yên cho tới khi cần phải
+về giữa một lần.
+
+Tăng ga bị giới hạn tốc độ (`ESC_RAMP_PER_S`), giảm ga có hiệu lực ngay, motor trước dừng
+`ESC_FRONT_REVERSE_DELAY_MS` trước khi đảo chiều. Trần công suất `MANUAL_REAR_MAX`,
+`MANUAL_FRONT_REV_MAX`, `MANUAL_FRONT_FWD_GAIN` và chiều bánh lái `RUDDER_DIR_*` nằm
+trong `App/app_config.h`.
+
+**Trước khi bật `ACTUATORS_ENABLED`**, với `HW_TEST_ENABLED = 0`, kiểm tra bằng debugger:
+gạt cần phải sang phải thì bánh lái phải kéo mũi sang phải và đẩy đuôi sang trái (sai thì
+đổi dấu `RUDDER_DIR_FRONT` / `RUDDER_DIR_REAR`), và `actuator_debug.esc_us` phải đúng như
+bảng trên khi đẩy / kéo cần phải.
+
+---
+
+## 14. LoRa: phát vị trí về trạm bờ
+
+`App/lora_beacon.c` + `Modules/LoRa/sx127x.c` phát vị trí GPS về trạm bờ (ESP32-S3) mỗi
+`LORA_BEACON_PERIOD_MS` (5 giây). Không chặn: mỗi vòng lặp chỉ làm vài lệnh SPI ngắn, gói ~0.4 giây
+trên không được theo dõi bằng máy trạng thái nên `Control_Tick` (10 ms) không bị trễ.
+
+Tham số radio (`App/app_config.h`) **phải khớp trạm** (`esp32-lora-station/main/main.c`):
+433 MHz, SF9, BW 125 kHz, CR 4/5, sync word `0xF3`, PA_BOOST 17 dBm, CRC payload bật.
+
+Khung gửi, một dòng text:
+
+```
+id=PHAO-01,10.762622,106.660172,hdop=0.9,seq=12      có fix
+id=PHAO-01,NO_FIX,seq=13                             chưa có fix hoặc GPS im lặng quá LORA_GPS_STALE_MS
+```
+
+Trạm lấy `id=`, rồi hai số thập phân đầu (không có dấu `=`) làm lat/lon và đẩy lên dashboard.
+`LORA_BUOY_ID` là tên hiển thị trên dashboard, đổi nếu có nhiều thuyền.
+
+**Gắn anten 433 MHz vào RA-02 trước khi cấp nguồn/nạp firmware**: phát không anten có thể làm hỏng tầng công suất.
+
+### Kiểm tra trên thuyền
+
+Không có UART log ra máy tính, nên đọc RAM qua ST-LINK (firmware vẫn chạy, không halt):
+
+```
+python Tools/lora_monitor.py --once
+```
+
+Kết quả mong đợi: `chip 0x12 OK`, `tx` tăng đều mỗi 5 giây, `fail 0`. Nếu `chip 0x00`/`0xFF` là sai dây SPI/NSS,
+thiếu nguồn 3.3 V hoặc chưa cắm module. Nếu `GPS ... last sentence never` là USART3 không nhận được câu GGA,
+thường do sai baud (xem bảng lỗi ở mục 9).

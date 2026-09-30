@@ -20,6 +20,8 @@ vehicle:
   max_roll_deg: 35.0
   nav_ttl_ms: 300
   lidar_stale_s: 0.50
+  # false only while the LD14 is not fitted: AUTO then runs with NO obstacle avoidance.
+  lidar_required: false
   imu_stale_s: 0.30
   gps_stale_s: 2.0
 planner:
@@ -33,13 +35,23 @@ camera:
   enabled: true
   device: 0
   horizontal_fov_deg: 100.0
-  model_path: models/person_detector.tflite
-  confidence_threshold: 0.80
+  model_path: /home/khanh/human_detect_project/detect.tflite
+  confidence_threshold: 0.60
   detection_hold_s: 0.40
   report_cooldown_s: 10.0
   lidar_association_half_angle_deg: 8.0
   min_target_distance_m: 1.0
   max_target_distance_m: 8.0
+  # lidar: range from the LD14. bbox: range from the person box height (no LiDAR, about +-30 %).
+  distance_source: bbox
+  vertical_fov_deg: 70.0      # calibrate with a person at a measured distance
+  person_height_m: 1.7
+  # Camera servo (STM32 CAM packet) follows the person, positive right of the bow.
+  pan_gain: 0.25
+  pan_deadband_deg: 2.0
+  pan_limit_deg: 80.0
+  recenter_after_s: 1.5
+  recenter_step_deg: 3.0
 logging:
   level: INFO
   directory: logs

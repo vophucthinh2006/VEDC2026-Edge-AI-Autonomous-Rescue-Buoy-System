@@ -1,0 +1,67 @@
+/* Bố cục: thanh trạng thái, cột bên, bản đồ, và các mốc responsive.
+   Điều kiện "narrow" phải khớp biến `narrow` trong js/app.js. */
+
+#app{ display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto 1fr; height:100vh; height:100dvh; }
+
+/* ---------- Thanh trạng thái ---------- */
+#statusbar{
+  display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:16px;
+  min-height:52px; padding:6px max(16px, var(--safe-r)) 6px max(16px, var(--safe-l));
+  padding-top:max(6px, var(--safe-t));
+  background:var(--panel); border-bottom:1px solid var(--line);
+}
+.sb-brand{ display:flex; align-items:center; gap:10px; min-width:0; }
+.sb-brand img{ width:34px; height:34px; border-radius:var(--r); background:#fff; padding:3px; object-fit:contain; flex:none; }
+.sb-title h1{ margin:0; font-size:15px; font-weight:700; line-height:1.15; letter-spacing:.01em; white-space:nowrap; }
+.sb-title p{ margin:1px 0 0; font-size:11px; color:var(--muted); white-space:nowrap; }
+.sb-chips{ display:flex; align-items:center; gap:8px; min-width:0; overflow-x:auto; scrollbar-width:none; }
+.sb-chips::-webkit-scrollbar{ display:none; }
+
+/* ---------- Thân ---------- */
+#main{ display:grid; grid-template-columns:var(--sidebar) minmax(0,1fr); min-height:0; }
+#side{ display:flex; flex-direction:column; min-height:0; background:var(--panel); border-right:1px solid var(--line); }
+.panel{ display:none; flex-direction:column; flex:1; min-height:0; }
+body[data-mode="monitor"] #panel-monitor{ display:flex; }
+body[data-mode="mission"] #panel-mission{ display:flex; }
+#map-wrap{ position:relative; min-height:0; }
+#map{ position:absolute; inset:0; background:#0B1118; }
+
+/* Tay nắm ngăn kéo: chỉ hiện trên điện thoại */
+#sheet-handle{
+  display:none; align-items:center; justify-content:center; gap:10px; width:100%; flex:none; min-height:40px;
+  background:var(--panel); border:0; border-bottom:1px solid var(--line); color:var(--muted); font-size:12px; font-weight:600;
+}
+#sheet-handle::before{ content:''; width:32px; height:4px; border-radius:2px; background:var(--line-2); }
+#sheet-handle::after{ content:'▾'; font-size:13px; }
+#side.collapsed #sheet-handle::after{ content:'▴'; }
+
+/* ---------- Màn hình thấp: bảng cuộn được ---------- */
+@media (max-height:560px){
+  #panel-monitor{ overflow-y:auto; }
+  #list-wrap{ flex:1 0 auto; min-height:200px; }
+  #list,#log-list{ overflow:visible; }
+  .sb-title p{ display:none; }
+}
+
+/* ---------- Điện thoại dọc / tablet dọc ---------- */
+@media (max-width:600px), (max-width:820px) and (orientation:portrait){
+  #statusbar{
+    grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"brand user" "chips chips";
+    gap:6px 10px; padding-bottom:8px;
+  }
+  .sb-brand{ grid-area:brand; }
+  #role-chip{ grid-area:user; }
+  .sb-chips{ grid-area:chips; }
+  .sb-title p{ display:none; }
+
+  #main{ grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; }
+  #map-wrap{ order:1; }
+  #side{ order:2; border-right:0; border-top:1px solid var(--line); max-height:var(--sheet-h); padding-bottom:var(--safe-b); }
+  #sheet-handle{ display:flex; }
+  #side.collapsed .panel{ display:none !important; }
+  .panel{ overflow-y:auto; }
+  #list-wrap{ flex:1 0 auto; min-height:180px; }
+  #m-listwrap{ flex:1 0 auto; }
+  #list,#m-list,#log-list{ overflow:visible; }
+  #m-actions{ position:static; }
+}

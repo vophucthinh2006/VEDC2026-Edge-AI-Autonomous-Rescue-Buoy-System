@@ -57,14 +57,35 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define ACC_CS_N_Pin GPIO_PIN_3
-#define ACC_CS_N_GPIO_Port GPIOE
-#define ESTOP_Pin GPIO_PIN_2
-#define ESTOP_GPIO_Port GPIOA
-#define SOS_Pin GPIO_PIN_13
-#define SOS_GPIO_Port GPIOD
-#define BNO055_RST_Pin GPIO_PIN_5
-#define BNO055_RST_GPIO_Port GPIOB
+#define BNO055_INT_Pin GPIO_PIN_2
+#define BNO055_INT_GPIO_Port GPIOE
+#define BNO055_INT_EXTI_IRQn EXTI2_IRQn
+#define ESTOP_Pin GPIO_PIN_4
+#define ESTOP_GPIO_Port GPIOE
+#define ESTOP_EXTI_IRQn EXTI4_IRQn
+#define RELAY2_Pin GPIO_PIN_2
+#define RELAY2_GPIO_Port GPIOC
+#define RELAY1_Pin GPIO_PIN_3
+#define RELAY1_GPIO_Port GPIOC
+#define LORA_RST_Pin GPIO_PIN_4
+#define LORA_RST_GPIO_Port GPIOC
+#define LORA_DIO0_Pin GPIO_PIN_11
+#define LORA_DIO0_GPIO_Port GPIOE
+#define LORA_DIO0_EXTI_IRQn EXTI15_10_IRQn
+#define LORA_DIO1_Pin GPIO_PIN_12
+#define LORA_DIO1_GPIO_Port GPIOE
+#define LORA_DIO1_EXTI_IRQn EXTI15_10_IRQn
+#define LORA_DIO2_Pin GPIO_PIN_13
+#define LORA_DIO2_GPIO_Port GPIOE
+#define LORA_DIO2_EXTI_IRQn EXTI15_10_IRQn
+#define LORA_NSS_Pin GPIO_PIN_12
+#define LORA_NSS_GPIO_Port GPIOB
+#define BNO055_RST_Pin GPIO_PIN_6
+#define BNO055_RST_GPIO_Port GPIOC
+#define GPS_SW_LED_Pin GPIO_PIN_9
+#define GPS_SW_LED_GPIO_Port GPIOC
+#define GPS_SW_Pin GPIO_PIN_8
+#define GPS_SW_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
