@@ -19,7 +19,7 @@ class SafetyArbiter:
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "attitude_fault")
         if not snapshot.imu.imu_ok or now - snapshot.imu.timestamp > self.v["imu_stale_s"]:
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "imu_stale")
-        if proposed.mode == "AUTO" and now - snapshot.scan_timestamp > self.v["lidar_stale_s"]:
+        if proposed.mode == "AUTO" and self.v.get("lidar_required", True) and now - snapshot.scan_timestamp > self.v["lidar_stale_s"]:
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "lidar_stale")
         if proposed.reason == "waypoint" and (snapshot.gps.fix < 2 or now - snapshot.gps.timestamp > self.v["gps_stale_s"]):
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "gps_stale_or_no_fix")

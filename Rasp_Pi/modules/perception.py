@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, radians, sin
+from math import cos, radians, sin, tan
 
 from modules.lidar_ld14 import LidarPoint
 from utils.geometry import median, signed_angle_deg
@@ -43,6 +43,19 @@ def cluster_scan(points: tuple[LidarPoint, ...], min_distance_m: float = 0.15, m
         width = max(0.05, 2 * distance * sin(radians(angular_width / 2)))
         obstacles.append(Obstacle(signed_angle_deg(angle), distance, width))
     return tuple(obstacles)
+
+
+def estimate_distance_bbox(box_height_frac: float, vertical_fov_deg: float, person_height_m: float) -> float:
+    """Pinhole range from the person box height (fraction of frame height). Rough: assumes a standing person."""
+    span = 2.0 * tan(radians(vertical_fov_deg) / 2.0) * max(box_height_frac, 1e-3)
+    return person_height_m / span
+
+
+def track_pan(pan_deg: float, bearing_cam_deg: float, gain: float, deadband_deg: float, limit_deg: float) -> float:
+    """One P step that turns the camera servo toward the person; positive is right."""
+    if abs(bearing_cam_deg) <= deadband_deg:
+        return pan_deg
+    return max(-limit_deg, min(limit_deg, pan_deg + gain * bearing_cam_deg))
 
 
 def associate_person(bearing_body_deg: float, obstacles: tuple[Obstacle, ...], half_angle_deg: float, min_distance_m: float, max_distance_m: float) -> Obstacle | None:

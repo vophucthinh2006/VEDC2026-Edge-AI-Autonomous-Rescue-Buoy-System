@@ -22,7 +22,7 @@ class Outbound:
 class Stm32Uart(threading.Thread):
     def __init__(self, port: str, baud: int, state: StateStore, stop_event: threading.Event) -> None:
         super().__init__(name="stm32-uart", daemon=True)
-        self._port, self._baud, self._state, self._stop = port, baud, state, stop_event
+        self._port, self._baud, self._state, self._stop_event = port, baud, state, stop_event
         self.outbound: queue.Queue[Outbound] = queue.Queue(maxsize=100)
         self.log = logging.getLogger(__name__)
         self.rx_errors = 0
@@ -55,9 +55,9 @@ class Stm32Uart(threading.Thread):
 
     def run(self) -> None:
         try:
-            with serial.Serial(self._port, self._baud, timeout=0.05, write_timeout=0.2) as ser:
+            with serial.Serial(self._port, self._baud, timeout=0.02, write_timeout=0.2) as ser:
                 self.log.info("STM32 UART open: %s @ %d", self._port, self._baud)
-                while not self._stop.is_set():
+                while not self._stop_event.is_set():
                     raw = ser.readline()
                     if raw:
                         packet = decode(raw)
@@ -65,11 +65,13 @@ class Stm32Uart(threading.Thread):
                             self.rx_errors += 1
                         else:
                             self._handle(packet)
-                    try:
-                        item = self.outbound.get_nowait()
-                    except queue.Empty:
-                        continue
-                    ser.write(encode(item.command, *item.fields))
+                    # Drain everything queued: one packet per loop cannot keep up with NAV+HBT+CAM.
+                    while True:
+                        try:
+                            item = self.outbound.get_nowait()
+                        except queue.Empty:
+                            break
+                        ser.write(encode(item.command, *item.fields))
         except serial.SerialException as exc:
             self.log.error("STM32 UART unavailable: %s", exc)
-            self._stop.set()
+            self._stop_event.set()
