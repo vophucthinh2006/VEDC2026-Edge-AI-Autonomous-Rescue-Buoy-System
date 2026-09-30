@@ -4,13 +4,16 @@
 
 /* Safety first: set to 1 only after dry-run calibration without propellers.
    At 0 the ESCs hold stop while the rudders still follow the commands. */
-#define ACTUATORS_ENABLED          0
+#define ACTUATORS_ENABLED          1
 #define NAV_TIMEOUT_MS             300U
 #define HBT_TIMEOUT_MS             500U
 #define RC_TIMEOUT_MS              250U
 #define IMU_TIMEOUT_MS             100U
 #define CONTROL_PERIOD_MS          10U
 #define TELEMETRY_PERIOD_MS        100U
+/* UART4 link test: 1 replaces the IMU/GPS/SYS telemetry with a counting
+   $TST line every TELEMETRY_PERIOD_MS, so the Pi side can be checked alone. */
+#define PI_LINK_TEST_ENABLED       0
 /* Arming needs fresh BNO055 data. 0 only while the IMU is not wired yet:
    the overturn check is then off too. Set back to 1 before any water run. */
 #define ARM_REQUIRES_IMU           0
@@ -70,6 +73,12 @@
 #define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (DShot rear, neutral front) so the ESCs arm */
 #define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */
 
+/* Camera pan servo (SERVO_CAMERA, TIM3_CH1) follows the CAM packet from the Pi.
+   Pulse = centre + dir * us_per_deg * angle. Flip DIR if the camera turns away from the person. */
+#define CAM_PAN_US_PER_DEG         5.5f    /* 1000..2000 us over about 180 deg */
+#define CAM_PAN_DIR                (-1)
+#define CAM_PAN_LIMIT_DEG          80.0f
+
 /* iBUS: channels are 1000..2000 approximately, channel indexes start at zero.
    FS-i6 in stick mode 2, SwB and SwD set as the aux sources of CH5 and CH6. */
 #define RC_CH_STEER                0U      /* CH1, right stick sideways */
@@ -83,7 +92,7 @@
 #define RC_STICK_DEADBAND_US       30U     /* around 1500 on the self-centring sticks */
 
 /* Manual caps, fractions of full ESC output. Start low, raise after water runs. */
-#define MANUAL_REAR_MAX            0.50f
+#define MANUAL_REAR_MAX            1.00f
 #define MANUAL_FRONT_FWD_GAIN      0.0f    /* front motor share when going forward; try 0.5 later */
 #define MANUAL_FRONT_REV_MAX       0.30f   /* front motor in reverse, also the brake */
 

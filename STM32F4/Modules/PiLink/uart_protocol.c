@@ -29,6 +29,10 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
         command->mode = mode; command->speed_mps = speed; command->heading_deg = heading; command->ttl_ms = ttl; command->sequence = seq; command->last_nav_ms = now_ms;
     } else if (strcmp(fields[0], "HBT") == 0 && count >= 3U) {
         command->last_hbt_ms = now_ms; command->pi_link_ok = true;
+    } else if (strcmp(fields[0], "CAM") == 0 && count >= 3U) {
+        float pan = strtof(fields[2], NULL);
+        if (pan < -90.0f || pan > 90.0f) return;
+        command->cam_pan_deg = pan; command->last_cam_ms = now_ms;
     } else if (strcmp(fields[0], "SOS") == 0 && count >= 3U) {
         command->sos_on = strtoul(fields[2], NULL, 10) != 0U;
     } else if (strcmp(fields[0], "TXD") == 0 && count >= 6U) {

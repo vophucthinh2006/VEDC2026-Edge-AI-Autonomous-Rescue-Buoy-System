@@ -10,6 +10,14 @@ static float heading_error(float target, float current) { float e = fmodf(target
 
 void Control_Init(controller_t *control) { memset(control, 0, sizeof(*control)); }
 
+/* Follows the Pi's CAM angle. Independent of arming: the camera only looks, and Actuators_Stop leaves it alone. */
+void Camera_Tick(const pi_command_t *pi) {
+    if (pi->last_cam_ms == 0U) return;
+    float pan = clamp(pi->cam_pan_deg, -CAM_PAN_LIMIT_DEG, CAM_PAN_LIMIT_DEG);
+    float us = (float)actuator_servo_center[SERVO_CAMERA] + (float)CAM_PAN_DIR * CAM_PAN_US_PER_DEG * pan;
+    Actuators_WriteServo(SERVO_CAMERA, (uint32_t)us);
+}
+
 void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_state_t *rc, const bno055_euler_t *imu, uint32_t now_ms) {
     bool rc_fresh = rc->valid && (uint32_t)(now_ms - rc->last_rx_ms) <= RC_TIMEOUT_MS;
     bool imu_fresh = imu->valid && (uint32_t)(now_ms - control->last_imu_ms) <= IMU_TIMEOUT_MS;

@@ -20,4 +20,5 @@ typedef struct {
 } controller_t;
 
 void Control_Init(controller_t *control);
+void Camera_Tick(const pi_command_t *pi);
 void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_state_t *rc, const bno055_euler_t *imu, uint32_t now_ms);

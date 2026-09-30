@@ -17,6 +17,8 @@ typedef struct {
     bool sos_on;
     bool txd_pending;             /* Event accepted from Pi; LoRa forwarding is board-specific. */
     uint16_t txd_sequence;
+    float cam_pan_deg;            /* camera servo angle from the bow, positive right */
+    uint32_t last_cam_ms;         /* 0 until the first CAM packet */
 } pi_command_t;
 
 void Protocol_Init(pi_command_t *command);

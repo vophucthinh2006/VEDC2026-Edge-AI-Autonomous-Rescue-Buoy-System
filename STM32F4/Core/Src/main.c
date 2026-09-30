@@ -74,6 +74,7 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#if !PI_LINK_TEST_ENABLED
 static void send_telemetry(uint16_t sequence)
 {
   char payload[128];
@@ -87,6 +88,7 @@ static void send_telemetry(uint16_t sequence)
   snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U);
   Protocol_Send(&huart4, "SYS", payload);
 }
+#endif
 /* USER CODE END 0 */
 
 /**
@@ -172,6 +174,7 @@ int main(void)
       HwTest_Tick(now);
 #else
       Control_Tick(&control, &pi_command, &ibus, &imu, now);
+      Camera_Tick(&pi_command);
       Buzzer_Tick(now);
 #endif
       /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
@@ -188,7 +191,13 @@ int main(void)
     if ((uint32_t)(now - last_telemetry) >= TELEMETRY_PERIOD_MS)
     {
       last_telemetry = now;
+#if PI_LINK_TEST_ENABLED
+      char payload[48];
+      snprintf(payload, sizeof(payload), "%u,%lu,HELLO_PI", ++sequence, (unsigned long)now);
+      Protocol_Send(&huart4, "TST", payload);
+#else
       send_telemetry(++sequence);
+#endif
     }
   }
   /* USER CODE END 3 */
@@ -267,6 +276,8 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   /* An overrun makes HAL abort the interrupt reception. Re-arm the GPS byte so the
      fix source does not stay silent until the next reset (BUSY if HAL kept it armed). */
   if (huart == &huart3) (void)HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
+  /* Same for the Pi link: without this one overrun leaves UART4 deaf until reset. */
+  else if (huart == &huart4) (void)HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
 }
 /* USER CODE END 4 */
 
