@@ -412,7 +412,7 @@ quá `MAX_PITCH_DEG` / `MAX_ROLL_DEG`, hoặc receiver mất link — output ESC
 
 ## 12. Quy ước đóng góp
 
-Theo `AGENTS.md`:
+Theo các skill của Claude trong `.claude/skills/` (`stm32-cubemx-first`, `git-commit-pr`):
 
 1. **Cấu hình CubeMX trước, code sau.** Việc gì làm được trong `.ioc` thì làm ở đó, đừng
    sửa tay `Core/`.
@@ -463,7 +463,6 @@ trong `App/app_config.h`.
 gạt cần phải sang phải thì bánh lái phải kéo mũi sang phải và đẩy đuôi sang trái (sai thì
 đổi dấu `RUDDER_DIR_FRONT` / `RUDDER_DIR_REAR`), và `actuator_debug.esc_us` phải đúng như
 bảng trên khi đẩy / kéo cần phải.
-
 
 ---
 
