@@ -1,10 +1,12 @@
 {
   "name": "phao-tram-bo-cloud",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test:auth": "node test/auth.test.mjs",
+    "test:telemetry": "node --test test/telemetry.test.mjs",
     "dev:idp": "node test/dev-idp.mjs"
   },
   "devDependencies": {
