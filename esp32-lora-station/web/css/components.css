@@ -23,6 +23,45 @@
 .h{ margin:0 0 10px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
 .note{ margin:-4px 0 10px; font-size:12px; color:var(--warn); }
 
+/* ---------- Tư thế và giữ hướng ---------- */
+.attitude{ margin:0 0 12px; padding:10px; background:var(--panel-2); border:1px solid var(--line); border-radius:var(--r-card); }
+.attitude-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px; }
+.attitude-head .h{ margin:0; }
+.attitude-instruments{ display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+.instrument-card{ min-width:0; text-align:center; }
+.instrument-title{ margin-bottom:6px; color:var(--muted); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.horizon,.heading-dial{ position:relative; width:96px; height:96px; margin:0 auto; overflow:hidden; border:2px solid var(--line-2); border-radius:50%; background:#0b1822; box-shadow:inset 0 0 0 2px rgba(255,255,255,.03); }
+.horizon-world{ position:absolute; left:-25%; top:-25%; width:150%; height:150%; transition:transform .35s ease-out; }
+.horizon-sky,.horizon-ground{ position:absolute; left:0; width:100%; height:50%; }
+.horizon-sky{ top:0; background:linear-gradient(#17658a,#3ea9c8); }
+.horizon-ground{ bottom:0; background:linear-gradient(#8c6037,#4f3522); }
+.horizon-line{ position:absolute; left:0; top:50%; width:100%; border-top:2px solid rgba(255,255,255,.9); }
+.horizon-aircraft{ position:absolute; left:50%; top:50%; display:flex; align-items:center; transform:translate(-50%,-50%); color:#fff; filter:drop-shadow(0 1px 1px #000); }
+.horizon-aircraft i{ display:block; width:22px; border-top:2px solid currentColor; }
+.horizon-aircraft b{ display:block; width:6px; height:6px; border:2px solid currentColor; border-radius:50%; }
+.heading-dial{ overflow:visible; background:radial-gradient(circle, var(--panel-3) 0 54%, transparent 55%), repeating-conic-gradient(from -1deg, var(--line-2) 0 2deg, transparent 2deg 15deg); }
+.heading-dial>span{ position:absolute; z-index:2; color:var(--muted); font:700 10px var(--mono); }
+.heading-dial .north{ top:5px; left:50%; transform:translateX(-50%); color:var(--bad); }
+.heading-dial .south{ bottom:5px; left:50%; transform:translateX(-50%); }
+.heading-dial .east{ right:7px; top:50%; transform:translateY(-50%); }
+.heading-dial .west{ left:7px; top:50%; transform:translateY(-50%); }
+.heading-needle{ position:absolute; z-index:3; inset:8px; transition:transform .35s ease-out; }
+.heading-needle i{ position:absolute; left:50%; top:2px; width:0; height:40px; border-left:2px solid var(--accent); transform:translateX(-50%); transform-origin:50% 100%; }
+.heading-needle i::before{ content:''; position:absolute; top:-1px; left:-5px; border-left:4px solid transparent; border-right:4px solid transparent; border-bottom:8px solid var(--accent); }
+.heading-needle.target{ z-index:2; }
+.heading-needle.target i{ height:34px; border-color:var(--warn); border-left-style:dashed; }
+.heading-needle.target i::before{ border-bottom-color:var(--warn); }
+.heading-hub{ position:absolute; z-index:4; left:50%; top:50%; width:8px; height:8px; transform:translate(-50%,-50%); border-radius:50%; background:var(--text); border:2px solid var(--panel); }
+.attitude-values{ display:flex; justify-content:center; gap:8px; margin-top:5px; color:var(--muted); font:10px var(--mono); }
+.attitude-values b{ color:var(--text); font-size:12px; }
+.attitude-meta{ display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-top:9px; }
+.attitude-meta div{ min-width:0; padding:5px 3px; border:1px solid var(--line); border-radius:5px; text-align:center; }
+.attitude-meta span{ display:block; color:var(--muted); font-size:9px; }
+.attitude-meta b{ display:block; overflow:hidden; color:var(--text); font:700 11px var(--mono); text-overflow:ellipsis; white-space:nowrap; }
+.attitude.is-stale .horizon-world,.attitude.is-stale .heading-needle{ transition:none; }
+.attitude.is-stale .attitude-instruments,.attitude.is-stale .attitude-meta{ opacity:.45; }
+.attitude.no-data .horizon-world,.attitude.no-data .heading-needle{ visibility:hidden; }
+
 .badge{ font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; border:1px solid currentColor; white-space:nowrap; }
 .badge.online{ color:var(--ok); } .badge.stale{ color:var(--warn); } .badge.nofix{ color:var(--bad); }
 
@@ -295,6 +334,7 @@ body[data-mode="mission"] #empty{ display:none; }
 @media (max-width:380px){
   .chip .k{ display:none; }
   .actions .btn{ font-size:11px; }
+  .horizon,.heading-dial{ width:84px; height:84px; }
 }
 @media (hover:none) and (pointer:coarse){
   .btn{ min-height:46px; }

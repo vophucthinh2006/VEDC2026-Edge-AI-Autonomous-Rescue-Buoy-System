@@ -81,6 +81,41 @@
             <div class="cell rel" id="d-rel" hidden><div class="k">Cách trạm bờ</div><div class="v mono"><span id="d-rel-dist">-</span><em>|</em><span id="d-rel-brg">-</span></div></div>
             <p class="note" id="d-lat-stale" hidden>Đang hiển thị vị trí cuối cùng, phao hiện chưa có GPS.</p>
 
+            <section id="d-attitude" class="attitude" aria-label="Tư thế và hướng của phao">
+              <div class="attitude-head">
+                <span class="h">Tư thế &amp; giữ hướng</span>
+                <span id="d-attitude-state" class="badge stale">Chưa có IMU</span>
+              </div>
+              <div class="attitude-instruments">
+                <div class="instrument-card">
+                  <div class="instrument-title">Roll / Pitch</div>
+                  <div class="horizon" role="img" aria-label="Chân trời nhân tạo">
+                    <div id="d-horizon-world" class="horizon-world">
+                      <div class="horizon-sky"></div><div class="horizon-ground"></div><div class="horizon-line"></div>
+                    </div>
+                    <div class="horizon-aircraft"><i></i><b></b><i></i></div>
+                  </div>
+                  <div class="attitude-values"><span>R <b id="d-roll">-</b>°</span><span>P <b id="d-pitch">-</b>°</span></div>
+                </div>
+                <div class="instrument-card">
+                  <div class="instrument-title">Yaw / Hướng đích</div>
+                  <div class="heading-dial" role="img" aria-label="La bàn hướng thực tế và hướng đích">
+                    <span class="north">N</span><span class="east">E</span><span class="south">S</span><span class="west">W</span>
+                    <div id="d-target-needle" class="heading-needle target"><i></i></div>
+                    <div id="d-yaw-needle" class="heading-needle actual"><i></i></div>
+                    <div class="heading-hub"></div>
+                  </div>
+                  <div class="attitude-values"><span>Y <b id="d-yaw">-</b>°</span><span>T <b id="d-target-yaw">-</b>°</span></div>
+                </div>
+              </div>
+              <div class="attitude-meta">
+                <div><span>Chế độ</span><b id="d-heading-mode">-</b></div>
+                <div><span>Sai số</span><b id="d-heading-error">-</b></div>
+                <div><span>IMU</span><b id="d-imu-status">-</b></div>
+                <div><span>Calib</span><b id="d-calib">-</b></div>
+              </div>
+            </section>
+
             <div class="sig">
               <div class="cell sig-main">
                 <div class="k">RSSI</div>

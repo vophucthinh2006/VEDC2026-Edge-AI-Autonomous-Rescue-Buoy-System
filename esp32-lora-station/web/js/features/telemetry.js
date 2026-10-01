@@ -1,5 +1,5 @@
 // Thẻ viễn trắc của phao đang chọn: tọa độ, RSSI/SNR, tuổi gói, đồ thị lịch sử.
-import { state, statusOf, ageSec, STATUS_TEXT } from '../state.js';
+import { state, statusOf, ageSec, attitudeAgeSec, ATTITUDE_STALE_SEC, STATUS_TEXT } from '../state.js';
 import { fmtAgeSec, rssiClass, NONE } from '../util/format.js';
 import { toDMS, distM, bearingDeg } from '../util/geo.js';
 import { fmtDist } from '../util/format.js';
@@ -18,6 +18,43 @@ function el(name, attrs = {}) {
   const e = document.createElementNS(SVGNS, name);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
   return e;
+}
+
+const signedHeadingError = (target, current) => (target - current + 540) % 360 - 180;
+
+function renderAttitude(b) {
+  const panel = $('d-attitude');
+  const has = b.hasAttitude === true;
+  const stale = has && attitudeAgeSec(b) > ATTITUDE_STALE_SEC;
+  panel.classList.toggle('no-data', !has);
+  panel.classList.toggle('is-stale', stale);
+
+  const badge = $('d-attitude-state');
+  badge.textContent = !has ? 'Chưa có IMU' : stale ? 'Dữ liệu cũ' : b.imuOk ? 'IMU tốt' : 'Lỗi IMU';
+  badge.className = 'badge ' + (!has || stale ? 'stale' : b.imuOk ? 'online' : 'nofix');
+  if (!has) {
+    for (const id of ['d-roll','d-pitch','d-yaw','d-target-yaw','d-heading-mode','d-heading-error','d-imu-status','d-calib']) $(id).textContent = NONE;
+    // Xóa dấu vết của phao chọn trước: inline style thắng lớp .no-data
+    $('d-imu-status').className = '';
+    $('d-target-needle').style.visibility = '';
+    return;
+  }
+
+  $('d-roll').textContent = b.roll.toFixed(1);
+  $('d-pitch').textContent = b.pitch.toFixed(1);
+  $('d-yaw').textContent = b.yaw.toFixed(1);
+  $('d-target-yaw').textContent = b.targetYaw === null ? NONE : b.targetYaw.toFixed(1);
+  $('d-heading-mode').textContent = ({ A: 'AUTO', M: 'MANUAL', S: 'STOP' })[b.headingMode] || NONE;
+  $('d-imu-status').textContent = b.imuOk ? 'OK' : 'LỖI';
+  $('d-imu-status').className = b.imuOk ? 'ok' : 'bad';
+  $('d-calib').textContent = `${b.calib}/3`;
+  const error = b.targetYaw === null ? null : signedHeadingError(b.targetYaw, b.yaw);
+  $('d-heading-error').textContent = error === null ? NONE : `${error >= 0 ? '+' : ''}${error.toFixed(1)}°`;
+
+  $('d-horizon-world').style.transform = `translateY(${Math.max(-35, Math.min(35, b.pitch * 0.8))}px) rotate(${-b.roll}deg)`;
+  $('d-yaw-needle').style.transform = `rotate(${b.yaw}deg)`;
+  $('d-target-needle').style.transform = b.targetYaw === null ? 'rotate(0deg)' : `rotate(${b.targetYaw}deg)`;
+  $('d-target-needle').style.visibility = b.targetYaw === null ? 'hidden' : 'visible';
 }
 
 function drawChart() {
@@ -112,6 +149,7 @@ export function renderDetail() {
   $('d-snr').textContent = b.snr.toFixed(1);
   $('d-age').textContent = fmtAgeSec(ageSec(b));
   $('d-age').className = 'big mono ' + (st === 'stale' ? 'warn' : '');
+  renderAttitude(b);
 
   const frac = Math.min(1, Math.max(0, (b.rssi + 130) / 90));
   const segs = $('d-rssi-bar').children;

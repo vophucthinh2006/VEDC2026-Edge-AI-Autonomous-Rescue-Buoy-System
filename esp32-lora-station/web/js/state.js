@@ -1,6 +1,7 @@
 // Trạng thái dùng chung và bus sự kiện nhỏ để các panel không gọi chéo nhau.
 
 export const STALE_SEC = 30;      // quá ngưỡng này không có gói mới thì coi là mất tín hiệu
+export const ATTITUDE_STALE_SEC = 12; // hai chu kỳ beacon 5 giây cộng dung sai
 export const HISTORY_MAX = 300;   // số mẫu giữ trong bộ nhớ cho mỗi phao
 
 export const state = {
@@ -19,6 +20,7 @@ export const on = (name, fn) => { (handlers.get(name) || handlers.set(name, []).
 export const emit = (name, data) => { for (const fn of handlers.get(name) || []) fn(data); };
 
 export const ageSec = b => (Date.now() - b.lastSeen) / 1000;
+export const attitudeAgeSec = b => b.attitudeLastSeen ? (Date.now() - b.attitudeLastSeen) / 1000 : Infinity;
 export const isStale = b => ageSec(b) > STALE_SEC;
 
 // 'online' | 'stale' | 'nofix'
