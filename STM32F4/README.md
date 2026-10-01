@@ -56,7 +56,9 @@ main.c  →  App/  →  Modules/  →  HAL
 
 `App/imu.c` là lớp đệm giữa driver BNO055 và vòng điều khiển: giữ struct `bno055_euler_t`
 phẳng mà `control.c` mong đợi, và map `yaw` của cảm biến thành `heading_deg` của bộ điều
-khiển. Nhờ vậy `Modules/BNO055/` vẫn là driver thuần.
+khiển. Hướng dùng trong điều khiển là
+`wrap(yaw_bno + IMU_MOUNTING_OFFSET_DEG + MAGNETIC_DECLINATION_DEG)`; góc và offset
+dương theo chiều kim đồng hồ. Nhờ vậy `Modules/BNO055/` vẫn là driver thuần.
 
 ---
 
@@ -408,6 +410,24 @@ Checksum là XOR của các ký tự ASCII giữa `$` và `*`, giống `Rasp_Pi/
 `NAV` và `HBT` phải mới hơn 300 ms. Nếu sai checksum, E-stop tác động, BNO055 lỗi, nghiêng
 quá `MAX_PITCH_DEG` / `MAX_ROLL_DEG`, hoặc receiver mất link — output ESC lập tức về stop.
 
+Giữ hướng dùng PID trong `App/heading_controller.c`: `u = Kp·e + Ki·∫e − Kd·yaw_rate`,
+`u ∈ [-1, 1]`, dương là quay mũi sang phải. Khâu D lấy từ **gyro Z** của BNO055 (qua lọc thông
+thấp 5 Hz), nên đổi đích không gây giật. Trong deadband 2° khâu P nghỉ, tích phân được giữ.
+`Heading_Mix` đưa `u` ra cả **bánh lái** (`u·HEADING_RUDDER_GAIN`) và **chênh ga** hai motor
+sau (`u·HEADING_DIFF_GAIN`, chia quanh ga chung, không motor nào dưới 0). Pi gửi tốc độ 0 thì
+motor dừng, không xoay tại chỗ. Tham số trong `App/app_config.h`.
+
+Hướng đích đến từ hai nguồn:
+- **AUTO**: gói `NAV` của Pi.
+- **Giữ hướng bằng RC** (`RC_HEADING_HOLD_ENABLED`): ở MANUAL, đẩy ga tiến và thả cần lái về
+  giữa thì khóa yaw hiện tại (chờ phao quay chậm dưới 10°/s, tối đa 1 s). Đánh cần lái, lùi
+  hoặc bỏ ga là nhả. Không cần Pi.
+
+Theo dõi trực tiếp: `python Tools/heading_monitor.py` (thêm `--csv run.csv` để ghi log).
+AUTO yêu cầu IMU mới không quá 100 ms cùng NAV/HBT còn hạn. Rời AUTO, disarm hoặc mất
+bất kỳ nguồn dữ liệu nào sẽ dừng motor và xóa tích phân. Các hằng số nằm trong
+`App/app_config.h`; chỉ tuning trên nước sau khi đã thử khô với chân vịt tháo rời.
+
 ---
 
 ## 12. Quy ước đóng góp
@@ -466,7 +486,7 @@ bảng trên khi đẩy / kéo cần phải.
 
 ---
 
-## 14. LoRa: phát vị trí về trạm bờ
+## 14. LoRa: phát vị trí và tư thế về trạm bờ
 
 `App/lora_beacon.c` + `Modules/LoRa/sx127x.c` phát vị trí GPS về trạm bờ (ESP32-S3) mỗi
 `LORA_BEACON_PERIOD_MS` (5 giây). Không chặn: mỗi vòng lặp chỉ làm vài lệnh SPI ngắn, gói ~0.4 giây
@@ -475,15 +495,18 @@ trên không được theo dõi bằng máy trạng thái nên `Control_Tick` (1
 Tham số radio (`App/app_config.h`) **phải khớp trạm** (`esp32-lora-station/main/main.c`):
 433 MHz, SF9, BW 125 kHz, CR 4/5, sync word `0xF3`, PA_BOOST 17 dBm, CRC payload bật.
 
-Khung gửi, một dòng text:
+Khung gửi, một dòng text dưới 100 ký tự:
 
 ```
-id=PHAO-01,10.762622,106.660172,hdop=0.9,seq=12      có fix
-id=PHAO-01,NO_FIX,seq=13                             chưa có fix hoặc GPS im lặng quá LORA_GPS_STALE_MS
+id=PHAO-01,10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=280.0,m=A,i=1,c=3,q=12
+id=PHAO-01,NO_FIX,r=2.1,p=-1.4,y=278.5,t=-1.0,m=S,i=0,c=0,q=13
 ```
 
-Trạm lấy `id=`, rồi hai số thập phân đầu (không có dấu `=`) làm lat/lon và đẩy lên dashboard.
-`LORA_BUOY_ID` là tên hiển thị trên dashboard, đổi nếu có nhiều thuyền.
+`r/p/y` là Roll/Pitch/Yaw thật, `t` là hướng đích (`-1.0` khi không có; `y` và `t` được
+làm tròn 0.1° rồi mới quấn nên không bao giờ in ra `360.0`), `m` là
+`A`/`M`/`S`, `i` báo IMU hợp lệ, `c` là calibration hệ thống 0..3 và `q` là sequence.
+Hai số thập phân không có dấu `=` vẫn là lat/lon để tương thích parser cũ; khi mất GPS,
+`NO_FIX` vẫn đi cùng dữ liệu IMU. `LORA_BUOY_ID` là tên hiển thị trên dashboard.
 
 **Gắn anten 433 MHz vào RA-02 trước khi cấp nguồn/nạp firmware**: phát không anten có thể làm hỏng tầng công suất.
 
