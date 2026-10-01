@@ -16,7 +16,7 @@
 #define PI_LINK_TEST_ENABLED       0
 /* Arming needs fresh BNO055 data. 0 only while the IMU is not wired yet:
    the overturn check is then off too. Set back to 1 before any water run. */
-#define ARM_REQUIRES_IMU           0
+#define ARM_REQUIRES_IMU           1
 /* E-stop contact on PE4, internal pull-up. 1 = normally closed, the design:
    pressed or a cut wire reads high and stops. 0 = normally open, bench only:
    pressed reads low and stops, but a cut wire reads as released. */
@@ -29,6 +29,43 @@
 #endif
 #define MAX_PITCH_DEG              35.0f
 #define MAX_ROLL_DEG               35.0f
+
+/* Heading reference. East magnetic declination and a clockwise sensor
+   mounting correction are positive. Calibrate both values on the finished
+   boat before a water run. */
+#define IMU_MOUNTING_OFFSET_DEG    0.0f
+#define MAGNETIC_DECLINATION_DEG   0.0f
+/* Gyro Z to a clockwise turn rate. BNO055 flat, Z up: gyro Z is positive
+   anticlockwise, hence -1. Check on the desk: turn the sensor clockwise
+   (seen from above), yaw_rate_dps must read positive. */
+#define IMU_YAW_RATE_SIGN          (-1.0f)
+
+/* Heading PID (AUTO and RC heading hold). Output u in -1..1, positive turns
+   the bow right. u = Kp*e + Ki*integral(e) - Kd*yaw_rate: the D term works on
+   the gyro, so a target jump gives no kick and yaw noise is not differentiated.
+   Starting values, tune on the stand then on water: P first, then D until the
+   overshoot is gone, then a little I for a steady drift. */
+#define HEADING_KP                 0.020f  /* per degree: 20 deg error gives u = 0.4 */
+#define HEADING_KI                 0.002f  /* per degree-second */
+#define HEADING_KD                 0.008f  /* per deg/s: 30 deg/s turn gives 0.24 of braking */
+#define HEADING_DEADBAND_DEG       2.0f    /* P rests inside, I is held, D still damps */
+#define HEADING_INTEGRAL_LIMIT     100.0f  /* degree-seconds: Ki * limit = 0.2 of u */
+#define HEADING_RATE_LPF_HZ        5.0f    /* low-pass on the gyro rate for the D term */
+/* Mixing u onto the boat: all rudders get u * RUDDER_GAIN, the rear motors
+   split u * DIFF_GAIN around their common throttle (capped so neither goes
+   below zero). DIFF_DIR +1: positive u speeds the LEFT motor up, which pushes
+   the bow right. Flip it if the stand test shows the motors helping the wrong way. */
+#define HEADING_RUDDER_GAIN        1.0f
+#define HEADING_DIFF_GAIN          0.30f
+#define HEADING_DIFF_DIR           (+1)
+/* RC heading hold in MANUAL: right stick forward with the steering centred
+   locks the current heading and the PID holds it. Moving the steering,
+   reversing or dropping the throttle releases it. The lock waits for the
+   turn to settle below LOCK_RATE, or LOCK_TIMEOUT at most. */
+#define RC_HEADING_HOLD_ENABLED    1
+#define RC_HOLD_STEER_BAND_US      60U     /* CH1 within 1500 +/- this counts as let go; wider than the stick deadband for trim and sub-trim */
+#define RC_HOLD_LOCK_RATE_DPS      10.0f
+#define RC_HOLD_LOCK_TIMEOUT_MS    1000U
 
 /* Rear ESCs: one-direction BLHeli_S, driven over DShot; the microsecond range
    below is kept as the command scale. */

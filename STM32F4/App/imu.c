@@ -1,8 +1,10 @@
 #include "imu.h"
 #include "bno055.h"
 #include "bno055_calib_profile.h"
+#include "app_config.h"
 #include "i2c.h"
 #include "main.h"
+#include <math.h>
 
 #if BNO055_CALIB_PROFILE_VALID
 static const uint8_t imu_calib_profile[BNO055_CALIB_PROFILE_SIZE] = BNO055_CALIB_PROFILE_DATA;
@@ -17,13 +19,26 @@ BNO055_HandleTypeDef hbno055;
 BNO055_Status_t      bno055_init_status = BNO055_ERR_PARAM;
 BNO055_Status_t      bno055_read_status = BNO055_ERR_PARAM;
 BNO055_Euler_t       bno055_euler;
+BNO055_Gyro_t        bno055_gyro;
 BNO055_CalibStatus_t bno055_calib;
 uint8_t              bno055_calib_captured[BNO055_CALIB_PROFILE_SIZE];
 uint8_t              bno055_calib_captured_valid;
 
+static bool IMU_AddressMayBeWrong(BNO055_Status_t status) {
+    return status == BNO055_ERR_I2C ||
+           status == BNO055_ERR_TIMEOUT ||
+           status == BNO055_ERR_CHIP_ID;
+}
+
+static float IMU_TrueHeading(float magnetic_heading_deg) {
+    float heading = fmodf(magnetic_heading_deg + IMU_MOUNTING_OFFSET_DEG +
+                          MAGNETIC_DECLINATION_DEG, 360.0f);
+    return heading < 0.0f ? heading + 360.0f : heading;
+}
+
 bool IMU_Init(void) {
     hbno055.hi2c = &hi2c1;
-    hbno055.address = BNO055_I2C_ADDR_COM3_HIGH; /* ADR floating -> 0x29 */
+    hbno055.address = BNO055_I2C_ADDR_COM3_HIGH; /* ADR floating/high -> 0x29 */
     hbno055.rst_port = BNO055_RST_GPIO_Port;
     hbno055.rst_pin = BNO055_RST_Pin;
     hbno055.mode = BNO055_OPR_MODE_NDOF;
@@ -34,6 +49,15 @@ bool IMU_Init(void) {
     hbno055.calib_profile = NULL;
 #endif
     bno055_init_status = BNO055_Init(&hbno055);
+
+    /* GY-BNO055 boards do not all strap ADR the same way. Try the alternate
+       address only when the first failure means that no valid BNO055 was
+       found. Keep hbno055.address on the detected address for later reads. */
+    if (IMU_AddressMayBeWrong(bno055_init_status)) {
+        hbno055.address = BNO055_I2C_ADDR_COM3_LOW; /* ADR low -> 0x28 */
+        bno055_init_status = BNO055_Init(&hbno055);
+    }
+
     return bno055_init_status == BNO055_OK;
 }
 
@@ -49,9 +73,17 @@ bool IMU_Read(bno055_euler_t *out) {
         return false;
     }
 
-    out->heading_deg = bno055_euler.yaw;
+    /* Turn rate damps the heading loop; a heading without it is not usable. */
+    bno055_read_status = BNO055_ReadGyro(&hbno055, &bno055_gyro);
+    if (bno055_read_status != BNO055_OK) {
+        out->valid = false;
+        return false;
+    }
+
+    out->heading_deg = IMU_TrueHeading(bno055_euler.yaw);
     out->roll_deg = bno055_euler.roll;
     out->pitch_deg = bno055_euler.pitch;
+    out->yaw_rate_dps = IMU_YAW_RATE_SIGN * bno055_gyro.z;
 
     if (BNO055_ReadCalibStatus(&hbno055, &bno055_calib) == BNO055_OK) {
         out->calibration = bno055_calib.sys;
