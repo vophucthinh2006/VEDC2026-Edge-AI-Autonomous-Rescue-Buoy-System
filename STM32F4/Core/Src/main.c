@@ -135,8 +135,8 @@ int main(void)
   Protocol_Init(&pi_command);
   IBUS_Init(&ibus);
   GPS_Init(&gps);
-  LoraBeacon_Init(&hspi2, &gps);   /* SPI2 + NSS PB12 + RST PC4, non-blocking after this call */
   Control_Init(&control);
+  LoraBeacon_Init(&hspi2, &gps, &imu, &control); /* SPI2 + NSS PB12 + RST PC4, non-blocking */
 #if HW_TEST_ENABLED
   HwTest_Init();
 #else

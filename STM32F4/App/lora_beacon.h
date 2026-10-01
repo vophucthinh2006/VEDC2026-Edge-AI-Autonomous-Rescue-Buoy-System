@@ -1,11 +1,13 @@
 #pragma once
 
-/* Sends the GPS position to the shore station over LoRa every LORA_BEACON_PERIOD_MS.
+/* Sends GPS and attitude to the shore station every LORA_BEACON_PERIOD_MS.
  * Non-blocking: each loop pass does a few short SPI transfers, so the control loop is unaffected. */
 
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
 #include "gps_nmea.h"
+#include "imu.h"
+#include "control.h"
 
 /* Beacon state, read over OpenOCD (Tools/lora_monitor.py). Keep the layout in step with that file. */
 typedef enum {
@@ -30,5 +32,6 @@ typedef struct {
 
 extern volatile lora_debug_t lora_debug;
 
-void LoraBeacon_Init(SPI_HandleTypeDef *hspi, const gps_state_t *gps);
+void LoraBeacon_Init(SPI_HandleTypeDef *hspi, const gps_state_t *gps,
+                     const bno055_euler_t *imu, const controller_t *control);
 void LoraBeacon_Tick(uint32_t now_ms);
