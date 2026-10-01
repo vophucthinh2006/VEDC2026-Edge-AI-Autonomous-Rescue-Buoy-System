@@ -20,8 +20,9 @@
   */
 typedef struct {
     float heading_deg;   /* 0 .. 360 */
-    float roll_deg;      /* -90 .. +90 */
-    float pitch_deg;     /* -180 .. +180 */
+    float roll_deg;      /* BNO055 Euler roll: -180 .. +180 */
+    float pitch_deg;     /* BNO055 Euler pitch: -90 .. +90 */
+    float yaw_rate_dps;  /* turn rate, positive clockwise like heading_deg */
     uint8_t calibration; /* system calibration, 0 = none .. 3 = full */
     bool valid;          /* last read succeeded */
 } bno055_euler_t;

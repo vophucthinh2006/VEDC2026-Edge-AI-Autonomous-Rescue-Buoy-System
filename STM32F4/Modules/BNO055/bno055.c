@@ -13,6 +13,7 @@
 /* Register map page 0 (section 4.2.1, Table 4-2) ----------------------------*/
 #define BNO055_REG_CHIP_ID          0x00U
 #define BNO055_REG_PAGE_ID          0x07U
+#define BNO055_REG_GYR_DATA_X_LSB   0x14U   /* gyro x, y, z: 0x14..0x19 */
 #define BNO055_REG_EUL_HEADING_LSB  0x1AU   /* heading, roll, pitch: 0x1A..0x1F */
 #define BNO055_REG_CALIB_STAT       0x35U
 #define BNO055_REG_SYS_CLK_STATUS   0x38U
@@ -39,6 +40,8 @@
 
 /* Euler angle representation: 1 degree = 16 LSB (Table 3-29) */
 #define BNO055_EULER_LSB_PER_DEG    16.0f
+/* Gyroscope representation in dps: 1 dps = 16 LSB (Table 3-22) */
+#define BNO055_GYR_LSB_PER_DPS      16.0f
 
 /* Timing -----------------------------------------------------------------------*/
 #define BNO055_T_RST_PULSE_MS       1U      /* nRESET low >= 20 ns (3.2) */
@@ -415,6 +418,37 @@ BNO055_Status_t BNO055_ReadEuler(BNO055_HandleTypeDef *hbno, BNO055_Euler_t *eul
   euler->yaw   = (float)heading / BNO055_EULER_LSB_PER_DEG;
   euler->roll  = (float)roll    / BNO055_EULER_LSB_PER_DEG;
   euler->pitch = (float)pitch   / BNO055_EULER_LSB_PER_DEG;
+
+  return BNO055_OK;
+}
+
+/**
+  * @brief  Read the compensated angular rate in dps (3.6.5.2).
+  */
+BNO055_Status_t BNO055_ReadGyro(BNO055_HandleTypeDef *hbno, BNO055_Gyro_t *gyro)
+{
+  uint8_t buf[6];
+  BNO055_Status_t status;
+
+  if ((hbno == NULL) || (gyro == NULL))
+  {
+    return BNO055_ERR_PARAM;
+  }
+
+  /* GYR_DATA_X/Y/Z LSB/MSB (Table 3-21) */
+  status = BNO055_ReadReg(hbno, BNO055_REG_GYR_DATA_X_LSB, buf, sizeof(buf));
+  if (status != BNO055_OK)
+  {
+    return status;
+  }
+
+  int16_t x = (int16_t)(((uint16_t)buf[1] << 8) | buf[0]);
+  int16_t y = (int16_t)(((uint16_t)buf[3] << 8) | buf[2]);
+  int16_t z = (int16_t)(((uint16_t)buf[5] << 8) | buf[4]);
+
+  gyro->x = (float)x / BNO055_GYR_LSB_PER_DPS;
+  gyro->y = (float)y / BNO055_GYR_LSB_PER_DPS;
+  gyro->z = (float)z / BNO055_GYR_LSB_PER_DPS;
 
   return BNO055_OK;
 }

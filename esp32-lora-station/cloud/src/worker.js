@@ -1,5 +1,6 @@
 import { json, num, secretEquals } from "./util.js";
 import { adminEmails, makeSession, originOk, readSession, sessionCookie, verifyGoogleToken } from "./auth.js";
+import { sanitizeBuoy } from "./telemetry.js";
 
 export { Hub } from "./hub.js";
 
@@ -9,29 +10,6 @@ const MAX_POINTS = 300;
 
 const validPt = p => p && num(p.lat) !== null && num(p.lon) !== null && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
 const cleanPts = arr => arr.map(p => ({ lat: +p.lat.toFixed(7), lon: +p.lon.toFixed(7) }));
-
-// Chuẩn hóa và kiểm tra bản tin từ trạm; trả về null nếu không hợp lệ
-function sanitize(m) {
-  if (!m || typeof m !== "object") return null;
-  const rssi = num(m.rssi), snr = num(m.snr);
-  if (rssi === null || snr === null) return null;
-  const id = typeof m.id === "string" && m.id.trim()
-    ? m.id.replace(/[^\w .\-]/g, "").slice(0, 32) || "PHAO-01"
-    : "PHAO-01";
-  const out = {
-    id,
-    fix: m.fix === 1 ? 1 : 0,
-    rssi: Math.round(rssi),
-    snr: Math.round(snr * 10) / 10,
-    raw: typeof m.raw === "string" ? m.raw.slice(0, 100) : "",
-  };
-  if (out.fix === 1) {
-    const lat = num(m.lat), lon = num(m.lon);
-    if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180) out.fix = 0;
-    else { out.lat = lat; out.lon = lon; }
-  }
-  return out;
-}
 
 // Chuẩn hóa vị trí trạm bờ (GPS của trạm); trả về null nếu không hợp lệ
 function sanitizeStation(m) {
@@ -82,7 +60,7 @@ export default {
       const body = await request.text();
       if (body.length > MAX_BODY) return json({ error: "too large" }, 413);
       let msg = null;
-      try { msg = sanitize(JSON.parse(body)); } catch { /* rơi xuống báo lỗi */ }
+      try { msg = sanitizeBuoy(JSON.parse(body)); } catch { /* rơi xuống báo lỗi */ }
       if (!msg) return json({ error: "bad payload" }, 400);
       return hub().fetch("https://hub/ingest", { method: "POST", body: JSON.stringify(msg) });
     }

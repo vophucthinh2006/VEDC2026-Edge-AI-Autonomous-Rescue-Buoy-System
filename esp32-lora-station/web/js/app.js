@@ -497,12 +497,20 @@ function onMissionMessage(m) {
 function onBuoyMessage(m) {
   const id = String(m.id || 'PHAO-01');
   const existed = state.buoys.get(id);
-  const prev = existed ? { fix: existed.fix } : null;
+  const prev = existed ? { fix: existed.fix, imuOk: existed.imuOk } : null;
   const b = existed || { hasPos: false, marker: null };
   const snapshot = (Number(m.age_s) || 0) > 0;   // bản phát lại lúc mở trang, không phải gói mới
   b.fix = m.fix;
   b.rssi = Number(m.rssi); b.snr = Number(m.snr); b.raw = String(m.raw ?? '');
   b.lastSeen = Date.now() - (Number(m.age_s) || 0) * 1000;
+  const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S'].includes(m.mode);
+  if (attitudeValid) {
+    b.hasAttitude = true;
+    b.roll = Number(m.roll); b.pitch = Number(m.pitch); b.yaw = Number(m.yaw);
+    b.targetYaw = Number(m.target_yaw) < 0 ? null : Number(m.target_yaw);
+    b.headingMode = m.mode; b.imuOk = m.imu_ok === 1; b.calib = Number(m.calib); b.sequence = Number(m.seq);
+    b.attitudeLastSeen = b.lastSeen;
+  }
   // Chỉ ghi đè vị trí khi bản tin có tọa độ hợp lệ; NO_FIX giữ vị trí cũ
   if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { b.lat = m.lat; b.lon = m.lon; b.hasPos = true; }
   state.buoys.set(id, b);

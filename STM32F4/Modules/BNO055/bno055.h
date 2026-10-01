@@ -101,6 +101,17 @@ typedef struct
 } BNO055_Euler_t;
 
 /**
+  * @brief Angular rate in degrees per second, sensor axes (Table 3-22).
+  *        Sign follows the right-hand rule on the chip axes.
+  */
+typedef struct
+{
+  float x;
+  float y;
+  float z;
+} BNO055_Gyro_t;
+
+/**
   * @brief Calibration status, 0 = not calibrated .. 3 = fully calibrated (4.3.54)
   */
 typedef struct
@@ -113,6 +124,7 @@ typedef struct
 
 BNO055_Status_t BNO055_Init(BNO055_HandleTypeDef *hbno);
 BNO055_Status_t BNO055_ReadEuler(BNO055_HandleTypeDef *hbno, BNO055_Euler_t *euler);
+BNO055_Status_t BNO055_ReadGyro(BNO055_HandleTypeDef *hbno, BNO055_Gyro_t *gyro);
 BNO055_Status_t BNO055_ReadCalibStatus(BNO055_HandleTypeDef *hbno, BNO055_CalibStatus_t *calib);
 BNO055_Status_t BNO055_ReadCalibProfile(BNO055_HandleTypeDef *hbno, uint8_t *profile);
 BNO055_Status_t BNO055_WriteCalibProfile(BNO055_HandleTypeDef *hbno, const uint8_t *profile);

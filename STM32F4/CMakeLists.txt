@@ -54,6 +54,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/Buzzer/buzzer.c
     Modules/LoRa/sx127x.c
     App/control.c
+    App/heading_controller.c
     App/manual.c
     App/imu.c
     App/hw_test.c

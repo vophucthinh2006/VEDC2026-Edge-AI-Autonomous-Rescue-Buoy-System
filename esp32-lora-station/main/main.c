@@ -1,6 +1,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -17,6 +18,7 @@
 
 #include "sx127x.h"
 #include "nmea_gps.h"
+#include "lora_payload.h"
 #include "secrets.h"   // WIFI_SSID, WIFI_PASSWORD, CLOUD_INGEST_URL, CLOUD_INGEST_TOKEN (xem secrets.example.h)
 
 static const char *TAG = "tram_bo";
@@ -48,7 +50,7 @@ static const char *TAG = "tram_bo";
 #define CLOUD_HTTP_TIMEOUT_MS  8000
 #define CLOUD_MAX_TRIES        3
 
-#define JSON_MAX 300
+#define JSON_MAX 384
 
 typedef struct { char json[JSON_MAX]; bool station; } cloud_msg_t;   // station: vị trí trạm (/api/station), ngược lại là gói phao (/api/ingest)
 
@@ -108,65 +110,6 @@ static void khoi_dong_wifi_sta(void) {
     ESP_LOGI(TAG, "Dang ket noi WiFi \"%s\"...", WIFI_SSID);
 }
 
-// ------------------------------------------------- Nhận diện lat/lon và id trong bản tin
-// Quét các trường phân cách bởi dấu phẩy, bỏ qua trường chứa '=' (dạng key=value),
-// lấy 2 số thập phân (chứa dấu '.') đầu tiên tìm được làm lat và lon.
-static bool tach_lat_lon(const char *msg, double *lat, double *lon) {
-    char buf[128];
-    strncpy(buf, msg, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = '\0';
-
-    double gia_tri[2];
-    int so_gia_tri_tim_duoc = 0;
-
-    char *token = strtok(buf, ",");
-    while (token != NULL && so_gia_tri_tim_duoc < 2) {
-        bool co_dau_bang = (strchr(token, '=') != NULL);
-        bool co_dau_cham = (strchr(token, '.') != NULL);
-
-        if (!co_dau_bang && co_dau_cham) {
-            char *end_ptr;
-            double val = strtod(token, &end_ptr);
-            if (end_ptr != token) {
-                gia_tri[so_gia_tri_tim_duoc++] = val;
-            }
-        }
-        token = strtok(NULL, ",");
-    }
-
-    if (so_gia_tri_tim_duoc == 2) {
-        *lat = gia_tri[0];
-        *lon = gia_tri[1];
-        return true;
-    }
-    return false;
-}
-
-// Nhận diện ID phao trong bản tin (nếu máy phát có gửi dạng id=...)
-static void tach_id(const char *msg, char *id_out, size_t max_len) {
-    char buf[128];
-    strncpy(buf, msg, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = '\0';
-
-    id_out[0] = '\0';
-
-    char *token = strtok(buf, ",");
-    while (token != NULL) {
-        while (*token == ' ') token++;
-
-        if (strncasecmp(token, "id=", 3) == 0) {
-            const char *gia_tri = token + 3;
-            size_t i = 0;
-            for (; gia_tri[i] != '\0' && i < max_len - 1; i++) {
-                id_out[i] = gia_tri[i];
-            }
-            id_out[i] = '\0';
-            return;
-        }
-        token = strtok(NULL, ",");
-    }
-}
-
 // Làm sạch chuỗi để nhúng an toàn vào JSON (thay dấu " \ và ký tự điều khiển bằng khoảng trắng)
 static void lam_sach_cho_json(char *dst, const char *src, size_t max_len) {
     size_t i = 0;
@@ -181,42 +124,66 @@ static void lam_sach_cho_json(char *dst, const char *src, size_t max_len) {
     dst[i] = '\0';
 }
 
+static bool json_append(char *dst, size_t capacity, size_t *used, const char *format, ...) {
+    if (*used >= capacity) return false;
+    va_list args;
+    va_start(args, format);
+    int written = vsnprintf(dst + *used, capacity - *used, format, args);
+    va_end(args);
+    if (written < 0 || (size_t)written >= capacity - *used) return false;
+    *used += (size_t)written;
+    return true;
+}
+
 // ------------------------------------------------------------- Xử lý gói LoRa nhận được
 // Dựng JSON đúng định dạng dashboard/Worker mong đợi rồi xếp vào hàng đợi gửi cloud.
 static void xu_ly_goi_lora(const char *raw, int rssi, float snr) {
-    double lat, lon;
-    bool co_toa_do = tach_lat_lon(raw, &lat, &lon);
+    lora_payload_t payload;
+    if (!lora_payload_parse(raw, &payload)) {
+        ESP_LOGW(TAG, "Bo goi LoRa khong hop le");
+        return;
+    }
+    if (payload.attitude_rejected) {
+        ESP_LOGW(TAG, "Bo nhom tu the (IMU) khong hop le, van gui vi tri: %s", raw);
+    }
 
-    char id_tho[32];
-    tach_id(raw, id_tho, sizeof(id_tho));
     char id_sach[32];
-    lam_sach_cho_json(id_sach, id_tho, sizeof(id_sach));
+    lam_sach_cho_json(id_sach, payload.id, sizeof(id_sach));
     bool co_id = (id_sach[0] != '\0');
 
     char raw_sach[100];
     lam_sach_cho_json(raw_sach, raw, sizeof(raw_sach));
 
-    char id_json[48];
-    if (co_id) {
-        snprintf(id_json, sizeof(id_json), "\"id\":\"%s\",", id_sach);
-    } else {
-        id_json[0] = '\0';   // không có id -> server/dashboard tự gán "PHAO-01"
-    }
-
     cloud_msg_t m;
     m.station = false;
-    if (co_toa_do) {
-        snprintf(m.json, sizeof(m.json),
-                 "{%s\"fix\":1,\"lat\":%.6f,\"lon\":%.6f,\"rssi\":%d,\"snr\":%.1f,\"raw\":\"%s\"}",
-                 id_json, lat, lon, rssi, snr, raw_sach);
+    size_t used = 0U;
+    bool json_ok = json_append(m.json, sizeof(m.json), &used, "{");
+    if (co_id) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, "\"id\":\"%s\",", id_sach);
+    if (payload.has_position) {
+        json_ok = json_ok && json_append(m.json, sizeof(m.json), &used,
+                 "\"fix\":1,\"lat\":%.6f,\"lon\":%.6f,\"rssi\":%d,\"snr\":%.1f,\"raw\":\"%s\"",
+                 payload.lat, payload.lon, rssi, snr, raw_sach);
         ESP_LOGI(TAG, "[NHAN] id=%s lat=%.6f lon=%.6f | RSSI=%d dBm | SNR=%.1f dB",
-                 co_id ? id_sach : "(khong co)", lat, lon, rssi, snr);
+                 co_id ? id_sach : "(khong co)", payload.lat, payload.lon, rssi, snr);
     } else {
-        snprintf(m.json, sizeof(m.json),
-                 "{%s\"fix\":0,\"rssi\":%d,\"snr\":%.1f,\"raw\":\"%s\"}",
-                 id_json, rssi, snr, raw_sach);
+        json_ok = json_ok && json_append(m.json, sizeof(m.json), &used,
+                 "\"fix\":0,\"rssi\":%d,\"snr\":%.1f,\"raw\":\"%s\"",
+                 rssi, snr, raw_sach);
         ESP_LOGI(TAG, "[NHAN] id=%s khong co toa do hop le: %s",
                  co_id ? id_sach : "(khong co)", raw_sach);
+    }
+    if (payload.has_attitude) {
+        json_ok = json_ok && json_append(m.json, sizeof(m.json), &used,
+                 ",\"roll\":%.1f,\"pitch\":%.1f,\"yaw\":%.1f,\"target_yaw\":%.1f,"
+                 "\"mode\":\"%c\",\"imu_ok\":%u,\"calib\":%u,\"seq\":%lu",
+                 payload.roll, payload.pitch, payload.yaw, payload.target_yaw,
+                 payload.mode, payload.imu_ok, payload.calibration,
+                 (unsigned long)payload.sequence);
+    }
+    json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, "}");
+    if (!json_ok) {
+        ESP_LOGE(TAG, "JSON telemetry vuot qua %u byte", (unsigned int)sizeof(m.json));
+        return;
     }
 
     // Hàng đợi đầy (mất mạng lâu): bỏ bản tin CŨ NHẤT để giữ dữ liệu mới nhất
