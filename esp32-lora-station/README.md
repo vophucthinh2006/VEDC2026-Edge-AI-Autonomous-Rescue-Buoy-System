@@ -150,10 +150,14 @@ curl -X POST http://localhost:8787/api/ingest -H "Authorization: Bearer dev-toke
 
 ESP32 → `POST /api/ingest` (header `Authorization: Bearer <INGEST_TOKEN>`):
 ```json
-{"id":"PHAO-01","fix":1,"lat":10.762622,"lon":106.660172,"rssi":-88,"snr":7.5,"raw":"..."}
-{"fix":0,"rssi":-115,"snr":-8.0,"raw":"TRIGGER,1,NO_FIX"}
+{"id":"PHAO-01","fix":1,"lat":10.762622,"lon":106.660172,"rssi":-88,"snr":7.5,"roll":2.1,"pitch":-1.4,"yaw":278.5,"target_yaw":280.0,"mode":"A","imu_ok":1,"calib":3,"seq":12,"raw":"..."}
+{"id":"PHAO-01","fix":0,"rssi":-115,"snr":-8.0,"roll":2.1,"pitch":-1.4,"yaw":278.5,"target_yaw":-1.0,"mode":"S","imu_ok":0,"calib":0,"seq":13,"raw":"..."}
 ```
-`id` có thể vắng (server gán `PHAO-01`). `fix:0` thì không có `lat`/`lon`.
+`id` có thể vắng (server gán `PHAO-01`). `fix:0` thì không có `lat`/`lon`, nhưng vẫn có
+dữ liệu tư thế. ESP32 và cloud kiểm tra miền Roll `[-180,180]`, Pitch `[-90,90]`, Yaw
+`[0,360)`, calibration 0..3 và toàn bộ nhóm trường IMU. Nhóm IMU hỏng thì **chỉ bỏ nhóm đó**
+(cloud gắn `attitude_bad:1`), vị trí và RSSI/SNR vẫn được lưu và phát.
+Gói GPS-only cũ vẫn được chấp nhận; lịch sử server chỉ tiếp tục lưu RSSI/SNR và vị trí.
 
 Server → trình duyệt (`/ws`): cùng định dạng, thêm `age_s` (giây kể từ lúc server nhận). Khi mở trang,
 server phát lại vị trí cuối của từng phao rồi bản tin lộ trình `{"type":"mission","rev":N,...}`.
@@ -165,7 +169,10 @@ Phong cách "trung tâm điều hành": nền tối, số liệu monospace, mộ
 
 - **Thanh trạng thái:** trạng thái máy chủ, số phao trực tuyến / mất tín hiệu / chưa GPS, tuổi gói LoRa cuối, đồng hồ UTC và giờ máy.
 - **Viễn trắc phao đang chọn:** tọa độ (thập phân hoặc độ phút giây), RSSI với thanh phân đoạn, SNR, tuổi gói,
-  đồ thị RSSI/SNR 5 phút / 15 phút / tất cả với vạch ngưỡng -95 và -110 dBm, bản tin gốc.
+  chân trời nhân tạo Roll/Pitch, la bàn Yaw thực tế/hướng đích, sai số ngắn nhất, trạng thái
+  AUTO/IMU/calibration, đồ thị RSSI/SNR 5 phút / 15 phút / tất cả với vạch ngưỡng -95 và
+  -110 dBm, bản tin gốc. Sau 12 giây không có attitude mới, đồng hồ giữ giá trị cuối và
+  đánh dấu `Dữ liệu cũ`.
 - **Nhật ký sự kiện:** kết nối, phao mới, gói tin, mất/có lại tín hiệu (quá 30 giây), mất/có lại GPS, admin cập nhật lộ trình. Lọc "Cảnh báo".
 - **Bản đồ:** thang tỷ lệ, tọa độ con trỏ, la bàn (Bắc luôn ở trên), vệt di chuyển của phao, thước đo nhiều điểm (Esc để thoát), nền sáng/tối.
 - **Lịch sử ở server:** mỗi phao lưu 300 mẫu gần nhất `{t, rssi, snr, lat?, lon?}` (khóa `h:<id>` trong Durable Object).
@@ -173,7 +180,7 @@ Phong cách "trung tâm điều hành": nền tối, số liệu monospace, mộ
 - **Trạm bờ (màu đỏ):** trạm có GPS riêng (ATK-S1216 ở UART1, GPIO17 TX / GPIO18 RX, 38400 baud), báo vị trí lên `/api/station`.
   Dashboard vẽ marker đỏ "TRẠM BỜ", chip "Trạm bờ" trên thanh trạng thái (số vệ tinh, chưa có GPS, mất tín hiệu quá 60 giây),
   đường nét đứt tới phao đang chọn, và "Cách trạm bờ" (khoảng cách + phương vị) trong thẻ viễn trắc. Mất fix thì giữ vị trí cuối.
-- Chỉ hiển thị dữ liệu thật của hệ thống (vị trí, RSSI, SNR, thời điểm nhận). Chưa có pin, tốc độ, hướng vì phao chưa gửi.
+- Chỉ hiển thị dữ liệu thật của hệ thống; không nội suy chuyển động của IMU khi mất gói.
 
 ## Bố cục đáp ứng (responsive)
 
