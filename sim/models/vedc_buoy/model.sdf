@@ -1,0 +1,450 @@
+<?xml version="1.0" ?>
+<!--
+  RedgeSCUE buoy, parametric stand-in until the CAD meshes arrive.
+
+  Catamaran 1.10 m long, 0.60 m wide. Model frame: x forward, y port, z up,
+  origin on the centreline at the design waterline.
+
+  Propulsion, as the STM32 firmware drives it (App/manual.c, actuators.c):
+    rear left / rear right  thruster on a steerable pod, steered together
+    front (centre)          bidirectional thruster on a pod that steers the
+                            opposite way to the rear ones (four-wheel style)
+
+  ArduPilot outputs (params/vedc_buoy.parm), control channel = SERVOn - 1:
+    SERVO1 ThrottleLeft  (73) -> rear left thrust
+    SERVO2 GroundSteering(26) -> both rear pods
+    SERVO3 ThrottleRight (74) -> rear right thrust
+    SERVO4 Throttle      (70) -> front thrust, 1500 us = stop
+    SERVO5 GroundSteering(26), reversed -> front pod
+
+  Guessed until measured on the real boat (see sim/README.md):
+    mass 8 kg, hulls 0.14 x 0.20 m, thrust +-15 N per rear motor and +-10 N
+    front, pods +-45 deg over 1000..2000 us.
+-->
+<sdf version="1.9">
+  <model name="vedc_buoy">
+
+    <!-- ===================== hull ===================== -->
+    <link name="base_link">
+      <inertial>
+        <pose>0 0 0.02 0 0 0</pose>
+        <mass>8.0</mass>
+        <!-- solid box 1.10 x 0.60 x 0.25 m -->
+        <inertia>
+          <ixx>0.282</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.848</iyy>
+          <iyz>0</iyz>
+          <izz>1.047</izz>
+        </inertia>
+      </inertial>
+
+      <!-- Buoyancy and drag come from these collision shapes. -->
+      <collision name="hull_port_collision">
+        <pose>0 0.23 0.05 0 0 0</pose>
+        <geometry><box><size>1.10 0.14 0.20</size></box></geometry>
+      </collision>
+      <collision name="hull_stbd_collision">
+        <pose>0 -0.23 0.05 0 0 0</pose>
+        <geometry><box><size>1.10 0.14 0.20</size></box></geometry>
+      </collision>
+
+      <visual name="hull_port_visual">
+        <pose>0 0.23 0.05 0 0 0</pose>
+        <geometry><box><size>1.10 0.14 0.20</size></box></geometry>
+        <material>
+          <ambient>1.0 0.35 0.0 1</ambient>
+          <diffuse>1.0 0.40 0.05 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+      <visual name="hull_stbd_visual">
+        <pose>0 -0.23 0.05 0 0 0</pose>
+        <geometry><box><size>1.10 0.14 0.20</size></box></geometry>
+        <material>
+          <ambient>1.0 0.35 0.0 1</ambient>
+          <diffuse>1.0 0.40 0.05 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+      <visual name="deck_visual">
+        <pose>-0.05 0 0.16 0 0 0</pose>
+        <geometry><box><size>0.80 0.60 0.02</size></box></geometry>
+        <material>
+          <ambient>0.85 0.85 0.85 1</ambient>
+          <diffuse>0.90 0.90 0.90 1</diffuse>
+        </material>
+      </visual>
+      <visual name="electronics_box_visual">
+        <pose>-0.10 0 0.22 0 0 0</pose>
+        <geometry><box><size>0.30 0.22 0.10</size></box></geometry>
+        <material>
+          <ambient>0.15 0.15 0.15 1</ambient>
+          <diffuse>0.20 0.20 0.20 1</diffuse>
+        </material>
+      </visual>
+      <!-- Flight controller IMU, in the electronics box. On the hull link itself:
+           a light IMU link on a fixed joint picked up solver jitter. -->
+      <sensor name="imu_sensor" type="imu">
+        <pose degrees="true">-0.10 0 0.20 180 0 0</pose>
+        <always_on>1</always_on>
+        <update_rate>1000.0</update_rate>
+      </sensor>
+      <!-- struts from the deck down to the three pods -->
+      <visual name="strut_rear_left_visual">
+        <pose>-0.50 0.23 0.02 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.12</length></cylinder></geometry>
+        <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
+      </visual>
+      <visual name="strut_rear_right_visual">
+        <pose>-0.50 -0.23 0.02 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.12</length></cylinder></geometry>
+        <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
+      </visual>
+      <visual name="strut_front_visual">
+        <pose>0.45 0 0.04 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.24</length></cylinder></geometry>
+        <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ===================== pods ===================== -->
+    <!-- Each pod: a yaw joint (servo) and a thruster joint along the pod's x. -->
+    <link name="pod_rear_left_link">
+      <pose>-0.50 0.23 -0.10 0 0 0</pose>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia><ixx>1e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-4</iyy><iyz>0</iyz><izz>1e-4</izz></inertia>
+      </inertial>
+      <visual name="visual">
+        <pose>0 0 0 0 1.5708 0</pose>
+        <geometry><cylinder><radius>0.022</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="pod_rear_left_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>pod_rear_left_link</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-0.8</lower><upper>0.8</upper><effort>1e6</effort></limit>
+        <dynamics><damping>0.05</damping></dynamics>
+      </axis>
+    </joint>
+    <link name="prop_rear_left_link">
+      <pose>-0.57 0.23 -0.10 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <!-- far above a real prop, as in the BlueBoat model: a light spinning link destabilises the solver -->
+        <inertia><ixx>0.1</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.1</iyy><iyz>0</iyz><izz>0.1</izz></inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry><box><size>0.01 0.07 0.012</size></box></geometry>
+        <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="prop_rear_left_joint" type="revolute">
+      <parent>pod_rear_left_link</parent>
+      <child>prop_rear_left_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+        <dynamics><damping>0.02</damping></dynamics>
+      </axis>
+    </joint>
+
+    <link name="pod_rear_right_link">
+      <pose>-0.50 -0.23 -0.10 0 0 0</pose>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia><ixx>1e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-4</iyy><iyz>0</iyz><izz>1e-4</izz></inertia>
+      </inertial>
+      <visual name="visual">
+        <pose>0 0 0 0 1.5708 0</pose>
+        <geometry><cylinder><radius>0.022</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="pod_rear_right_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>pod_rear_right_link</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-0.8</lower><upper>0.8</upper><effort>1e6</effort></limit>
+        <dynamics><damping>0.05</damping></dynamics>
+      </axis>
+    </joint>
+    <link name="prop_rear_right_link">
+      <pose>-0.57 -0.23 -0.10 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <!-- far above a real prop, as in the BlueBoat model: a light spinning link destabilises the solver -->
+        <inertia><ixx>0.1</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.1</iyy><iyz>0</iyz><izz>0.1</izz></inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry><box><size>0.01 0.07 0.012</size></box></geometry>
+        <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="prop_rear_right_joint" type="revolute">
+      <parent>pod_rear_right_link</parent>
+      <child>prop_rear_right_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+        <dynamics><damping>0.02</damping></dynamics>
+      </axis>
+    </joint>
+
+    <link name="pod_front_link">
+      <pose>0.45 0 -0.10 0 0 0</pose>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia><ixx>1e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-4</iyy><iyz>0</iyz><izz>1e-4</izz></inertia>
+      </inertial>
+      <visual name="visual">
+        <pose>0 0 0 0 1.5708 0</pose>
+        <geometry><cylinder><radius>0.022</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="pod_front_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>pod_front_link</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-0.8</lower><upper>0.8</upper><effort>1e6</effort></limit>
+        <dynamics><damping>0.05</damping></dynamics>
+      </axis>
+    </joint>
+    <link name="prop_front_link">
+      <pose>0.38 0 -0.10 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <!-- far above a real prop, as in the BlueBoat model: a light spinning link destabilises the solver -->
+        <inertia><ixx>0.1</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.1</iyy><iyz>0</iyz><izz>0.1</izz></inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry><box><size>0.01 0.07 0.012</size></box></geometry>
+        <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="prop_front_joint" type="revolute">
+      <parent>pod_front_link</parent>
+      <child>prop_front_link</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+        <dynamics><damping>0.02</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ===================== sensors ===================== -->
+    <!-- Bow sensor mast: the Pi's camera and LD14. -->
+    <link name="sensor_mast_link">
+      <pose>0.30 0 0.30 0 0 0</pose>
+      <inertial>
+        <mass>0.2</mass>
+        <inertia><ixx>1e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-4</iyy><iyz>0</iyz><izz>1e-4</izz></inertia>
+      </inertial>
+      <visual name="mast_visual">
+        <pose>0 0 -0.06 0 0 0</pose>
+        <geometry><cylinder><radius>0.015</radius><length>0.12</length></cylinder></geometry>
+        <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+      </visual>
+      <visual name="head_visual">
+        <geometry><box><size>0.06 0.08 0.06</size></box></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+      <!-- Pi camera: horizontal FOV matches camera.horizontal_fov_deg (100 deg). -->
+      <sensor name="camera" type="camera">
+        <pose>0.04 0 0 0 0 0</pose>
+        <always_on>1</always_on>
+        <update_rate>15</update_rate>
+        <topic>vedc_buoy/camera</topic>
+        <camera>
+          <horizontal_fov>1.745</horizontal_fov>
+          <image><width>640</width><height>480</height><format>R8G8B8</format></image>
+          <clip><near>0.05</near><far>200</far></clip>
+        </camera>
+      </sensor>
+      <!-- LD14: 360 deg, 0.15 to 8 m, about 6 Hz. -->
+      <sensor name="lidar" type="gpu_lidar">
+        <pose>0 0 0.05 0 0 0</pose>
+        <always_on>1</always_on>
+        <update_rate>6</update_rate>
+        <topic>vedc_buoy/lidar</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.14159</min_angle>
+              <max_angle>3.14159</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </vertical>
+          </scan>
+          <range><min>0.15</min><max>8.0</max><resolution>0.01</resolution></range>
+          <noise><type>gaussian</type><mean>0</mean><stddev>0.01</stddev></noise>
+        </lidar>
+      </sensor>
+    </link>
+    <joint name="sensor_mast_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>sensor_mast_link</child>
+    </joint>
+
+    <!-- ===================== plugins ===================== -->
+    <plugin name="gz::sim::systems::JointStatePublisher" filename="gz-sim-joint-state-publisher-system"/>
+    <plugin name="gz::sim::systems::OdometryPublisher" filename="gz-sim-odometry-publisher-system">
+      <odom_frame>odom</odom_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+      <dimensions>3</dimensions>
+    </plugin>
+
+    <!-- Thrusters: cmd_thrust in newtons along each pod's x axis. -->
+    <plugin name="gz::sim::systems::Thruster" filename="gz-sim-thruster-system">
+      <namespace>vedc_buoy</namespace>
+      <joint_name>prop_rear_left_joint</joint_name>
+      <thrust_coefficient>0.02</thrust_coefficient>
+      <fluid_density>1000</fluid_density>
+      <propeller_diameter>0.06</propeller_diameter>
+      <velocity_control>0</velocity_control>
+      <use_angvel_cmd>0</use_angvel_cmd>
+    </plugin>
+    <plugin name="gz::sim::systems::Thruster" filename="gz-sim-thruster-system">
+      <namespace>vedc_buoy</namespace>
+      <joint_name>prop_rear_right_joint</joint_name>
+      <thrust_coefficient>0.02</thrust_coefficient>
+      <fluid_density>1000</fluid_density>
+      <propeller_diameter>0.06</propeller_diameter>
+      <velocity_control>0</velocity_control>
+      <use_angvel_cmd>0</use_angvel_cmd>
+    </plugin>
+    <plugin name="gz::sim::systems::Thruster" filename="gz-sim-thruster-system">
+      <namespace>vedc_buoy</namespace>
+      <joint_name>prop_front_joint</joint_name>
+      <thrust_coefficient>0.02</thrust_coefficient>
+      <fluid_density>1000</fluid_density>
+      <propeller_diameter>0.06</propeller_diameter>
+      <velocity_control>0</velocity_control>
+      <use_angvel_cmd>0</use_angvel_cmd>
+    </plugin>
+
+    <!-- Pod servos: position commands in radians. -->
+    <plugin name="gz::sim::systems::JointPositionController" filename="gz-sim-joint-position-controller-system">
+      <joint_name>pod_rear_left_joint</joint_name>
+      <topic>/model/vedc_buoy/joint/pod_rear_left_joint/cmd_pos</topic>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>12</p_gain>
+      <cmd_max>7</cmd_max>
+      <cmd_min>-7</cmd_min>
+    </plugin>
+    <plugin name="gz::sim::systems::JointPositionController" filename="gz-sim-joint-position-controller-system">
+      <joint_name>pod_rear_right_joint</joint_name>
+      <topic>/model/vedc_buoy/joint/pod_rear_right_joint/cmd_pos</topic>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>12</p_gain>
+      <cmd_max>7</cmd_max>
+      <cmd_min>-7</cmd_min>
+    </plugin>
+    <plugin name="gz::sim::systems::JointPositionController" filename="gz-sim-joint-position-controller-system">
+      <joint_name>pod_front_joint</joint_name>
+      <topic>/model/vedc_buoy/joint/pod_front_joint/cmd_pos</topic>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>12</p_gain>
+      <cmd_max>7</cmd_max>
+      <cmd_min>-7</cmd_min>
+    </plugin>
+
+    <plugin name="gz::sim::systems::Hydrodynamics" filename="gz-waves1-hydrodynamics-system">
+      <enable>vedc_buoy::base_link</enable>
+      <hydrodynamics>
+        <damping_on>1</damping_on>
+        <viscous_drag_on>1</viscous_drag_on>
+        <pressure_drag_on>1</pressure_drag_on>
+      </hydrodynamics>
+    </plugin>
+
+    <!--
+      ArduPilot link. A COMMAND control publishes (pwm_norm + offset) * multiplier
+      on cmd_topic, pwm_norm = (pwm - servo_min) / (servo_max - servo_min).
+      offset -0.5 makes 1500 us the zero.
+    -->
+    <plugin name="ArduPilotPlugin" filename="ArduPilotPlugin">
+      <fdm_addr>127.0.0.1</fdm_addr>
+      <fdm_port_in>9002</fdm_port_in>
+      <connectionTimeoutMaxCount>5</connectionTimeoutMaxCount>
+      <lock_step>1</lock_step>
+      <gazeboXYZToNED degrees="true">0 0 0 180 0 90</gazeboXYZToNED>
+      <modelXYZToAirplaneXForwardZDown degrees="true">0 0 0 180 0 0</modelXYZToAirplaneXForwardZDown>
+      <imuName>base_link::imu_sensor</imuName>
+
+      <!-- SERVO1 ThrottleLeft: +-15 N -->
+      <control channel="0">
+        <jointName>prop_rear_left_joint</jointName>
+        <multiplier>30</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>COMMAND</type>
+        <cmd_topic>/model/vedc_buoy/joint/prop_rear_left_joint/cmd_thrust</cmd_topic>
+      </control>
+      <!-- SERVO2 GroundSteering: rear pods, +-45 deg; positive (bow right) turns them anticlockwise -->
+      <control channel="1">
+        <jointName>pod_rear_left_joint</jointName>
+        <multiplier>1.5708</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>COMMAND</type>
+        <cmd_topic>/model/vedc_buoy/joint/pod_rear_left_joint/cmd_pos</cmd_topic>
+      </control>
+      <control channel="1">
+        <jointName>pod_rear_right_joint</jointName>
+        <multiplier>1.5708</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>COMMAND</type>
+        <cmd_topic>/model/vedc_buoy/joint/pod_rear_right_joint/cmd_pos</cmd_topic>
+      </control>
+      <!-- SERVO3 ThrottleRight: +-15 N -->
+      <control channel="2">
+        <jointName>prop_rear_right_joint</jointName>
+        <multiplier>30</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>COMMAND</type>
+        <cmd_topic>/model/vedc_buoy/joint/prop_rear_right_joint/cmd_thrust</cmd_topic>
+      </control>
+      <!-- SERVO4 Throttle: front motor, +-10 N, 1500 us stop -->
+      <control channel="3">
+        <jointName>prop_front_joint</jointName>
+        <multiplier>20</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>COMMAND</type>
+        <cmd_topic>/model/vedc_buoy/joint/prop_front_joint/cmd_thrust</cmd_topic>
+      </control>
+      <!-- SERVO5 GroundSteering reversed: front pod, opposite to the rear ones -->
+      <control channel="4">
+        <jointName>pod_front_joint</jointName>
+        <multiplier>1.5708</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>COMMAND</type>
+        <cmd_topic>/model/vedc_buoy/joint/pod_front_joint/cmd_pos</cmd_topic>
+      </control>
+    </plugin>
+  </model>
+</sdf>
