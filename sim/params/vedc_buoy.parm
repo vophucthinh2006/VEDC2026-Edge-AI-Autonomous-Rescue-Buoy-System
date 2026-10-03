@@ -1,0 +1,32 @@
+# ArduPilot Rover parameters for the simulated VEDC buoy (sim/models/vedc_buoy).
+# Loaded on top of rover.parm + rover-skid.parm.
+
+# Boat: no wheel encoders, drifts when stopped, Loiter holds position.
+FRAME_CLASS     2
+
+# Outputs, mirroring the STM32 firmware (App/actuators.c):
+#   rear motors skid-steer, all three pods steer, the front pod the opposite way.
+SERVO1_FUNCTION 73      # ThrottleLeft  -> rear left motor
+SERVO2_FUNCTION 26      # GroundSteering -> both rear pods
+SERVO3_FUNCTION 74      # ThrottleRight -> rear right motor
+SERVO4_FUNCTION 70      # Throttle      -> front motor, bidirectional, 1500 us stop
+SERVO5_FUNCTION 26      # GroundSteering -> front pod
+SERVO5_REVERSED 1
+# Pod swing like RUDDER_SPAN_US = 250 us each side of centre (+-22.5 deg in the model).
+SERVO2_MIN      1250
+SERVO2_MAX      1750
+SERVO5_MIN      1250
+SERVO5_MAX      1750
+
+# Cruise: guessed for an 8 kg hull with +-15 N per rear motor; the real buoy is
+# capped lower (Pi max_speed_mps 0.5, AUTO throttle 0.5). Retune when measured.
+CRUISE_SPEED    1.5
+CRUISE_THROTTLE 50
+WP_SPEED        1.5
+WP_RADIUS       2.0
+
+# Failsafes, the same intent as the STM32 watchdog:
+# lost GCS heartbeat (Mission Planner / shore station) -> RTL, home is the launch point.
+FS_GCS_ENABLE   1
+FS_ACTION       1
+FS_TIMEOUT      5
