@@ -62,16 +62,21 @@ function applyFollowBtn() { $('btn-follow').setAttribute('aria-pressed', String(
 // ================= GIÁM SÁT =================
 function pinIcon(id, b) {
   const active = id === state.selected;
+  // Mũi tên hướng mũi phao khi có yaw (giống biểu tượng phương tiện trên Mission Planner)
+  const arrow = b.hasAttitude ? `<b class="hdg" style="transform:rotate(${b.yaw}deg)"></b>` : '';
   return L.divIcon({
     className: '', iconSize: [22, 22], iconAnchor: [11, 11],
-    html: `<div class="pin ${statusOf(b)}${active ? ' active' : ''}"><i></i></div>`,
+    html: `<div class="pin ${statusOf(b)}${active ? ' active' : ''}">${arrow}<i></i></div>`,
   });
 }
+
+// "-87 dBm" cho LoRa, "MAVLink" cho cầu nối không có RSSI
+const linkLabel = b => b.rssi === null ? 'MAVLink' : `${b.rssi} dBm`;
 
 function updateMarker(id) {
   const b = state.buoys.get(id);
   if (!b || !b.hasPos) return;
-  const label = `${id} ${b.rssi} dBm`;
+  const label = `${id} ${linkLabel(b)}`;
   if (b.marker) {
     b.marker.setLatLng([b.lat, b.lon]).setIcon(pinIcon(id, b));
     b.marker.setTooltipContent(label);
@@ -105,10 +110,15 @@ function renderList() {
     const meta = document.createElement('div');
     const name = document.createElement('div'); name.className = 'name'; name.textContent = id;
     const sub = document.createElement('div'); sub.className = 'sub';
-    sub.textContent = `${STATUS_TEXT[statusOf(b)]} | ${fmtAgeSec((Date.now() - b.lastSeen) / 1000)} | ${b.rssi} dBm`;
+    sub.textContent = `${STATUS_TEXT[statusOf(b)]} | ${fmtAgeSec((Date.now() - b.lastSeen) / 1000)} | ${linkLabel(b)}`;
     meta.append(name, sub);
-    const br = document.createElement('div'); br.className = 'bars l' + sigLevel(b.rssi);
-    br.append(...[1, 2, 3, 4].map(() => document.createElement('i')));
+    let br;
+    if (b.rssi === null) {
+      br = document.createElement('span'); br.className = 'link-tag'; br.textContent = 'MAV';
+    } else {
+      br = document.createElement('div'); br.className = 'bars l' + sigLevel(b.rssi);
+      br.append(...[1, 2, 3, 4].map(() => document.createElement('i')));
+    }
     el.append(dot, meta, br);
     el.addEventListener('click', () => select(id));
     list.appendChild(el);
@@ -497,12 +507,18 @@ function onMissionMessage(m) {
 function onBuoyMessage(m) {
   const id = String(m.id || 'PHAO-01');
   const existed = state.buoys.get(id);
-  const prev = existed ? { fix: existed.fix, imuOk: existed.imuOk } : null;
+  const prev = existed ? { fix: existed.fix, imuOk: existed.imuOk, nav: existed.nav } : null;
   const b = existed || { hasPos: false, marker: null };
   const snapshot = (Number(m.age_s) || 0) > 0;   // bản phát lại lúc mở trang, không phải gói mới
   b.fix = m.fix;
-  b.rssi = Number(m.rssi); b.snr = Number(m.snr); b.raw = String(m.raw ?? '');
+  // Cầu nối MAVLink không đi qua LoRa nên không có RSSI/SNR: để null, giao diện hiện "MAVLink"
+  b.link = m.link === 'mavlink' ? 'mavlink' : 'lora';
+  b.rssi = Number.isFinite(m.rssi) ? m.rssi : null;
+  b.snr = Number.isFinite(m.snr) ? m.snr : null;
+  b.raw = String(m.raw ?? '');
   b.lastSeen = Date.now() - (Number(m.age_s) || 0) * 1000;
+  // Nhóm điều hướng (ARMED, chế độ, tốc độ, ga, waypoint, pin, GPS) chỉ có ở MAVLink
+  b.nav = m.nav && typeof m.nav === 'object' ? m.nav : null;
   const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S'].includes(m.mode);
   if (attitudeValid) {
     b.hasAttitude = true;
@@ -517,8 +533,12 @@ function onBuoyMessage(m) {
   if (!state.selected) state.selected = id;
   state.lastRx = Math.max(state.lastRx, b.lastSeen);
 
-  if (!snapshot) {
-    const s = { t: b.lastSeen, rssi: b.rssi, snr: b.snr };
+  // MAVLink đến 1-2 gói/giây: lấy mẫu lịch sử mỗi 2 giây để 300 mẫu phủ được 10 phút vệt đi
+  const sampleDue = b.link !== 'mavlink' || !(b.lastSample > b.lastSeen - 2000);
+  if (!snapshot && sampleDue) {
+    b.lastSample = b.lastSeen;
+    const s = { t: b.lastSeen };
+    if (b.rssi !== null) { s.rssi = b.rssi; s.snr = b.snr; }
     if (m.fix === 1 && b.hasPos) { s.lat = b.lat; s.lon = b.lon; }
     pushHistory(id, s);
   }
@@ -556,7 +576,8 @@ function onStationMessage(m) {
 
 function onHistoryMessage(m) {
   if (!Array.isArray(m.points)) return;
-  const pts = m.points.filter(p => Number.isFinite(p.t) && Number.isFinite(p.rssi));
+  // Mẫu MAVLink không có RSSI nhưng có tọa độ: vẫn giữ để vẽ vệt di chuyển
+  const pts = m.points.filter(p => Number.isFinite(p.t) && (Number.isFinite(p.rssi) || Number.isFinite(p.lat)));
   state.history.set(String(m.id), pts.slice(-300));
   updateTrail(String(m.id));
   if (String(m.id) === state.selected) renderDetail();

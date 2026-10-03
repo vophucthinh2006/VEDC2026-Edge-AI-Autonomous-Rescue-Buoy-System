@@ -3,6 +3,7 @@ import { state, statusOf, ageSec, attitudeAgeSec, ATTITUDE_STALE_SEC, STATUS_TEX
 import { fmtAgeSec, rssiClass, NONE } from '../util/format.js';
 import { toDMS, distM, bearingDeg } from '../util/geo.js';
 import { fmtDist } from '../util/format.js';
+import { renderHud } from './hud.js';
 
 const $ = id => document.getElementById(id);
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -143,13 +144,25 @@ export function renderDetail() {
   }
   $('d-lat-stale').hidden = !(b.hasPos && b.fix !== 1);   // tọa độ là vị trí cuối, không phải bản tin hiện tại
 
+  // MAVLink: HUD thay cho thẻ tư thế, không có RSSI/SNR nên ẩn khối tín hiệu LoRa
+  const hud = renderHud(b);
+  $('d-attitude').hidden = hud;
+  const lora = b.rssi !== null;
+  $('d-signal').hidden = !lora;
+  $('d-link-mav').hidden = lora;
+  if (!lora) {
+    $('d-age-mav').textContent = fmtAgeSec(ageSec(b));
+    $('d-raw').textContent = b.raw || NONE;
+    return;
+  }
+  renderAttitude(b);
+
   const cls = rssiClass(b.rssi);
   $('d-rssi').textContent = b.rssi;
   $('d-rssi').className = 'big mono ' + cls;
   $('d-snr').textContent = b.snr.toFixed(1);
   $('d-age').textContent = fmtAgeSec(ageSec(b));
   $('d-age').className = 'big mono ' + (st === 'stale' ? 'warn' : '');
-  renderAttitude(b);
 
   const frac = Math.min(1, Math.max(0, (b.rssi + 130) / 90));
   const segs = $('d-rssi-bar').children;
