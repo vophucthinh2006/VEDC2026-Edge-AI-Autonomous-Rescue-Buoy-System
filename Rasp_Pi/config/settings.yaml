@@ -13,7 +13,7 @@ vehicle:
   slow_distance_m: 2.00
   influence_distance_m: 3.00
   arrive_radius_m: 4.0
-  target_standoff_m: 1.5
+  target_standoff_m: 2.0     # from the boat's GPS position; the bow is 0.55 m ahead of it
   target_timeout_s: 2.0
   max_turn_rate_deg_s: 35.0
   max_pitch_deg: 35.0
@@ -33,8 +33,9 @@ planner:
   cluster_gap_m: 0.25
 camera:
   enabled: true
+  source: device              # device: the USB camera below. gazebo: the simulator's camera topic
   device: 0
-  horizontal_fov_deg: 100.0
+  horizontal_fov_deg: 60.0    # OV9726 with the 60 deg lens
   model_path: /home/khanh/human_detect_project/detect.tflite
   confidence_threshold: 0.60
   detection_hold_s: 0.40
@@ -42,16 +43,74 @@ camera:
   lidar_association_half_angle_deg: 8.0
   min_target_distance_m: 1.0
   max_target_distance_m: 8.0
-  # lidar: range from the LD14. bbox: range from the person box height (no LiDAR, about +-30 %).
+  # lidar: range from the LiDAR return at the person's bearing, none without one.
+  # bbox: range from the person box height (no LiDAR, about +-30 %).
+  # fused: the LiDAR return when there is one, else the box.
   distance_source: bbox
-  vertical_fov_deg: 70.0      # calibrate with a person at a measured distance
+  vertical_fov_deg: 47.0      # 60 deg horizontal at 4:3; calibrate with a person at a measured distance
+  # Height the box covers. 1.7 is a standing person; a swimmer shows only head and
+  # shoulders (about 0.4 m), so with 1.7 the range to a person in the water reads several times too far.
   person_height_m: 1.7
+  # A box whose bottom edge is more than elevated_min_deg above the horizon is somebody standing
+  # clear of the water (on a roof): their box covers standing_height_m.
+  standing_height_m: 1.7
+  elevated_min_deg: 0.5
   # Camera servo (STM32 CAM packet) follows the person, positive right of the bow.
   pan_gain: 0.25
   pan_deadband_deg: 2.0
   pan_limit_deg: 80.0
   recenter_after_s: 1.5
   recenter_step_deg: 3.0
+  # Search sweep, while the autopilot is armed in one of `modes` and nobody is in view. The servo
+  # steps through angles_deg (from the bow, positive right), waits settle_s for it to stop, looks
+  # at dwell_frames frames, steps on. With the 60 deg lens, 0 and +-60 cover the 180 deg ahead;
+  # ahead is listed twice because that is where the boat is going. Any other mode: camera ahead.
+  scan:
+    enabled: true
+    angles_deg: [0, -60, 0, 60]
+    settle_s: 0.25
+    dwell_frames: 3
+    modes: [AUTO]
+# Pixhawk link (rescue_main.py). TELEM2 on the boat; config/sim.yaml points it at the simulator.
+mavlink:
+  url: /dev/serial0
+  baud: 921600
+# Rescue logic on top of the autopilot (modules/rescue.py).
+rescue:
+  search_mode: AUTO           # the Pi only takes over while the autopilot runs the search pattern
+  hold_mode: LOITER           # keeps station next to the person
+  after_hold: AUTO            # AUTO resumes the pattern where it stopped; RTL brings the boat home
+  confirm_s: 1.0              # a detection must persist this long before the takeover,
+  confirm_frames: 3           # in at least this many frames,
+  confirm_gap_s: 1.0          # with no gap longer than this
+  hold_s: 20.0
+  lost_s: 5.0                 # person out of sight this long on the way: back to the search
+  arrive_m: 0.5               # within stand-off + this counts as arrived
+  revisit_radius_m: 8.0       # a person already attended is not approached again
+  goto_period_s: 1.0
+  stall_s: 10.0               # no closer for this long on the approach: report the person as unreachable and hold
+  # Within stand-off + hold_clear_within_m of the person, a LiDAR return closer than hold_clear_m
+  # ahead (the wall under somebody on a roof) ends the approach there.
+  hold_clear_m: 1.5
+  hold_clear_within_m: 3.0
+  hold_min_m: 0.9             # anything this close to the LiDAR, on any side, ends the approach wherever it is
+  # A search waypoint on top of an obstacle: within blocked_within_m of it, no closer for blocked_s,
+  # something on the LiDAR inside blocked_obstacle_m. The mission then moves on to its next item.
+  blocked_s: 20.0
+  blocked_within_m: 6.0
+  blocked_obstacle_m: 4.0
+  # Or sooner: LiDAR returns within blocked_clear_m of the waypoint itself for blocked_clear_s.
+  blocked_clear_m: 1.5
+  blocked_clear_s: 3.0
+  detector: camera            # camera: the TFLite model. simulated: known positions (sim section)
+# Obstacles sent to the autopilot's avoidance (modules/obstacle_feed.py): MAVLink OBSTACLE_DISTANCE.
+avoidance:
+  rate_hz: 5.0
+  min_range_m: 0.15
+  max_range_m: 8.0
+  # Circle around a person already attended. The autopilot adds OA_MARGIN_MAX (1 m) to it; the
+  # two together must stay below the stand-off, or the boat cannot leave the person it holds next to.
+  keep_out_radius_m: 0.4
 logging:
   level: INFO
   directory: logs
