@@ -1,2 +1,8 @@
 # Editor / IDE local settings (absolute paths per machine)
 .vscode/
+
+# Python bytecode
+__pycache__/
+
+# Detection model: downloaded, not versioned (link in Rasp_Pi/README.md)
+Rasp_Pi/models/
