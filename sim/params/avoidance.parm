@@ -1,0 +1,21 @@
+# Obstacle avoidance fed by the Pi. Loaded on top of vedc_buoy.parm only when the Pi code runs
+# (run_boat.sh --pi): with PRX1_TYPE set and nobody sending OBSTACLE_DISTANCE, ArduPilot's
+# pre-arm check refuses to arm, which is right on the boat and a nuisance for a simulator
+# session with Mission Planner alone.
+#
+# The Pi sends LiDAR clusters and keep-out circles around people already attended
+# (Rasp_Pi/modules/obstacle_feed.py); BendyRuler bends the path around them in AUTO and GUIDED.
+PRX1_TYPE       2       # MAVLink
+OA_TYPE         1       # BendyRuler
+OA_BR_LOOKAHEAD 5       # the default 15 m is beyond the LiDAR's 8 m
+OA_MARGIN_MAX   1.0     # clearance BendyRuler keeps; 1.5 would not let the boat between the tree and the houses
+# Simple avoidance (stop short of what the LiDAR sees) off, fence only. While it limits the speed
+# near an obstacle Rover refuses to turn at low speed (mode.cpp, navigate_to_waypoint), so the boat
+# could not pivot away from the obstacle BendyRuler was steering it around, and stayed there.
+AVOID_ENABLE    1
+# BendyRuler often asks for a heading far off the bow (around an obstacle the boat has already
+# closed on). Without pivot turns Rover answers a large heading error with zero speed, and a
+# boat at zero speed does not turn: it sat still for minutes. Above 60 deg it now turns on the
+# spot with the rear motors, one ahead and one astern. Needs reversible rear ESCs on the boat.
+WP_PIVOT_ANGLE  60
+WP_PIVOT_RATE   40

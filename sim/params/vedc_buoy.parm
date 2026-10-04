@@ -18,12 +18,33 @@ SERVO2_MAX      1750
 SERVO5_MIN      1250
 SERVO5_MAX      1750
 
-# Cruise: guessed for an 8 kg hull with +-15 N per rear motor; the real buoy is
+# Battery: 12 V, 5600 mAh (team figure). Assumed a 3S lithium pack, 12.6 V full:
+# check the chemistry before trusting the low-voltage failsafe on the real boat.
+BATT_CAPACITY   5600
+SIM_BATT_VOLTAGE 12.6
+SIM_BATT_CAP_AH 5.6
+BATT_LOW_VOLT   10.5
+BATT_FS_LOW_ACT 1       # RTL
+
+# Cruise: guessed for a 15 kg hull with +-15 N per rear motor; the real buoy is
 # capped lower (Pi max_speed_mps 0.5, AUTO throttle 0.5). Retune when measured.
-CRUISE_SPEED    1.5
-CRUISE_THROTTLE 50
-WP_SPEED        1.5
+CRUISE_SPEED    1.0
+CRUISE_THROTTLE 20      # measured in the sim: about 18 % throttle holds 1.0 m/s
+WP_SPEED        1.0     # search speed: the camera only confirms a person inside about 5 m
 WP_RADIUS       2.0
+
+# Steering rate controller, tuned in the sim on the 15 kg hull. The rover default
+# feed-forward (0.2) left the heading loop to P and I alone and the boat wove
+# +-1.6 m around the track; at 80 % steering it turns 48 deg/s, about 1 rad/s at
+# full steering, which puts the feed-forward near 0.8. Track error now +-0.3 m.
+# Retune on the real boat: the turn rate depends on the real thrust and drag.
+ATC_STR_RAT_FF  0.8
+ATC_STR_RAT_P   0.2
+ATC_STR_RAT_I   0.2
+
+# Station keeping next to a person: correct once 0.5 m off the loiter point. The default
+# 2 m let the boat drift to almost 5 m away; 1 m let it drift to 0.8 m from the person.
+LOIT_RADIUS     0.5
 
 # Failsafes, the same intent as the STM32 watchdog:
 # lost GCS heartbeat (Mission Planner / shore station) -> RTL, home is the launch point.
