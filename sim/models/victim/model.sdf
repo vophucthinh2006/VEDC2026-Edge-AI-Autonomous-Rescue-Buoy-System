@@ -1,0 +1,67 @@
+<?xml version="1.0" ?>
+<!--
+  A person in the water wearing an orange life jacket, one arm raised.
+  Origin at the waterline; only head, shoulders and the arm are above it.
+
+  Static: it does not bob with the waves (about 0.1 m here) and costs no
+  hydrodynamics time. The head tops out near 0.38 m, the raised hand near
+  0.65 m: the buoy's lidar plane (about 0.37 m) only catches the arm, as an
+  LD14 would on a real swimmer. The range has to come from the camera.
+-->
+<sdf version="1.9">
+  <model name="victim">
+    <static>true</static>
+    <link name="body">
+      <!-- torso in a life jacket, mostly under water -->
+      <visual name="jacket">
+        <pose>0 0 -0.08 0 0 0</pose>
+        <geometry><box><size>0.30 0.46 0.50</size></box></geometry>
+        <material>
+          <ambient>1.0 0.35 0.0 1</ambient>
+          <diffuse>1.0 0.40 0.02 1</diffuse>
+          <specular>0.2 0.2 0.2 1</specular>
+        </material>
+      </visual>
+      <collision name="jacket_collision">
+        <pose>0 0 -0.08 0 0 0</pose>
+        <geometry><box><size>0.30 0.46 0.50</size></box></geometry>
+      </collision>
+      <visual name="neck">
+        <pose>0 0 0.20 0 0 0</pose>
+        <geometry><cylinder><radius>0.055</radius><length>0.08</length></cylinder></geometry>
+        <material><ambient>0.85 0.62 0.48 1</ambient><diffuse>0.87 0.65 0.50 1</diffuse></material>
+      </visual>
+      <visual name="head">
+        <pose>0 0 0.28 0 0 0</pose>
+        <geometry><sphere><radius>0.105</radius></sphere></geometry>
+        <material><ambient>0.85 0.62 0.48 1</ambient><diffuse>0.87 0.65 0.50 1</diffuse></material>
+      </visual>
+      <visual name="hair">
+        <pose>-0.012 0 0.315 0 0 0</pose>
+        <geometry><sphere><radius>0.098</radius></sphere></geometry>
+        <material><ambient>0.08 0.06 0.05 1</ambient><diffuse>0.10 0.08 0.06 1</diffuse></material>
+      </visual>
+      <!-- raised right arm -->
+      <visual name="arm_raised">
+        <pose>0 -0.27 0.38 -0.25 0 0</pose>
+        <geometry><cylinder><radius>0.042</radius><length>0.52</length></cylinder></geometry>
+        <material><ambient>0.85 0.62 0.48 1</ambient><diffuse>0.87 0.65 0.50 1</diffuse></material>
+      </visual>
+      <collision name="arm_raised_collision">
+        <pose>0 -0.27 0.38 -0.25 0 0</pose>
+        <geometry><cylinder><radius>0.042</radius><length>0.52</length></cylinder></geometry>
+      </collision>
+      <visual name="hand">
+        <pose>0 -0.335 0.65 0 0 0</pose>
+        <geometry><sphere><radius>0.05</radius></sphere></geometry>
+        <material><ambient>0.85 0.62 0.48 1</ambient><diffuse>0.87 0.65 0.50 1</diffuse></material>
+      </visual>
+      <!-- left arm resting on the water -->
+      <visual name="arm_floating">
+        <pose>0.05 0.36 0.02 1.35 0 0.2</pose>
+        <geometry><cylinder><radius>0.042</radius><length>0.45</length></cylinder></geometry>
+        <material><ambient>0.85 0.62 0.48 1</ambient><diffuse>0.87 0.65 0.50 1</diffuse></material>
+      </visual>
+    </link>
+  </model>
+</sdf>
