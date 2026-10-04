@@ -1,0 +1,19 @@
+<?xml version="1.0" ?>
+<!--
+  A person standing, origin at the feet: for a roof. Same mesh as victim_person, the
+  "Standing person" from Gazebo Fuel (OpenRobotics, CC0), downloaded on first use.
+-->
+<sdf version="1.9">
+  <model name="victim_standing">
+    <static>true</static>
+    <link name="body">
+      <visual name="person">
+        <geometry>
+          <mesh>
+            <uri>https://fuel.gazebosim.org/1.0/openrobotics/models/standing person/3/files/meshes/standing.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>

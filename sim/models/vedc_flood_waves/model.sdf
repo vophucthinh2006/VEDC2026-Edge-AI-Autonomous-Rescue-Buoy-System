@@ -1,0 +1,148 @@
+<?xml version='1.0' ?>
+<!--
+  vedc_waves for the flood scene: the lake waves in a narrow street would be wrong, so the wind is
+  down to 1.5 m/s (ripples). The brown tint below has no visible effect: the wave shader colours
+  the surface itself. Everything else as in vedc_waves;
+  keep the two files in step.
+-->
+<sdf version="1.6">
+  <model name="vedc_flood_waves">
+    <static>true</static>
+
+    <plugin
+        filename="gz-waves1-waves-model-system"
+        name="gz::sim::systems::WavesModel">
+      <static>0</static>
+      <update_rate>30</update_rate>
+      <wave>
+        <algorithm>fft</algorithm>
+        <tile_size>256</tile_size>
+        <cell_count>128</cell_count>
+        <wind_speed>1.5</wind_speed>
+        <wind_angle_deg>135</wind_angle_deg>
+        <steepness>2</steepness>
+      </wave>
+    </plugin>
+
+    <link name="base_link">
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://waves/materials/mesh_L256m_N256.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.45 0.33 0.18 0.96</ambient>
+          <diffuse>0.42 0.30 0.16 0.96</diffuse>
+          <specular>0.3 0.3 0.3 0.96</specular>
+          <pbr>
+            <metal>
+              <albedo_map>model://waves/materials/water.jpg</albedo_map>
+              <normal_map>model://waves/materials/wave_normals.dds</normal_map>
+              <environment_map>model://waves/materials/skybox_lowres.dds</environment_map>
+              <roughness>0.3</roughness>
+              <metalness>0.1</metalness>
+            </metal>
+          </pbr>
+        </material>
+
+        <plugin
+            filename="gz-waves1-waves-visual-system"
+            name="gz::sim::systems::WavesVisual">
+          <static>0</static>
+          <mesh_deformation_method>DYNAMIC_GEOMETRY</mesh_deformation_method>
+          <tiles_x>-0 0</tiles_x>
+          <tiles_y>-0 0</tiles_y>
+          <wave>
+            <algorithm>fft</algorithm>
+            <tile_size>256</tile_size>
+            <cell_count>128</cell_count>
+            <wind_speed>1.5</wind_speed>
+            <wind_angle_deg>135</wind_angle_deg>
+            <steepness>2</steepness>
+          </wave>
+
+          <!-- Upstream shader block, unchanged except the paths: the plugin
+               requires it even with DYNAMIC_GEOMETRY. -->
+          <shader language="metal">
+            <vertex>model://waves/materials/waves_vs.metal</vertex>
+            <fragment>model://waves/materials/waves_fs.metal</fragment>
+          </shader>
+          <param>
+            <shader>vertex</shader>
+            <name>world_matrix</name>
+          </param>
+          <param>
+            <shader>vertex</shader>
+            <name>worldviewproj_matrix</name>
+          </param>
+          <param>
+            <shader>vertex</shader>
+            <name>camera_position</name>
+          </param>
+          <param>
+            <shader>vertex</shader>
+            <name>rescale</name>
+            <value>0.5</value>
+            <type>float</type>
+          </param>
+          <param>
+            <shader>vertex</shader>
+            <name>bumpScale</name>
+            <value>128 128</value>
+            <type>float_array</type>
+          </param>
+          <param>
+            <shader>vertex</shader>
+            <name>bumpSpeed</name>
+            <value>0.01 0.01</value>
+            <type>float_array</type>
+          </param>
+          <param>
+            <shader>vertex</shader>
+            <name>t</name>
+            <value>TIME</value>
+          </param>
+          <param>
+            <shader>fragment</shader>
+            <name>deepColor</name>
+            <value>0.0 0.05 0.2 1.0</value>
+            <type>float_array</type>
+          </param>
+          <param>
+            <shader>fragment</shader>
+            <name>shallowColor</name>
+            <value>0.0 0.1 0.3 1.0</value>
+            <type>float_array</type>
+          </param>
+          <param>
+            <shader>fragment</shader>
+            <name>fresnelPower</name>
+            <value>5.0</value>
+            <type>float</type>
+          </param>
+          <param>
+            <shader>fragment</shader>
+            <name>hdrMultiplier</name>
+            <value>0.4</value>
+            <type>float</type>
+          </param>
+          <param>
+            <shader>fragment</shader>
+            <name>bumpMap</name>
+            <value>model://waves/materials/wave_normals.dds</value>
+            <type>texture</type>
+            <arg>0</arg>
+          </param>
+          <param>
+            <shader>fragment</shader>
+            <name>cubeMap</name>
+            <value>model://waves/materials/skybox_lowres.dds</value>
+            <type>texture_cube</type>
+            <arg>1</arg>
+          </param>
+        </plugin>
+      </visual>
+    </link>
+  </model>
+</sdf>
