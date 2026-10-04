@@ -49,6 +49,10 @@ def main() -> int:
     parser.add_argument("--detector", choices=("camera", "simulated"), help="overrides rescue.detector")
     parser.add_argument("--mavlink", help="overrides mavlink.url, e.g. udpin:0.0.0.0:14552")
     parser.add_argument("--no-scan", action="store_true", help="camera fixed ahead while searching (camera.scan.enabled off)")
+    parser.add_argument("--scan-mode", choices=("step", "sweep"), help="overrides camera.scan.mode")
+    parser.add_argument("--scan-rate", type=float, metavar="DEG_S", help="overrides camera.scan.sweep_rate_deg_s")
+    parser.add_argument("--viewer", type=int, nargs="?", const=8090, metavar="PORT",
+                        help="serve the live view of camera and LiDAR on http://<this machine>:PORT/ (default 8090)")
     args = parser.parse_args()
     config = load_config(args.config, args.overlay)
     if args.detector:
@@ -57,6 +61,10 @@ def main() -> int:
         config["mavlink"]["url"] = args.mavlink
     if args.no_scan:
         config["camera"]["scan"]["enabled"] = False
+    if args.scan_mode:
+        config["camera"]["scan"]["mode"] = args.scan_mode
+    if args.scan_rate:
+        config["camera"]["scan"]["sweep_rate_deg_s"] = args.scan_rate
     logging.basicConfig(level=getattr(logging, config["logging"]["level"].upper()),
                         format="%(asctime)s %(levelname)s %(threadName)s %(name)s: %(message)s")
     log = logging.getLogger("rescue")
@@ -69,7 +77,8 @@ def main() -> int:
 
     if config["rescue"]["detector"] == "simulated":
         from modules.detector_sim import SimulatedDetector
-        workers.append(SimulatedDetector(config["camera"], config["sim"], state, stop_event))
+        detector = SimulatedDetector(config["camera"], config["sim"], state, stop_event)
+        workers.append(detector)
     else:
         from modules.ai_vision import VisionWorker
         camera = config["camera"]
@@ -81,8 +90,9 @@ def main() -> int:
             def send_pan(_pan_deg: float) -> None:
                 return
         # The rescue logic reports the person itself, with a position; the worker's own callback is unused.
-        workers.append(VisionWorker(camera, state, stop_event, lambda _target: None, send_pan,
-                                    float(config["vehicle"]["target_standoff_m"])))
+        detector = VisionWorker(camera, state, stop_event, lambda _target: None, send_pan,
+                                float(config["vehicle"]["target_standoff_m"]))
+        workers.append(detector)
     avoidance = config["avoidance"]
     # The serial LiDAR (LDS-008) is not wired into this runtime yet: on the boat only the keep-outs are sent.
     lidar = None
@@ -92,6 +102,10 @@ def main() -> int:
     # LiDAR returns and keep-out circles around people already attended go to the autopilot, which
     # bends the path around them and returns to it. Started once the link is up.
     obstacle_feed = ObstacleFeed(avoidance, state, stop_event, mission.keep_outs, mission.attending, link.obstacle_distance)
+    if args.viewer:
+        from modules.viewer import Viewer   # needs OpenCV; only loaded when asked for
+        workers.append(Viewer(args.viewer, state, stop_event, avoidance, config["camera"], detector.view,
+                              mission.keep_outs, mission.attending, lambda: mission.phase.value))
     for worker in workers:
         worker.start()
 

@@ -8,10 +8,13 @@ The operator always wins: any mode change the Pi did not ask for (RC switch, gro
 ends the takeover at once.
 
 A search waypoint can land on something the operator could not see on the map: a tree, a car, a
-roof. The autopilot's avoidance then keeps the boat nosing around in front of it for ever. Two
+roof. The autopilot's avoidance then keeps the boat nosing around in front of it for ever. Three
 rules move the mission on to the next item, with a report to the shore: the LiDAR shows something
-right at the waypoint (decided from a distance, before the boat closes in), or the boat is near
-its waypoint, gets no closer for a while and has something on the LiDAR close by.
+right at the waypoint (decided from a distance, before the boat closes in); the boat is near its
+waypoint, gets no closer for a while and has something on the LiDAR close by; or, however far the
+waypoint (the middle of a large building), the boat has not come closer than its best for a long
+while. When the blocked waypoint is the last item there is nothing to move on to: the boat is put
+in blocked_last_mode (HOLD) instead of circling.
 """
 from __future__ import annotations
 
@@ -67,6 +70,9 @@ class RescueMission:
         self.blocked_obstacle_m = float(rescue.get("blocked_obstacle_m", 4.0))
         self.blocked_clear_m = float(rescue.get("blocked_clear_m", 1.5))
         self.blocked_clear_s = float(rescue.get("blocked_clear_s", 3.0))
+        self.blocked_far_s = float(rescue.get("blocked_far_s", 45.0))
+        self.blocked_arrived_m = float(rescue.get("blocked_arrived_m", 2.5))
+        self.blocked_last_mode = str(rescue.get("blocked_last_mode", "HOLD")).upper()
         self._wp_occupied_since: float | None = None
         self._wp = (-1, 0.0, 0.0)                                 # mission item, best distance to it, when
         self.phase = Phase.SEARCH
@@ -126,13 +132,18 @@ class RescueMission:
                        for o in snap.obstacles)
         self._wp_occupied_since = (self._wp_occupied_since or now) if occupied else None
         nearest = min((o.distance_m for o in snap.obstacles), default=float("inf"))
-        stuck = now - self._wp[2] > self.blocked_s and distance <= self.blocked_within_m and nearest <= self.blocked_obstacle_m
+        waited = now - self._wp[2]
+        stuck = waited > self.blocked_s and distance <= self.blocked_within_m and nearest <= self.blocked_obstacle_m
+        stuck = stuck or waited > self.blocked_far_s        # no closer than the best so far, wherever the waypoint is
+        # Inside the waypoint radius the boat has arrived and may be waiting there (a Delay): not stuck.
+        stuck = stuck and distance > self.blocked_arrived_m
         if not stuck and not (occupied and now - self._wp_occupied_since >= self.blocked_clear_s):
             return []
         self._wp, self._wp_occupied_since = (-1, 0.0, now), None
         # MISSION_CURRENT.total is the number of the last item (home, item 0, is not counted).
         if vehicle.mission_total and seq >= vehicle.mission_total:
-            return [Action("report", text=f"WP {seq} BLOCKED")]         # the last item: nothing to move on to
+            # The last item: nothing to move on to. Stop here rather than circle; the operator decides.
+            return [Action("mode", mode=self.blocked_last_mode), Action("report", text=f"WP {seq} BLOCKED, {self.blocked_last_mode}")]
         return [Action("skip", seq=seq + 1), Action("report", text=f"WP {seq} BLOCKED, SKIPPED")]
 
     def step(self, snap: Snapshot, now: float) -> list[Action]:

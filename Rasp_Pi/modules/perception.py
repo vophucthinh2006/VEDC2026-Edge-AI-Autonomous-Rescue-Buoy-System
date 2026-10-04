@@ -113,6 +113,57 @@ class ScanPattern:
         return self.target_deg
 
 
+class SweepPattern:
+    """Search sweep of the camera servo, the smooth way: back and forth between -limit and +limit at
+    a constant rate. Every frame is used; the angle at capture is the commanded one, which a servo
+    many times faster than the sweep follows closely. Same interface as ScanPattern.
+
+    The slower the sweep, the longer a person stays in view, and the longer the camera is away
+    from each side: at rate_deg_s a full cycle takes 4 * limit / rate seconds, during which the
+    boat keeps moving.
+    """
+
+    def __init__(self, limit_deg: float, rate_deg_s: float) -> None:
+        self.limit, self.rate = abs(float(limit_deg)), abs(float(rate_deg_s))
+        self._angle, self._direction, self._at = 0.0, -1.0, 0.0
+
+    @property
+    def target_deg(self) -> float:
+        return self._angle
+
+    def start(self, now: float, pan_deg: float) -> float:
+        """Begin (or resume) from where the camera points, heading for the nearer end first."""
+        self._angle = max(-self.limit, min(self.limit, float(pan_deg)))
+        self._direction = 1.0 if self._angle > 0 else -1.0
+        self._at = now
+        return self._angle
+
+    def usable(self, _now: float) -> bool:
+        return True
+
+    def frame_done(self, now: float) -> float:
+        """Advance to `now` and return the angle to command."""
+        travel = self.rate * max(0.0, now - self._at)
+        self._at = now
+        while travel > 0.0:
+            room = self.limit - self._angle if self._direction > 0 else self._angle + self.limit
+            if travel < room:
+                self._angle += self._direction * travel
+                break
+            self._angle = self.limit * self._direction
+            self._direction, travel = -self._direction, travel - room
+        return self._angle
+
+
+def make_scan(scan: dict | None) -> ScanPattern | SweepPattern | None:
+    """The search pattern of camera.scan, or None when it is off."""
+    if not scan or not scan.get("enabled"):
+        return None
+    if str(scan.get("mode", "step")).lower() == "sweep":
+        return SweepPattern(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"])
+    return ScanPattern(scan["angles_deg"], scan["settle_s"], scan["dwell_frames"])
+
+
 def track_pan(pan_deg: float, bearing_cam_deg: float, gain: float, deadband_deg: float, limit_deg: float) -> float:
     """One P step that turns the camera servo toward the person; positive is right."""
     if abs(bearing_cam_deg) <= deadband_deg:

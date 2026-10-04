@@ -156,18 +156,41 @@ class BlockedWaypointTest(unittest.TestCase):
         self.assertEqual(mission.step(snap(22.0, **blocked), 22.0), [])          # one skip, then the clock restarts
 
     def test_progress_a_far_waypoint_or_open_water_do_not_skip(self):
-        for label, later in (("progress", {"wp_dist": 2.0, "obstacle_m": 2.5}), ("far", {"wp_dist": 20.0, "obstacle_m": 2.5}),
+        for label, later in (("progress", {"wp_dist": 2.0, "obstacle_m": 2.5}), ("far, not for long", {"wp_dist": 20.0, "obstacle_m": 2.5}),
                              ("open water", {"wp_dist": 3.0}), ("next item", {"wp_dist": 3.0, "obstacle_m": 2.5, "seq": 4})):
             mission = RescueMission(VEHICLE, RESCUE)
-            first = {"wp_dist": 20.0 if label == "far" else 3.0, "obstacle_m": 2.5}
+            first = {"wp_dist": 20.0 if label.startswith("far") else 3.0, "obstacle_m": 2.5}
             mission.step(snap(0.0, seq=3, total=7, **first), 0.0)
             self.assertEqual(mission.step(snap(30.0, total=7, **{"seq": 3, **later}), 30.0), [], label)
 
-    def test_the_last_item_is_reported_not_skipped(self):
+    def test_a_blocked_last_item_stops_the_boat(self):
         mission = RescueMission(VEHICLE, RESCUE)
         mission.step(snap(0.0, seq=6, total=6, wp_dist=3.0, obstacle_m=2.0), 0.0)
         actions = mission.step(snap(30.0, seq=6, total=6, wp_dist=3.0, obstacle_m=2.0), 30.0)
-        self.assertEqual(kinds(actions), [("report", "WP 6 BLOCKED")])
+        self.assertEqual(kinds(actions), [("mode", "HOLD"), ("report", "WP 6 BLOCKED, HOLD")])
+        self.assertEqual(mission.step(snap(31.0, mode="HOLD", seq=6, total=6, wp_dist=3.0, obstacle_m=2.0), 31.0), [])
+
+    def test_waiting_at_a_waypoint_is_not_being_blocked(self):
+        # A waypoint with a Delay, next to a house: the boat sits 1.5 m from it for a minute.
+        mission = RescueMission(VEHICLE, RESCUE)
+        waiting = {"seq": 3, "total": 7, "wp_dist": 1.5, "obstacle_m": 2.0}
+        mission.step(snap(0.0, **waiting), 0.0)
+        self.assertEqual(mission.step(snap(30.0, **waiting), 30.0), [])
+        self.assertEqual(mission.step(snap(60.0, **waiting), 60.0), [])
+
+    def test_skips_a_far_waypoint_it_makes_no_progress_to(self):
+        # 12 m short of a waypoint in the middle of a large building, nothing within 4 m of the LiDAR.
+        mission = RescueMission(VEHICLE, RESCUE)
+        far = {"seq": 3, "total": 7, "wp_dist": 12.0}
+        mission.step(snap(0.0, **far), 0.0)
+        self.assertEqual(mission.step(snap(40.0, **far), 40.0), [])
+        actions = mission.step(snap(46.0, **far), 46.0)
+        self.assertEqual([(a.kind, a.seq or a.text) for a in actions], [("skip", 4), ("report", "WP 3 BLOCKED, SKIPPED")])
+        # Getting closer, however slowly, restarts the clock.
+        mission = RescueMission(VEHICLE, RESCUE)
+        mission.step(snap(0.0, **far), 0.0)
+        mission.step(snap(40.0, seq=3, total=7, wp_dist=11.0), 40.0)
+        self.assertEqual(mission.step(snap(60.0, seq=3, total=7, wp_dist=11.0), 60.0), [])
 
     def test_skips_at_once_a_waypoint_with_something_on_it(self):
         mission = RescueMission(VEHICLE, RESCUE)

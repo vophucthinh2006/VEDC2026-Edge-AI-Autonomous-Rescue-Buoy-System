@@ -3,10 +3,11 @@
 # the boat runs a straight leg that passes the victim OFFSET metres to starboard of them (the
 # victim is to port), with the sweep or with the camera fixed ahead.
 #
-#   bash sim/tools/scan_test.sh [camera|simulated] [offset_m] [scan|noscan] [wait_s]
+#   bash sim/tools/scan_test.sh [camera|simulated] [offset_m] [scan|sweep|sweep=RATE|noscan] [wait_s]
 #     offset_m  how far the leg passes from the victim (default 3.5). The simulated detector
 #               sees to 5 m (config/sim.yaml), so keep it below that.
-#     scan      search sweep on (default). noscan: camera fixed ahead, for comparison
+#     sweep     smooth sweep at the configured rate (default); sweep=20: at 20 deg/s.
+#               scan: search in steps, 0 / -60 / 0 / +60 deg. noscan: camera fixed ahead
 #     wait_s    instead of passing by, stop for this long at a waypoint abeam of the victim
 #               (a waypoint with a Delay, as set in Mission Planner): the boat sits still and sweeps
 #
@@ -15,7 +16,7 @@
 set -o pipefail
 DETECTOR="${1:-simulated}"
 OFFSET="${2:-3.5}"
-SCAN="${3:-scan}"
+SCAN="${3:-sweep}"
 WAIT_S="${4:-0}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$REPO/sim/env.sh"
@@ -43,6 +44,11 @@ sleep 28
 cd "$REPO/Rasp_Pi"
 PI_ARGS=(--overlay config/sim.yaml --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773)
 [ "$SCAN" = noscan ] && PI_ARGS+=(--no-scan)
+case "$SCAN" in
+    scan)    PI_ARGS+=(--scan-mode step) ;;
+    sweep)   PI_ARGS+=(--scan-mode sweep) ;;
+    sweep=*) PI_ARGS+=(--scan-mode sweep --scan-rate "${SCAN#sweep=}") ;;
+esac
 setsid python3 -u rescue_main.py "${PI_ARGS[@]}" > "$T/pi.log" 2>&1 < /dev/null &
 PI=$!
 cleanup() {
@@ -61,7 +67,8 @@ from gz.msgs10.pose_v_pb2 import Pose_V
 from gz.transport13 import Node
 from pymavlink import mavutil
 
-OFFSET, SCAN, WAIT_S = float(sys.argv[1]), sys.argv[2] == "scan", float(sys.argv[3])
+OFFSET, SCAN, WAIT_S = float(sys.argv[1]), sys.argv[2] != "noscan", float(sys.argv[3])
+STEPS, LABEL = sys.argv[2] == "scan", sys.argv[2]
 CAMERA = sys.argv[4] == "camera"     # the simulated detector turns its field of view, not the Gazebo servo
 M = mavutil.mavlink
 HOME = (10.883438, 106.796019)
@@ -73,7 +80,7 @@ track_n = VICTIM_NE[0] - OFFSET               # the leg runs east, the victim to
 LEGS = [(track_n, 17.0, 0)] + ([(track_n, 34.0, WAIT_S)] if WAIT_S else []) + [(track_n, 50.0, 0)]
 
 # The camera's pan as Gazebo has it: yaw of camera_link relative to the hull, positive right.
-pans, yaw, held = [], {}, [None, 0.0]
+pans, yaw, held, extent = [], {}, [None, 0.0], [0.0, 0.0]
 def on_poses(msg):
     for pose in msg.pose:
         if pose.name in ("camera_link", "base_link"):
@@ -81,6 +88,7 @@ def on_poses(msg):
             yaw[pose.name] = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
     if len(yaw) == 2:
         pan = -math.degrees((yaw["camera_link"] - yaw["base_link"] + math.pi) % (2 * math.pi) - math.pi)
+        extent[0], extent[1] = min(extent[0], pan), max(extent[1], pan)
         step = round(pan / 10.0) * 10
         # Only where the camera rests: the same reading for 0.15 s, not the angles it passes through.
         if abs(pan - step) >= 2.0 or step != held[0]:
@@ -123,8 +131,9 @@ while time.time() - t0 < 90:
 else:
     sys.exit("FAIL: could not arm")
 pans.clear()
+extent[0] = extent[1] = 0.0
 m.set_mode("AUTO")
-print(f"armed, AUTO; leg {OFFSET:g} m from the victim, sweep {'on' if SCAN else 'off'}" + (f", {WAIT_S:g} s wait abeam" if WAIT_S else ""))
+print(f"armed, AUTO; leg {OFFSET:g} m from the victim, search {LABEL}" + (f", {WAIT_S:g} s wait abeam" if WAIT_S else ""))
 
 texts, seen_at, closest, start, done = [], None, 1e9, time.time(), False
 position = (0.0, 0.0)
@@ -143,7 +152,8 @@ while time.time() - start < 170 and not done:
         position = ((msg.lat / 1e7 - HOME[0]) * 111320, (msg.lon / 1e7 - HOME[1]) * K)
         closest = min(closest, math.hypot(position[0] - VICTIM_NE[0], position[1] - VICTIM_NE[1]))
 
-print("camera pan seen in Gazebo (deg, first steps): " + " ".join(f"{p:+d}" for p in pans[:14]))
+print("camera pan seen in Gazebo (deg, where it rested): " + " ".join(f"{p:+d}" for p in pans[:14])
+      + f"; range {extent[0]:+.0f} to {extent[1]:+.0f}")
 errors = []
 for t in texts:
     words = t.split()
@@ -151,15 +161,17 @@ for t in texts:
         lat, lon = float(words[-3]), float(words[-2])
         errors.append(math.hypot((lat - HOME[0]) * 111320 - VICTIM_NE[0], (lon - HOME[1]) * K - VICTIM_NE[1]))
 found = seen_at is not None
-print(f"RESULT offset {OFFSET:g} m, sweep {'on' if SCAN else 'off'}: "
+print(f"RESULT offset {OFFSET:g} m, {LABEL}: "
       + (f"seen from {seen_at:.1f} m" if found else "NOT seen")
       + (f", reported {min(errors):.1f} m off" if errors else "")
       + f", closest the boat came {closest:.1f} m")
 if not SCAN:
     sys.exit(0)
 failures = []
-if CAMERA and pans[:4] != [0, -60, 0, 60]:
+if CAMERA and STEPS and pans[:4] != [0, -60, 0, 60]:
     failures.append("the camera did not step 0, -60, 0, +60")
+if CAMERA and not STEPS and not found and (extent[0] > -55.0 or extent[1] < 55.0):
+    failures.append("the camera did not sweep from -60 to +60")
 if not found:
     failures.append("person not seen")
 elif not errors or min(errors) > 3.0:

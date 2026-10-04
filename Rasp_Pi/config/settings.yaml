@@ -61,15 +61,22 @@ camera:
   pan_limit_deg: 80.0
   recenter_after_s: 1.5
   recenter_step_deg: 3.0
-  # Search sweep, while the autopilot is armed in one of `modes` and nobody is in view. The servo
-  # steps through angles_deg (from the bow, positive right), waits settle_s for it to stop, looks
-  # at dwell_frames frames, steps on. With the 60 deg lens, 0 and +-60 cover the 180 deg ahead;
-  # ahead is listed twice because that is where the boat is going. Any other mode: camera ahead.
+  # Search sweep, while the autopilot is armed in one of `modes` and nobody is in view. Any other
+  # mode: camera ahead. With the 60 deg lens, pointing between -60 and +60 covers the 180 deg ahead.
+  #   mode: step   the servo steps through angles_deg (from the bow, positive right), waits settle_s
+  #                for it to stop, looks at dwell_frames frames, steps on. Ahead is listed twice
+  #                because that is where the boat is going.
+  #   mode: sweep  the servo turns smoothly between -sweep_limit_deg and +sweep_limit_deg at
+  #                sweep_rate_deg_s. Slower keeps a person in view longer (60 / rate seconds) but
+  #                takes 4 * limit / rate seconds to come back to the same side.
   scan:
     enabled: true
+    mode: sweep
     angles_deg: [0, -60, 0, 60]
     settle_s: 0.25
     dwell_frames: 3
+    sweep_limit_deg: 60
+    sweep_rate_deg_s: 30
     modes: [AUTO]
 # Pixhawk link (rescue_main.py). TELEM2 on the boat; config/sim.yaml points it at the simulator.
 mavlink:
@@ -102,6 +109,12 @@ rescue:
   # Or sooner: LiDAR returns within blocked_clear_m of the waypoint itself for blocked_clear_s.
   blocked_clear_m: 1.5
   blocked_clear_s: 3.0
+  # Or, at any distance (a waypoint in the middle of a large building): no closer than the best
+  # so far for blocked_far_s.
+  blocked_far_s: 45.0
+  blocked_arrived_m: 2.5      # a little over WP_RADIUS: closer than this the boat has arrived and may be waiting (Delay)
+  # The blocked waypoint is the last mission item: nothing to move on to, switch to this mode.
+  blocked_last_mode: HOLD
   detector: camera            # camera: the TFLite model. simulated: known positions (sim section)
 # Obstacles sent to the autopilot's avoidance (modules/obstacle_feed.py): MAVLink OBSTACLE_DISTANCE.
 avoidance:

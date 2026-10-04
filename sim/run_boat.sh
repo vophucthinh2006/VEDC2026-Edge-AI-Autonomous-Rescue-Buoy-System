@@ -8,7 +8,8 @@
 #   --wipe      reset ArduPilot's stored parameters to the defaults + params/vedc_buoy.parm
 #   --pi        also run the Pi's rescue code (Rasp_Pi/rescue_main.py) on the Gazebo camera and
 #               load params/avoidance.parm. --pi=simulated uses the geometric detector instead
-#               of the TFLite model. Its log goes to ~/vedc_sim/sitl_run/pi.log.
+#               of the TFLite model. Its log goes to ~/vedc_sim/sitl_run/pi.log, and what it
+#               sees (camera with the detector's box, LiDAR from above) to http://127.0.0.1:8090/
 #   --world=    lake (default): open water, marker buoys, one person in the water.
 #               flood: a street under water, houses, obstacles on the way, one person in the
 #               water and one on a roof (worlds/vedc_flood.sdf).
@@ -72,10 +73,11 @@ if [ -n "$PI_DETECTOR" ]; then
     # code connects; it then waits for the autopilot's heartbeat.
     ( sleep 25
       cd "$VEDC_SIM_REPO/../Rasp_Pi"
-      exec python3 -u rescue_main.py "${PI_OVERLAYS[@]}" --detector "$PI_DETECTOR"
+      exec python3 -u rescue_main.py "${PI_OVERLAYS[@]}" --detector "$PI_DETECTOR" --viewer 8090
     ) > "$SIM_DIR/sitl_run/pi.log" 2>&1 &
     PI_PID=$!
     echo "Pi rescue code starts in 25 s (detector: $PI_DETECTOR), log: $SIM_DIR/sitl_run/pi.log"
+    echo "What the Pi sees (camera + LiDAR): http://127.0.0.1:8090/"
 fi
 
 # SITL waits in lock-step for Gazebo's ArduPilotPlugin on UDP 9002.

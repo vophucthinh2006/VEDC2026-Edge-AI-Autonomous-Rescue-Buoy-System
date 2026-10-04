@@ -128,6 +128,8 @@ while time.time() - start < 480:
             modes.append(mode)
             print(f"  [{time.time() - start:5.1f} s] mode {mode}")
     elif kind == "STATUSTEXT" and any(word in msg.text for word in ("VICTIM", "RESUMING", "Reached", "Mission", "BLOCKED")):
+        if "BLOCKED, HOLD" in msg.text:
+            returning = True      # a blocked last waypoint ends the run where the boat is
         texts.append(msg.text)
         returning = returning or "RTL" in msg.text
         print(f"  [{time.time() - start:5.1f} s] {msg.text}")
