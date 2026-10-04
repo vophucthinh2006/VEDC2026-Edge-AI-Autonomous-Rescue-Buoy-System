@@ -1,0 +1,8 @@
+# On top of sim.yaml for the flood scene (sim/worlds/vedc_flood.sdf):
+#   python3 rescue_main.py --overlay config/sim.yaml --overlay config/sim_flood.yaml
+# For rescue.detector: simulated. The person in the water (27 m east, 0.5 m south of home) and
+# the one at the edge of the end house's roof (43.5 m east, 0.5 m north).
+sim:
+  victims:
+    - [10.8834335, 106.7962660]
+    - [10.8834425, 106.7964169, 9.0]   # standing in full view: the real model sees them from 9 to 10 m

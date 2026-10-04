@@ -1,0 +1,9 @@
+# Everything here runs inside WSL: bash and Gazebo need LF, whatever core.autocrlf says.
+*.sh     text eol=lf
+*.py     text eol=lf
+*.sdf    text eol=lf
+*.config text eol=lf
+*.parm   text eol=lf
+# Meshes are binary: no line-ending conversion.
+*.stl     binary
+*.STL     binary

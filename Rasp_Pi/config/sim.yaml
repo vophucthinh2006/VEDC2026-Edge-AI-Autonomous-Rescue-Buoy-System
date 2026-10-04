@@ -1,0 +1,34 @@
+# Overrides on top of settings.yaml for the Gazebo + ArduPilot simulator (sim/run_boat.sh):
+#   python3 rescue_main.py --overlay config/sim.yaml
+mavlink:
+  # SITL's SERIAL2, the simulated TELEM2: the Pi sits where it does on the boat, and the
+  # autopilot forwards its reports to the ground station like the real one does.
+  url: tcp:127.0.0.1:5763
+  baud: 0
+camera:
+  source: gazebo
+  gazebo_topic: /vedc_buoy/camera
+  pan_topic: /model/vedc_buoy/joint/camera_pan_joint/cmd_pos
+  model_path: models/detect.tflite
+  # Calibrated on the simulated person: the water is translucent there, so the box also
+  # covers part of the submerged body (0.65 to 0.75 m from 3 to 6 m away).
+  person_height_m: 0.7
+  # A person on a roof fills far more of the frame than the swimmer person_height_m is set for;
+  # the wall below them gives the LiDAR a range. The swimmer's head is at the scan plane: seen
+  # on some scans, else the box height is used.
+  # Not measured on the Pi 4 yet: the detector is held to this rate so the search sweep runs at
+  # the pace expected on the boat, not at the laptop's.
+  max_fps: 5.0
+  distance_source: fused
+  # Only a LiDAR return right at the person's bearing counts. With the 8 deg of settings.yaml the
+  # utility pole of the flood scene, a few metres off to the side, was taken for the range of the
+  # person on the roof 9 m away, and the boat reported them next to the pole.
+  lidar_association_half_angle_deg: 3.0
+lidar:
+  source: gazebo
+  gazebo_topic: /vedc_buoy/lidar
+# For rescue.detector: simulated. The victim of sim/worlds/vedc_lake.sdf (32 m east, 8 m north of home).
+sim:
+  detect_range_m: 5.0         # the real model holds 0.6 confidence out to about 4-6 m with the 60 deg lens
+  victims:
+    - [10.8835099, 106.7963117]

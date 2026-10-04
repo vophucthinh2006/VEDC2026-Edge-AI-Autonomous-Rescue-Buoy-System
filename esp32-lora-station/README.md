@@ -38,8 +38,10 @@ esp32-lora-station/
 │   ├── js/app.js            khởi động, bản đồ, phao, lộ trình, đăng nhập, WebSocket
 │   ├── js/state.js          trạng thái dùng chung + bus sự kiện
 │   ├── js/util/             geo.js (khoảng cách, phương vị, tuyến quét), format.js
-│   ├── js/features/         statusbar, telemetry (đồ thị RSSI/SNR), eventlog, mapfx (thang tỷ lệ, tọa độ, thước đo, vệt)
+│   ├── js/features/         statusbar, telemetry (đồ thị RSSI/SNR), hud (HUD kiểu Mission Planner),
+│   │                        eventlog, mapfx (thang tỷ lệ, tọa độ, thước đo, vệt)
 │   └── dev/mock.js          Phao giả chuyển động cho ?mock, không được deploy (.assetsignore)
+├── tools/mavlink_bridge.py  Cầu nối MAVLink -> /api/ingest (giả lập ArduPilot, sau này Pixhawk thật)
 └── cloud/                   Cloudflare Worker
     ├── src/worker.js        Định tuyến, phân quyền, kiểm tra dữ liệu
     ├── src/auth.js          Xác minh ID token Google, phiên cookie ký HMAC
@@ -117,6 +119,7 @@ Hành vi firmware:
 ## Chạy thử trên máy
 
 Giao diện với phao giả, không cần backend: `?mock` (admin giả) hoặc `?mock=guest` (khách giả).
+Bản giả có thêm `SIM-01` báo qua MAVLink để xem HUD, đổi chế độ HOLD → GUIDED → AUTO → RTL mỗi 20 giây.
 ```powershell
 cd web
 python -m http.server 8766        # mở http://localhost:8766/?mock
@@ -159,6 +162,30 @@ dữ liệu tư thế. ESP32 và cloud kiểm tra miền Roll `[-180,180]`, Pitc
 (cloud gắn `attitude_bad:1`), vị trí và RSSI/SNR vẫn được lưu và phát.
 Gói GPS-only cũ vẫn được chấp nhận; lịch sử server chỉ tiếp tục lưu RSSI/SNR và vị trí.
 
+### Nguồn MAVLink (cầu nối, giả lập)
+
+`tools/mavlink_bridge.py` đọc MAVLink của ArduPilot và gửi cùng định dạng, với `"link":"mavlink"`,
+**không có** `rssi`/`snr` (không đi qua LoRa) và thêm nhóm `nav` cho HUD:
+```json
+{"id":"SIM-01","link":"mavlink","fix":1,"lat":10.883438,"lon":106.796019,"roll":1.2,"pitch":-0.4,"yaw":91.3,
+ "target_yaw":90.0,"mode":"A","imu_ok":1,"calib":3,"seq":42,"raw":"MAV GUIDED ARMED gs=1.4 hdg=91",
+ "nav":{"armed":1,"mode_name":"GUIDED","gs":1.42,"thr":38,"wp_dist":18.4,"wp_seq":0,"batt_v":12.6,"batt_pct":100,"sats":10,"hdop":1.2}}
+```
+- `mode` A/M/S suy từ chế độ ArduPilot (AUTO/GUIDED/RTL/LOITER… là A, HOLD hoặc chưa arm là S, còn lại M).
+- `calib` không có nghĩa BNO055 ở đây: 3 khi EKF có cả tư thế lẫn vị trí tuyệt đối, ngược lại 0.
+- `wp_dist` = -1 khi không đi theo đích, `batt_pct` = -1 khi không biết.
+- Cloud kiểm tra miền từng trường; nhóm `nav` hỏng thì chỉ bỏ nhóm đó (`nav_bad:1`).
+- Gói MAVLink đến 1–2 lần/giây: vẫn phát realtime từng gói, nhưng chỉ ghi kho và lịch sử **mỗi 5 giây**
+  một lần cho mỗi phao (giới hạn số lần ghi Durable Object). Gói LoRa vẫn ghi từng gói như cũ.
+
+Chạy cầu nối (trong WSL, nơi có pymavlink), giả lập đang chạy bằng `sim/run_boat.sh` (MAVProxy phát
+sẵn ra cổng 14551):
+```bash
+export VEDC_INGEST_TOKEN=...     # bằng INGEST_TOKEN của Worker
+python3 tools/mavlink_bridge.py --url http://127.0.0.1:8787/api/ingest --id SIM-01
+```
+Đổi `--url` sang địa chỉ Worker trên Cloudflare để mọi người cùng xem.
+
 Server → trình duyệt (`/ws`): cùng định dạng, thêm `age_s` (giây kể từ lúc server nhận). Khi mở trang,
 server phát lại vị trí cuối của từng phao rồi bản tin lộ trình `{"type":"mission","rev":N,...}`.
 Mỗi lần admin lưu, mọi trình duyệt nhận lại bản tin `mission` mới (bản của chính tab vừa lưu bị bỏ qua nhờ `cid`).
@@ -173,6 +200,10 @@ Phong cách "trung tâm điều hành": nền tối, số liệu monospace, mộ
   AUTO/IMU/calibration, đồ thị RSSI/SNR 5 phút / 15 phút / tất cả với vạch ngưỡng -95 và
   -110 dBm, bản tin gốc. Sau 12 giây không có attitude mới, đồng hồ giữ giá trị cuối và
   đánh dấu `Dữ liệu cũ`.
+- **HUD kiểu Mission Planner** (phao báo qua MAVLink): chân trời nhân tạo có thang pitch và cung roll,
+  thước hướng có vạch hướng đích (vàng), tốc độ, thanh ga (lùi màu vàng), ARMED/DISARMED, chế độ, GPS,
+  pin; dưới là 6 ô số lớn như tab "Quick": tốc độ, cách waypoint, hướng, ga, pin, vệ tinh. Phao LoRa
+  vẫn dùng thẻ tư thế và đồ thị RSSI/SNR. Trên bản đồ mỗi phao có mũi tên chỉ hướng mũi.
 - **Nhật ký sự kiện:** kết nối, phao mới, gói tin, mất/có lại tín hiệu (quá 30 giây), mất/có lại GPS, admin cập nhật lộ trình. Lọc "Cảnh báo".
 - **Bản đồ:** thang tỷ lệ, tọa độ con trỏ, la bàn (Bắc luôn ở trên), vệt di chuyển của phao, thước đo nhiều điểm (Esc để thoát), nền sáng/tối.
 - **Lịch sử ở server:** mỗi phao lưu 300 mẫu gần nhất `{t, rssi, snr, lat?, lon?}` (khóa `h:<id>` trong Durable Object).

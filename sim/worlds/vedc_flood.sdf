@@ -1,0 +1,173 @@
+<?xml version="1.0" ?>
+<!--
+  RedgeSCUE flood scene: a street under water up to the eaves. The buoy starts at the origin
+  facing east (Gazebo x) and searches down the street.
+
+      y
+   +9 |  [house] [tin] [house] [tin]            north row, eaves 6.2 m from the centre line
+    0 | B>   (tree)  (car)   A   (pole)   R[house]     x
+   -9 |  [tin] [house] [tin] [house]            south row
+        0    10    18     27   31      43.5
+
+    tree   tree top across the centre line          x 10, y -1.0
+    car    car under water to the windows           x 18, y  1.0
+    A      person in the water                      x 27, y -0.5
+    pole   leaning utility pole                     x 31, y  0.8
+    R      person on the roof of the end house      x 43.5, y  0.5
+
+  Everything but the buoy is static: static models have no hydrodynamics, so the scene runs
+  as fast as the open lake. The obstacles all stand at least 0.5 m out of the water, in the
+  plane of the buoy's LiDAR (0.37 m). Something lower, a drifting log for instance, is
+  invisible to it. sim/tools/flood_test.sh has the same coordinates: change both.
+-->
+<sdf version="1.9">
+  <world name="vedc_flood">
+    <physics name="2ms" type="ignore">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+
+    <scene>
+      <ambient>1.0 1.0 1.0</ambient>
+      <background>0.62 0.66 0.70</background>
+      <sky></sky>
+    </scene>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.6 0.6 0.6 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <include>
+      <pose>0 0 0 0 0 0</pose>
+      <uri>model://vedc_flood_waves</uri>
+    </include>
+
+    <include>
+      <name>vedc_buoy</name>
+      <pose>0 0 0 0 0 0</pose>
+      <uri>model://vedc_buoy</uri>
+    </include>
+
+    <!-- Two rows of houses, 3 to 4 m alleys between them. -->
+    <include><name>house_north_1</name><pose>6 9 0 0 0 0</pose><uri>model://flooded_house</uri></include>
+    <include><name>house_north_2</name><pose>16 9 0 0 0 0</pose><uri>model://flooded_house_tin</uri></include>
+    <include><name>house_north_3</name><pose>26 9 0 0 0 0</pose><uri>model://flooded_house</uri></include>
+    <include><name>house_north_4</name><pose>36 9 0 0 0 0</pose><uri>model://flooded_house_tin</uri></include>
+    <include><name>house_south_1</name><pose>4 -9 0 0 0 0</pose><uri>model://flooded_house_tin</uri></include>
+    <include><name>house_south_2</name><pose>14 -9 0 0 0 0</pose><uri>model://flooded_house</uri></include>
+    <include><name>house_south_3</name><pose>24 -9 0 0 0 0</pose><uri>model://flooded_house_tin</uri></include>
+    <include><name>house_south_4</name><pose>34 -9 0 0 0 0</pose><uri>model://flooded_house</uri></include>
+
+    <!-- The house that closes the street, ridge north-south, with a person on its west roof. -->
+    <include><name>house_end</name><pose>46.0 0 0 0 0 1.5708</pose><uri>model://flooded_house</uri></include>
+    <include>
+      <name>victim_roof</name>
+      <pose>43.5 0.5 0.54 0 0 -1.5708</pose>
+      <uri>model://victim_standing</uri>
+    </include>
+
+    <!-- The person in the water, facing west towards the start. -->
+    <include>
+      <name>victim_water</name>
+      <pose>27 -0.5 0 0 0 -1.5708</pose>
+      <uri>model://victim_person</uri>
+    </include>
+
+    <!-- Obstacles on the centre line. -->
+    <model name="tree_top">
+      <static>true</static>
+      <pose>10 -1.0 0 0 0 0</pose>
+      <link name="link">
+        <visual name="crown">
+          <pose>0 0 0.45 0 0 0</pose>
+          <geometry><ellipsoid><radii>0.9 0.9 0.75</radii></ellipsoid></geometry>
+          <material><ambient>0.16 0.42 0.14 1</ambient><diffuse>0.16 0.42 0.14 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+        </visual>
+        <visual name="crown_top">
+          <pose>0.2 -0.1 1.1 0 0 0</pose>
+          <geometry><ellipsoid><radii>0.6 0.6 0.5</radii></ellipsoid></geometry>
+          <material><ambient>0.2 0.5 0.16 1</ambient><diffuse>0.2 0.5 0.16 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+        </visual>
+        <collision name="crown">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry><cylinder><radius>0.9</radius><length>2.0</length></cylinder></geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="car">
+      <static>true</static>
+      <pose>18 1.0 0 0 0 0.15</pose>
+      <link name="link">
+        <visual name="body">
+          <pose>0 0 0.05 0 0 0</pose>
+          <geometry><box><size>3.8 1.7 1.0</size></box></geometry>
+          <material><ambient>0.75 0.75 0.78 1</ambient><diffuse>0.75 0.75 0.78 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+        </visual>
+        <visual name="cabin">
+          <pose>-0.2 0 0.80 0 0 0</pose>
+          <geometry><box><size>2.0 1.5 0.5</size></box></geometry>
+          <material><ambient>0.2 0.24 0.28 1</ambient><diffuse>0.2 0.24 0.28 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+        </visual>
+        <collision name="body">
+          <pose>0 0 0.05 0 0 0</pose>
+          <geometry><box><size>3.8 1.7 1.0</size></box></geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="pole">
+      <static>true</static>
+      <pose>31 0.8 0 0 0 0</pose>
+      <link name="link">
+        <visual name="pole">
+          <pose>0 0 1.0 0.20 0 0</pose>
+          <geometry><cylinder><radius>0.14</radius><length>6.0</length></cylinder></geometry>
+          <material><ambient>0.45 0.43 0.4 1</ambient><diffuse>0.45 0.43 0.4 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+        </visual>
+        <visual name="crossarm">
+          <pose>0 -0.72 3.6 0.20 0 0</pose>
+          <geometry><box><size>1.4 0.1 0.1</size></box></geometry>
+          <material><ambient>0.3 0.22 0.15 1</ambient><diffuse>0.3 0.22 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+        </visual>
+        <collision name="pole">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry><cylinder><radius>0.2</radius><length>2.0</length></cylinder></geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- Out of the way, against the houses: drums and a floating roof panel, for the look. -->
+    <model name="drums">
+      <static>true</static>
+      <pose>21 4.6 0 0 0 0</pose>
+      <link name="link">
+        <visual name="drum_1">
+          <pose>0 0 0.2 0 0 0</pose>
+          <geometry><cylinder><radius>0.3</radius><length>0.9</length></cylinder></geometry>
+          <material><ambient>0.15 0.3 0.6 1</ambient><diffuse>0.15 0.3 0.6 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+        </visual>
+        <visual name="drum_2">
+          <pose>0.7 0.1 0.15 1.5708 0 0.4</pose>
+          <geometry><cylinder><radius>0.3</radius><length>0.9</length></cylinder></geometry>
+          <material><ambient>0.7 0.45 0.1 1</ambient><diffuse>0.7 0.45 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+        </visual>
+        <collision name="drums">
+          <pose>0.35 0 0.2 0 0 0</pose>
+          <geometry><box><size>1.4 0.8 0.9</size></box></geometry>
+        </collision>
+      </link>
+    </model>
+  </world>
+</sdf>

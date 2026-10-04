@@ -1,0 +1,29 @@
+<?xml version="1.0" ?>
+<!--
+  A realistic person in the water, for the real detector: the "Standing person"
+  mesh from Gazebo Fuel (OpenRobotics, CC0, made with MakeHuman), sunk so the
+  waterline is at the chest. Static, origin at the waterline.
+
+  The mesh (28 MB) is not in this repository: Gazebo downloads it from Fuel
+  the first time and keeps it in ~/.gz/fuel.
+-->
+<sdf version="1.9">
+  <model name="victim_person">
+    <static>true</static>
+    <link name="body">
+      <visual name="person">
+        <!-- feet at -1.30 m: of a 1.75 m person, head and shoulders stay above the water -->
+        <pose>0 0 -1.30 0.04 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>https://fuel.gazebosim.org/1.0/openrobotics/models/standing person/3/files/meshes/standing.dae</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <collision name="torso">
+        <pose>0 0 -0.10 0 0 0</pose>
+        <geometry><box><size>0.30 0.46 0.60</size></box></geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>

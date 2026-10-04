@@ -69,6 +69,30 @@
           }
           if (n % 3 === 0) send({ type: 'station', fix: 1, lat: BASE.lat, lon: BASE.lon, sats: 9, hdop: 0.9, age_s: 0 });
         }, 3000));
+
+        // SIM-01: phao báo qua cầu nối MAVLink (không RSSI/SNR, có nhóm nav), 2 gói/giây.
+        // Chạy vòng tròn, đổi chế độ HOLD -> GUIDED -> AUTO -> RTL để thấy HUD và nhật ký.
+        const modes = ['HOLD', 'GUIDED', 'AUTO', 'RTL'];
+        let k = 0;
+        this._timers.push(setInterval(() => {
+          const t = (now() - started) / 1000;
+          k++;
+          const mode = modes[Math.floor(t / 20) % modes.length];
+          const armed = mode !== 'HOLD';
+          const yaw = ((t * 6) % 360 + 360) % 360;
+          const target = armed ? (yaw + 25 * Math.sin(t / 4) + 360) % 360 : -1;
+          const p = { lat: 10.7600 + 0.0012 * Math.sin(t / 9.5), lon: 106.6560 + 0.0012 * Math.cos(t / 9.5) };
+          send({
+            id: 'SIM-01', link: 'mavlink', fix: 1, lat: p.lat, lon: p.lon, raw: `MAV ${mode}`,
+            roll: 6 * Math.sin(t * 1.3), pitch: 3 * Math.cos(t * 0.9), yaw: Math.round(yaw * 10) / 10,
+            target_yaw: Math.round(target * 10) / 10, mode: armed ? 'A' : 'S', imu_ok: 1, calib: 3, seq: k,
+            nav: { armed: armed ? 1 : 0, mode_name: mode, gs: armed ? 1.4 + 0.3 * Math.sin(t) : 0.05,
+                   thr: armed ? Math.round(45 + 30 * Math.sin(t / 3)) : 0, wp_dist: armed ? Math.max(0, 40 - (t % 20) * 2) : -1,
+                   wp_seq: Math.floor(t / 20) % 4, batt_v: 12.6 - t * 0.002, batt_pct: Math.max(0, 100 - Math.round(t / 6)),
+                   sats: 10, hdop: 1.2 },
+            age_s: 0,
+          });
+        }, 500));
       }, 300);
     }
     close() { this._timers.forEach(clearInterval); this.onclose && this.onclose(); }

@@ -77,6 +77,15 @@ export function initEventLog() {
     if (!prev) log('ok', `Phát hiện phao mới: ${id}`);
     if (prev && prev.fix === 1 && b.fix !== 1) log('warn', `${id} mất GPS, giữ vị trí cuối`);
     if (prev && prev.fix !== 1 && b.fix === 1) log('ok', `${id} có lại GPS`);
+    if (b.link === 'mavlink') {
+      // MAVLink đến 1-2 gói/giây: chỉ ghi khi arm/disarm hoặc đổi chế độ, không ghi từng gói
+      const was = prev && prev.nav, now = b.nav;
+      if (!now) return;
+      if (!was) { log('info', `${id} qua MAVLink: ${now.mode_name}, ${now.armed ? 'ĐANG ARM' : 'chưa arm'}`); return; }
+      if (was.armed !== now.armed) log(now.armed ? 'warn' : 'info', `${id} ${now.armed ? 'ĐÃ ARM, động cơ có thể chạy' : 'đã disarm'}`);
+      if (was.mode_name !== now.mode_name) log('info', `${id} đổi chế độ ${was.mode_name} → ${now.mode_name}`);
+      return;
+    }
     const pos = b.fix === 1 ? `${b.lat.toFixed(5)}, ${b.lon.toFixed(5)}` : 'không có tọa độ';
     log('info', `${id} gói tin: ${pos}, RSSI ${b.rssi} dBm, SNR ${b.snr.toFixed(1)} dB`);
   });

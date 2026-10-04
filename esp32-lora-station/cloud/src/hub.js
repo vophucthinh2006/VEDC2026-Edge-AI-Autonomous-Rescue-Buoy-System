@@ -3,6 +3,11 @@ import { json } from "./util.js";
 
 const MAX_BUOYS = 50;
 const MAX_HISTORY = 300;   // số mẫu RSSI/SNR/vị trí giữ cho mỗi phao
+// LoRa đến 5 giây một gói, cầu nối MAVLink thì 1-2 gói mỗi giây. Gói MAVLink vẫn được phát
+// realtime, nhưng chỉ ghi kho và lịch sử tối đa mỗi PERSIST_MS một lần cho mỗi phao, để số
+// lần ghi Durable Object không vượt hạn mức miễn phí (khoảng 100 nghìn dòng mỗi ngày).
+// Gói LoRa luôn được ghi: ESP32 xếp hàng khi mất mạng rồi gửi dồn, mỗi gói là một mẫu thật.
+const PERSIST_MS = 5000;
 const EMPTY_MISSION = { rev: 0, waypoints: [], poly: [], spacing: 10, angle: null, speed: 1.5 };
 
 // Một Durable Object duy nhất giữ vị trí mới nhất của từng phao, lộ trình chung,
@@ -12,6 +17,7 @@ export class Hub extends DurableObject {
   mission = null;   // { rev, waypoints, poly, spacing, angle, speed, by?, at? }
   station = undefined;   // { msg, t } vị trí GPS trạm bờ; undefined = chưa tải, null = chưa có
   hist = {};        // id -> [{ t, rssi, snr, lat?, lon? }], mỗi phao một khóa lưu trữ `h:<id>`
+  persistedAt = {}; // id -> thời điểm ghi kho gần nhất (chỉ trong bộ nhớ)
 
   async loadBuoys() {
     if (!this.buoys) this.buoys = (await this.ctx.storage.get("buoys")) || {};
@@ -102,12 +108,16 @@ export class Hub extends DurableObject {
         ? { ...msg, lat: prev.lat, lon: prev.lon, fix_lost: 1 } : msg;
       const now = Date.now();
       buoys[msg.id] = { msg: stored, t: now };
-      const points = await this.loadHistory(msg.id);
-      const sample = { t: now, rssi: msg.rssi, snr: msg.snr };
-      if (msg.fix === 1) { sample.lat = msg.lat; sample.lon = msg.lon; }
-      points.push(sample);
-      if (points.length > MAX_HISTORY) points.splice(0, points.length - MAX_HISTORY);
-      await this.ctx.storage.put({ buoys, ["h:" + msg.id]: points });
+      if (msg.link !== "mavlink" || now - (this.persistedAt[msg.id] || 0) >= PERSIST_MS) {
+        this.persistedAt[msg.id] = now;
+        const points = await this.loadHistory(msg.id);
+        const sample = { t: now };
+        if (msg.rssi !== undefined) { sample.rssi = msg.rssi; sample.snr = msg.snr; }
+        if (msg.fix === 1) { sample.lat = msg.lat; sample.lon = msg.lon; }
+        points.push(sample);
+        if (points.length > MAX_HISTORY) points.splice(0, points.length - MAX_HISTORY);
+        await this.ctx.storage.put({ buoys, ["h:" + msg.id]: points });
+      }
       this.broadcast({ ...msg, age_s: 0 });
       return json({ ok: true, clients: this.ctx.getWebSockets().length });
     }

@@ -43,3 +43,47 @@ test("wraps headings that round up to 360", () => {
 test("still rejects a frame without signal values", () => {
   assert.equal(sanitizeBuoy({ ...attitude, fix: 0 }), null);
 });
+
+const nav = { armed: 1, mode_name: "GUIDED", gs: 1.234, thr: 42.4, wp_dist: 18.37, wp_seq: 0,
+              batt_v: 12.6, batt_pct: 100, sats: 10, hdop: 1.21 };
+const mav = { id: "SIM-01", link: "mavlink", fix: 1, lat: 10.883438, lon: 106.796019, raw: "", ...attitude, nav };
+
+test("accepts a MAVLink frame without RSSI/SNR and keeps the nav group", () => {
+  const result = sanitizeBuoy(mav);
+  assert.equal(result.link, "mavlink");
+  assert.equal(Object.hasOwn(result, "rssi"), false);
+  assert.equal(Object.hasOwn(result, "snr"), false);
+  assert.equal(result.yaw, 278.5);
+  assert.deepEqual(result.nav, { ...nav, gs: 1.23, thr: 42, wp_dist: 18.4 });
+});
+
+test("a LoRa frame never carries a link field and still needs RSSI/SNR", () => {
+  assert.equal(Object.hasOwn(sanitizeBuoy(base), "link"), false);
+  assert.equal(sanitizeBuoy({ ...base, link: "lora", rssi: undefined }), null);
+  assert.equal(sanitizeBuoy({ ...base, link: "wifi" }), null);
+});
+
+test("drops only the nav group when it is malformed", () => {
+  for (const bad of [
+    { ...nav, armed: 2 },
+    { ...nav, mode_name: "guided" },
+    { ...nav, mode_name: "<script>" },
+    { ...nav, gs: -1 },
+    { ...nav, thr: 101 },
+    { ...nav, wp_seq: 1.5 },
+    { ...nav, batt_pct: 120 },
+    "GUIDED",
+  ]) {
+    const result = sanitizeBuoy({ ...mav, nav: bad });
+    assert.equal(Object.hasOwn(result, "nav"), false);
+    assert.equal(result.nav_bad, 1);
+    assert.equal(result.lat, mav.lat);
+    assert.equal(result.yaw, 278.5);
+  }
+});
+
+test("accepts the 'no waypoint' and 'no battery' markers", () => {
+  const result = sanitizeBuoy({ ...mav, nav: { ...nav, wp_dist: -1, batt_pct: -1 } });
+  assert.equal(result.nav.wp_dist, -1);
+  assert.equal(result.nav.batt_pct, -1);
+});

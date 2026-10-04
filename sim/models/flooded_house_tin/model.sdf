@@ -1,0 +1,39 @@
+<?xml version="1.0" ?>
+<!--
+  A smaller house with a low tin roof, flooded to the eaves.
+  Built from boxes, static: no hydrodynamics, so it costs the simulator nothing.
+  Origin at the water level in the middle of the footprint, ridge along x.
+  Walls reach 0.4 m above the water, eaves 0.32 m, ridge 1.00 m: the buoy's
+  LiDAR, 0.37 m above the water, sees the walls and the roof just above the eaves.
+-->
+<sdf version="1.9">
+  <model name="flooded_house_tin">
+    <static>true</static>
+    <link name="house">
+      <visual name="walls">
+        <pose>0 0 -1.050 0 0 0</pose>
+        <geometry><box><size>6.0 4.5 2.9</size></box></geometry>
+        <material><ambient>0.7 0.74 0.72 1</ambient><diffuse>0.7 0.74 0.72 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="gable">
+        <pose>0 0 0.551 0 0 0</pose>
+        <geometry><box><size>6.0 2.25 0.301</size></box></geometry>
+        <material><ambient>0.7 0.74 0.72 1</ambient><diffuse>0.7 0.74 0.72 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="roof_north">
+        <pose>0 1.275 0.661 -0.2618 0 0</pose>
+        <geometry><box><size>6.6 2.640 0.08</size></box></geometry>
+        <material><ambient>0.22 0.38 0.55 1</ambient><diffuse>0.22 0.38 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="roof_south">
+        <pose>0 -1.275 0.661 0.2618 0 0</pose>
+        <geometry><box><size>6.6 2.640 0.08</size></box></geometry>
+        <material><ambient>0.22 0.38 0.55 1</ambient><diffuse>0.22 0.38 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="walls">
+        <pose>0 0 -1.050 0 0 0</pose>
+        <geometry><box><size>6.0 4.5 2.9</size></box></geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>

@@ -35,6 +35,13 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * radius * math.asin(math.sqrt(a))
 
 
+def offset_latlon(lat: float, lon: float, bearing: float, distance_m: float) -> tuple[float, float]:
+    """Point distance_m away along bearing (degrees clockwise from North). Flat-earth, fine below a few km."""
+    north = distance_m * math.cos(math.radians(bearing))
+    east = distance_m * math.sin(math.radians(bearing))
+    return lat + north / 111_320.0, lon + east / (111_320.0 * math.cos(math.radians(lat)))
+
+
 def body_to_world(forward_m: float, right_m: float, yaw_deg: float) -> tuple[float, float]:
     """Body forward/right vector to East/North vector using compass yaw."""
     yaw = math.radians(yaw_deg)

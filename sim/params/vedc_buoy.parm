@@ -1,0 +1,53 @@
+# ArduPilot Rover parameters for the simulated VEDC buoy (sim/models/vedc_buoy).
+# Loaded on top of rover.parm + rover-skid.parm.
+
+# Boat: no wheel encoders, drifts when stopped, Loiter holds position.
+FRAME_CLASS     2
+
+# Outputs, mirroring the STM32 firmware (App/actuators.c):
+#   rear motors skid-steer, all three pods steer, the front pod the opposite way.
+SERVO1_FUNCTION 73      # ThrottleLeft  -> rear left motor
+SERVO2_FUNCTION 26      # GroundSteering -> both rear pods
+SERVO3_FUNCTION 74      # ThrottleRight -> rear right motor
+SERVO4_FUNCTION 70      # Throttle      -> front motor, bidirectional, 1500 us stop
+SERVO5_FUNCTION 26      # GroundSteering -> front pod
+SERVO5_REVERSED 1
+# Pod swing like RUDDER_SPAN_US = 250 us each side of centre (+-22.5 deg in the model).
+SERVO2_MIN      1250
+SERVO2_MAX      1750
+SERVO5_MIN      1250
+SERVO5_MAX      1750
+
+# Battery: 12 V, 5600 mAh (team figure). Assumed a 3S lithium pack, 12.6 V full:
+# check the chemistry before trusting the low-voltage failsafe on the real boat.
+BATT_CAPACITY   5600
+SIM_BATT_VOLTAGE 12.6
+SIM_BATT_CAP_AH 5.6
+BATT_LOW_VOLT   10.5
+BATT_FS_LOW_ACT 1       # RTL
+
+# Cruise: guessed for a 15 kg hull with +-15 N per rear motor; the real buoy is
+# capped lower (Pi max_speed_mps 0.5, AUTO throttle 0.5). Retune when measured.
+CRUISE_SPEED    1.0
+CRUISE_THROTTLE 20      # measured in the sim: about 18 % throttle holds 1.0 m/s
+WP_SPEED        1.0     # search speed: the camera only confirms a person inside about 5 m
+WP_RADIUS       2.0
+
+# Steering rate controller, tuned in the sim on the 15 kg hull. The rover default
+# feed-forward (0.2) left the heading loop to P and I alone and the boat wove
+# +-1.6 m around the track; at 80 % steering it turns 48 deg/s, about 1 rad/s at
+# full steering, which puts the feed-forward near 0.8. Track error now +-0.3 m.
+# Retune on the real boat: the turn rate depends on the real thrust and drag.
+ATC_STR_RAT_FF  0.8
+ATC_STR_RAT_P   0.2
+ATC_STR_RAT_I   0.2
+
+# Station keeping next to a person: correct once 0.5 m off the loiter point. The default
+# 2 m let the boat drift to almost 5 m away; 1 m let it drift to 0.8 m from the person.
+LOIT_RADIUS     0.5
+
+# Failsafes, the same intent as the STM32 watchdog:
+# lost GCS heartbeat (Mission Planner / shore station) -> RTL, home is the launch point.
+FS_GCS_ENABLE   1
+FS_ACTION       1
+FS_TIMEOUT      5

@@ -81,6 +81,19 @@
             <div class="cell rel" id="d-rel" hidden><div class="k">Cách trạm bờ</div><div class="v mono"><span id="d-rel-dist">-</span><em>|</em><span id="d-rel-brg">-</span></div></div>
             <p class="note" id="d-lat-stale" hidden>Đang hiển thị vị trí cuối cùng, phao hiện chưa có GPS.</p>
 
+            <!-- HUD kiểu Mission Planner: chỉ hiện với phao báo qua MAVLink (có nhóm nav) -->
+            <section id="d-hud" class="hud" aria-label="Bảng lái HUD" hidden>
+              <div id="hud-screen"></div>
+              <div class="quick">
+                <div class="q"><span class="k">Tốc độ</span><b class="mono" id="q-gs">-</b><small>m/s</small></div>
+                <div class="q"><span class="k">Cách WP</span><b class="mono" id="q-wp">-</b><small id="q-wp-sub">m</small></div>
+                <div class="q"><span class="k">Hướng</span><b class="mono" id="q-hdg">-</b><small>độ</small></div>
+                <div class="q"><span class="k">Ga</span><b class="mono" id="q-thr">-</b><small>%</small></div>
+                <div class="q"><span class="k">Pin</span><b class="mono" id="q-batt">-</b><small id="q-batt-sub">V</small></div>
+                <div class="q"><span class="k">Vệ tinh</span><b class="mono" id="q-gps">-</b><small id="q-gps-sub">HDOP -</small></div>
+              </div>
+            </section>
+
             <section id="d-attitude" class="attitude" aria-label="Tư thế và hướng của phao">
               <div class="attitude-head">
                 <span class="h">Tư thế &amp; giữ hướng</span>
@@ -116,6 +129,7 @@
               </div>
             </section>
 
+            <div id="d-signal">
             <div class="sig">
               <div class="cell sig-main">
                 <div class="k">RSSI</div>
@@ -136,6 +150,8 @@
             </div>
             <div id="d-chart"></div>
             <div class="legend"><span class="rssi">RSSI (dBm)</span><span class="snr">SNR (dB)</span></div>
+            </div>
+            <div class="cell" id="d-link-mav" hidden><div class="k">Kênh</div><div class="v">MAVLink · tuổi gói <span class="mono" id="d-age-mav">-</span></div></div>
 
             <details class="raw"><summary>Bản tin gốc</summary><div id="d-raw"></div></details>
 
