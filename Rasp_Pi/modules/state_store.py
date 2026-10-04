@@ -37,6 +37,20 @@ class SysState:
 
 
 @dataclass(frozen=True)
+class VehicleState:
+    """Autopilot status (MAVLink link only): flight mode name, armed flag, current mission item,
+    number of the last mission item (0 unknown), distance and true bearing to the current mission
+    waypoint (distance negative: unknown, or the item is not a waypoint)."""
+    mode: str = ""
+    armed: bool = False
+    mission_seq: int = 0
+    timestamp: float = 0.0
+    mission_total: int = 0
+    wp_dist_m: float = -1.0
+    wp_bearing_deg: float = 0.0
+
+
+@dataclass(frozen=True)
 class HumanTarget:
     bearing_body_deg: float
     distance_m: float
@@ -53,6 +67,7 @@ class Snapshot:
     scan_timestamp: float
     waypoint: tuple[float, float] | None
     human_target: HumanTarget | None
+    vehicle: VehicleState = VehicleState()
 
 
 class StateStore:
@@ -65,6 +80,12 @@ class StateStore:
         self._scan_timestamp = 0.0
         self._waypoint: tuple[float, float] | None = None
         self._human_target: HumanTarget | None = None
+        self._vehicle = VehicleState()
+
+    def update_vehicle(self, mode: str, armed: bool, mission_seq: int, mission_total: int = 0, wp_dist_m: float = -1.0,
+                       wp_bearing_deg: float = 0.0) -> None:
+        with self._lock:
+            self._vehicle = VehicleState(mode, armed, mission_seq, monotonic(), mission_total, wp_dist_m, wp_bearing_deg)
 
     def update_imu(self, pitch: float, roll: float, yaw: float, imu_ok: bool, overturned: bool) -> None:
         with self._lock:
@@ -93,4 +114,4 @@ class StateStore:
 
     def snapshot(self) -> Snapshot:
         with self._lock:
-            return Snapshot(self._imu, self._gps, self._system, self._obstacles, self._scan_timestamp, self._waypoint, self._human_target)
+            return Snapshot(self._imu, self._gps, self._system, self._obstacles, self._scan_timestamp, self._waypoint, self._human_target, self._vehicle)
