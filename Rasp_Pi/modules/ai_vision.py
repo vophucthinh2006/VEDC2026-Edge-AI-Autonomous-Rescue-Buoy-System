@@ -10,7 +10,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from modules.perception import associate_person, estimate_distance_bbox, track_pan
+from modules.perception import ScanPattern, associate_person, box_bottom_elevation_deg, estimate_distance_bbox, track_pan
 from modules.state_store import HumanTarget, StateStore
 from utils.geometry import signed_angle_deg
 
@@ -36,6 +36,12 @@ class VisionWorker(threading.Thread):
         self._pan = 0.0          # camera servo angle from the bow, positive right
         self._sent_pan = 0.0
         self._sent_at = 0.0
+        # Search sweep (camera.scan): only while the autopilot runs the search pattern.
+        scan = camera.get("scan") or {}
+        self._scan = ScanPattern(scan["angles_deg"], scan["settle_s"], scan["dwell_frames"]) if scan.get("enabled") else None
+        self._scan_modes = {str(mode).upper() for mode in scan.get("modes", [])}
+        self._scanning = False
+        self._last_frame = 0.0
 
     @staticmethod
     def _dequantize(value: np.ndarray, detail: dict) -> np.ndarray:
@@ -89,14 +95,26 @@ class VisionWorker(threading.Thread):
         return best
 
     def _distance(self, detection: PersonDetection, bearing_body_deg: float) -> float | None:
-        if self.c["distance_source"] == "lidar":
-            # Report only after a reliable LiDAR association: never navigate from a 2-D box alone.
-            snap = self.state.snapshot()
+        snap = self.state.snapshot()
+        # Somebody standing clear of the water has the bottom of their box above the horizon.
+        bottom_deg = box_bottom_elevation_deg(detection.box[2], self.c["vertical_fov_deg"], snap.imu.pitch_deg)
+        elevated = bottom_deg > float(self.c.get("elevated_min_deg", 0.5))
+        source = self.c["distance_source"]
+        # fused: the LiDAR ranges only people standing on something, whose wall it hits. A swimmer is
+        # below the scan plane: the return at their bearing is whatever stands behind them, and with
+        # the camera looking sideways down a flooded street that is always a house.
+        if source == "lidar" or (source == "fused" and elevated):
             obstacle = associate_person(bearing_body_deg, snap.obstacles, self.c["lidar_association_half_angle_deg"], self.c["min_target_distance_m"], self.c["max_target_distance_m"])
-            return obstacle.distance_m if obstacle else None
+            if obstacle:
+                return obstacle.distance_m
+            if source == "lidar":
+                return None   # never navigate from a 2-D box alone
         if detection.cropped:
             return self.standoff_m   # too close to size up: hold at the stand-off instead of guessing
-        distance = estimate_distance_bbox(detection.box_height_frac, self.c["vertical_fov_deg"], self.c["person_height_m"])
+        # person_height_m is what a box covers of somebody in the water. Somebody standing clear of
+        # it shows their whole height; with the swimmer's figure their range would read 2.5 times too short.
+        height_m = float(self.c.get("standing_height_m", self.c["person_height_m"])) if elevated else self.c["person_height_m"]
+        distance = estimate_distance_bbox(detection.box_height_frac, self.c["vertical_fov_deg"], height_m)
         return distance if distance <= self.c["max_target_distance_m"] else None
 
     def _recenter(self) -> None:
@@ -104,40 +122,68 @@ class VisionWorker(threading.Thread):
         self._pan = 0.0 if abs(self._pan) <= step else self._pan - step * (1 if self._pan > 0 else -1)
         self._publish_pan(monotonic())
 
+    def _searching(self) -> bool:
+        vehicle = self.state.snapshot().vehicle
+        return self._scan is not None and vehicle.armed and vehicle.mode in self._scan_modes
+
     def _publish_pan(self, now: float) -> None:
         if abs(self._pan - self._sent_pan) >= 0.5 or now - self._sent_at >= 0.25:
             self.send_pan(self._pan)
             self._sent_pan, self._sent_at = self._pan, now
 
     def run(self) -> None:
+        # tflite-runtime on the Pi; it has no wheels for Python 3.12, where its
+        # successor ai-edge-litert takes over (the simulator under WSL).
         try:
             from tflite_runtime.interpreter import Interpreter
         except ImportError:
-            self.log.error("tflite-runtime not installed; camera worker disabled")
-            return
+            try:
+                from ai_edge_litert.interpreter import Interpreter
+            except ImportError:
+                self.log.error("neither tflite-runtime nor ai-edge-litert is installed; camera worker disabled")
+                return
         interpreter = Interpreter(model_path=self.c["model_path"])
         interpreter.allocate_tensors()
         details = interpreter.get_input_details() + interpreter.get_output_details()
-        cap = cv2.VideoCapture(int(self.c["device"]))
+        if self.c.get("source", "device") == "gazebo":
+            from modules.gazebo_io import GazeboCapture   # simulator only: needs the Gazebo bindings
+            cap = GazeboCapture(self.c["gazebo_topic"])
+        else:
+            cap = cv2.VideoCapture(int(self.c["device"]))
         if not cap.isOpened():
-            self.log.error("cannot open camera %s", self.c["device"])
+            self.log.error("cannot open camera %s", self.c.get("gazebo_topic") if self.c.get("source") == "gazebo" else self.c["device"])
             return
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # a queue of old frames delays the camera servo loop
-        self.log.info("vision worker started")
+        max_fps = float(self.c.get("max_fps", 0.0))
+        self.log.info("vision worker started, search sweep %s", f"{self._scan.angles} deg" if self._scan else "off")
         try:
             while not self.stop.is_set():
                 ok, frame = cap.read()
                 if not ok:
                     sleep(0.05)
                     continue
+                now = monotonic()
+                # Simulator only (camera.max_fps): hold the detector to the rate expected of the Pi.
+                if max_fps and now - self._last_frame < 1.0 / max_fps:
+                    continue
+                if self._scanning and not self._scan.usable(now):
+                    continue   # the servo is still moving: blurred frame, angle unknown
+                self._last_frame = now
                 detection = self._detect(interpreter, details, frame)
                 now = monotonic()
                 if detection is None:
                     if now - self._last_seen > self.c["detection_hold_s"]:
                         self.state.update_human_target(None)
                         if now - self._last_seen > self.c["recenter_after_s"]:
-                            self._recenter()
+                            if self._searching():
+                                self._pan = self._scan.frame_done(now) if self._scanning else self._scan.start(now, self._pan)
+                                self._scanning = True
+                                self._publish_pan(now)
+                            else:
+                                self._scanning = False
+                                self._recenter()
                     continue
+                self._scanning = False   # somebody in view: stop the sweep, the servo now follows them
                 self._last_seen = now
                 pan_at_capture = self._pan
                 self._pan = track_pan(self._pan, detection.bearing_cam_deg, self.c["pan_gain"], self.c["pan_deadband_deg"], self.c["pan_limit_deg"])
