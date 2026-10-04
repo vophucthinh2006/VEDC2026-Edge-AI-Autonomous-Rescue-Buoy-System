@@ -1,7 +1,7 @@
 import unittest
 
 from modules.obstacle_feed import objects_from, sectors
-from modules.perception import Obstacle, ScanPattern, box_bottom_elevation_deg, ray_obstacles
+from modules.perception import Obstacle, ScanPattern, SweepPattern, box_bottom_elevation_deg, make_scan, ray_obstacles
 from modules.state_store import GpsState, ImuState, Snapshot, SysState
 from utils.geometry import offset_latlon
 
@@ -79,6 +79,39 @@ class RayObstaclesTest(unittest.TestCase):
     def test_range_limits_and_the_wrap_at_the_stern(self):
         self.assertEqual(ray_obstacles([(0.0, 0.05), (1.0, 0.06), (5.0, 9.0), (6.0, 9.0)]), ())
         self.assertEqual(len(ray_obstacles([(179.5, 2.0), (-179.5, 2.0)])), 2)
+
+
+class SweepPatternTest(unittest.TestCase):
+    def test_turns_at_a_constant_rate_and_reverses_at_the_limits(self):
+        sweep = SweepPattern(60, 30)
+        self.assertEqual(sweep.start(0.0, 0.0), 0.0)
+        self.assertAlmostEqual(sweep.frame_done(1.0), -30.0)
+        self.assertAlmostEqual(sweep.frame_done(2.0), -60.0)
+        self.assertAlmostEqual(sweep.frame_done(3.0), -30.0)          # on the way back
+        self.assertAlmostEqual(sweep.frame_done(6.0), 60.0)
+        self.assertAlmostEqual(sweep.frame_done(6.5), 45.0)
+        self.assertAlmostEqual(sweep.frame_done(14.5), 45.0)          # one full cycle later: 8 s at 30 deg/s
+
+    def test_small_steps_between_frames(self):
+        sweep = SweepPattern(60, 30)
+        sweep.start(0.0, 0.0)
+        angles = [sweep.frame_done(i / 15.0) for i in range(1, 60)]   # one command per camera frame
+        self.assertLessEqual(max(abs(b - a) for a, b in zip(angles, angles[1:])), 2.01)
+        self.assertTrue(sweep.usable(0.0))                            # no frame is thrown away
+
+    def test_resumes_from_where_the_camera_points(self):
+        sweep = SweepPattern(60, 30)
+        self.assertEqual(sweep.start(0.0, 48.0), 48.0)                # was following somebody to starboard
+        self.assertAlmostEqual(sweep.frame_done(0.2), 54.0)           # finishes that side first
+        self.assertEqual(sweep.start(0.0, -75.0), -60.0)              # beyond the sweep: comes back to its end
+
+    def test_make_scan_picks_the_pattern(self):
+        base = {"enabled": True, "angles_deg": [0, -60, 0, 60], "settle_s": 0.25, "dwell_frames": 3,
+                "sweep_limit_deg": 60, "sweep_rate_deg_s": 30}
+        self.assertIsInstance(make_scan(base), ScanPattern)
+        self.assertIsInstance(make_scan({**base, "mode": "sweep"}), SweepPattern)
+        self.assertIsNone(make_scan({**base, "enabled": False}))
+        self.assertIsNone(make_scan(None))
 
 
 class BoxElevationTest(unittest.TestCase):

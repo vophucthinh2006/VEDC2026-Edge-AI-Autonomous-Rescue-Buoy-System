@@ -13,7 +13,7 @@ import random
 import threading
 from time import monotonic, sleep
 
-from modules.perception import ScanPattern
+from modules.perception import make_scan
 from modules.state_store import HumanTarget, StateStore
 from utils.geometry import bearing_deg, haversine_m, signed_angle_deg
 
@@ -28,9 +28,14 @@ class SimulatedDetector(threading.Thread):
         self.victims = [(float(v[0]), float(v[1]), float(v[2]) if len(v) > 2 else self.range_m) for v in sim["victims"]]
         self.pan_limit = float(camera["pan_limit_deg"])
         scan = camera.get("scan") or {}
-        self._scan = ScanPattern(scan["angles_deg"], scan["settle_s"], scan["dwell_frames"]) if scan.get("enabled") else None
+        self._scan = make_scan(scan)
         self._scan_modes = {str(mode).upper() for mode in scan.get("modes", [])}
         self.log = logging.getLogger(__name__)
+        self._view = {"frame": None, "note": "simulated detector: no camera frame", "pan_deg": 0.0, "scanning": False}
+
+    def view(self) -> dict:
+        """For the live viewer: where the simulated field of view points."""
+        return dict(self._view)
 
     def run(self) -> None:
         self.log.info("simulated detector: %d victim(s), range %.1f m, FOV +-%.0f deg", len(self.victims), self.range_m, self.half_fov)
@@ -59,4 +64,5 @@ class SimulatedDetector(threading.Thread):
                     pan = self._scan.frame_done(now)
             else:
                 pan, scanning = 0.0, False
+            self._view["pan_deg"], self._view["scanning"] = pan, scanning
             sleep(0.2)

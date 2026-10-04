@@ -10,7 +10,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from modules.perception import ScanPattern, associate_person, box_bottom_elevation_deg, estimate_distance_bbox, track_pan
+from modules.perception import SweepPattern, associate_person, make_scan, box_bottom_elevation_deg, estimate_distance_bbox, track_pan
 from modules.state_store import HumanTarget, StateStore
 from utils.geometry import signed_angle_deg
 
@@ -38,10 +38,13 @@ class VisionWorker(threading.Thread):
         self._sent_at = 0.0
         # Search sweep (camera.scan): only while the autopilot runs the search pattern.
         scan = camera.get("scan") or {}
-        self._scan = ScanPattern(scan["angles_deg"], scan["settle_s"], scan["dwell_frames"]) if scan.get("enabled") else None
+        self._scan = make_scan(scan)
         self._scan_modes = {str(mode).upper() for mode in scan.get("modes", [])}
         self._scanning = False
         self._last_frame = 0.0
+        # For the live viewer (modules/viewer.py): the last frame read and what was made of the last one looked at.
+        self._view_frame: np.ndarray | None = None
+        self._view_result: tuple[PersonDetection | None, float, float | None, float] = (None, 0.0, None, 0.0)
 
     @staticmethod
     def _dequantize(value: np.ndarray, detail: dict) -> np.ndarray:
@@ -122,6 +125,12 @@ class VisionWorker(threading.Thread):
         self._pan = 0.0 if abs(self._pan) <= step else self._pan - step * (1 if self._pan > 0 else -1)
         self._publish_pan(monotonic())
 
+    def view(self) -> dict:
+        detection, pan_deg, distance_m, at = self._view_result
+        return {"frame": self._view_frame, "box": detection.box if detection else None,
+                "confidence": detection.confidence if detection else 0.0, "distance_m": distance_m,
+                "pan_deg": self._pan if detection is None else pan_deg, "scanning": self._scanning, "age_s": monotonic() - at}
+
     def _searching(self) -> bool:
         vehicle = self.state.snapshot().vehicle
         return self._scan is not None and vehicle.armed and vehicle.mode in self._scan_modes
@@ -155,7 +164,9 @@ class VisionWorker(threading.Thread):
             return
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # a queue of old frames delays the camera servo loop
         max_fps = float(self.c.get("max_fps", 0.0))
-        self.log.info("vision worker started, search sweep %s", f"{self._scan.angles} deg" if self._scan else "off")
+        self.log.info("vision worker started, search sweep %s", "off" if self._scan is None
+                      else f"smooth +-{self._scan.limit:.0f} deg at {self._scan.rate:.0f} deg/s" if isinstance(self._scan, SweepPattern)
+                      else f"steps {self._scan.angles} deg")
         try:
             while not self.stop.is_set():
                 ok, frame = cap.read()
@@ -163,6 +174,12 @@ class VisionWorker(threading.Thread):
                     sleep(0.05)
                     continue
                 now = monotonic()
+                self._view_frame = frame
+                # A smooth sweep is commanded on every camera frame, not only on those the detector
+                # gets to look at: at 5 frames a second the servo would move in 6 deg jumps.
+                if self._scanning and isinstance(self._scan, SweepPattern):
+                    self._pan = self._scan.frame_done(now)
+                    self._publish_pan(now)
                 # Simulator only (camera.max_fps): hold the detector to the rate expected of the Pi.
                 if max_fps and now - self._last_frame < 1.0 / max_fps:
                     continue
@@ -172,6 +189,7 @@ class VisionWorker(threading.Thread):
                 detection = self._detect(interpreter, details, frame)
                 now = monotonic()
                 if detection is None:
+                    self._view_result = (None, self._pan, None, now)
                     if now - self._last_seen > self.c["detection_hold_s"]:
                         self.state.update_human_target(None)
                         if now - self._last_seen > self.c["recenter_after_s"]:
@@ -190,6 +208,7 @@ class VisionWorker(threading.Thread):
                 self._publish_pan(now)
                 bearing_body = signed_angle_deg(pan_at_capture + detection.bearing_cam_deg)
                 distance = self._distance(detection, bearing_body)
+                self._view_result = (detection, pan_at_capture, distance, now)
                 if distance is None:
                     self.state.update_human_target(None)
                     continue
