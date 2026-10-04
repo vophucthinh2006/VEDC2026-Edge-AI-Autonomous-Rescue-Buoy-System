@@ -78,6 +78,19 @@ wsl -d Ubuntu-24.04 -- bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/
 Cách thử: vẽ lộ trình đi ngang gần nạn nhân (cách điểm xuất phát 32 m về đông, 8 m về bắc), Write WPs,
 Arm, AUTO. Log của Pi: `~/vedc_sim/sitl_run/pi.log`. `--pi=simulated` dùng bộ phát hiện hình học thay model.
 
+**Xem Pi đang thấy gì.** Với `--pi`, mở `http://127.0.0.1:8090/` trên trình duyệt:
+
+- bên trái là ảnh camera, có khung quanh người mà model phát hiện, độ tin cậy, khoảng cách ước tính, và góc
+  servo đang nhìn (đang quét, đang bám, hay nhìn thẳng);
+- bên phải là LiDAR nhìn từ trên xuống, mũi phao hướng lên: chấm trắng là điểm LiDAR quét được, vạch đỏ là
+  72 ô 5° đúng như Pi gửi cho bộ lái, vòng cam là vùng cấm quanh nạn nhân đã tiếp cận, hình quạt là góc nhìn
+  60° của camera (vàng khi quét, xanh khi bám), dấu × là người đang được bám;
+- dòng dưới cùng: chế độ bay, pha cứu hộ, waypoint hiện tại, vật cản gần nhất.
+
+Trang này do chính `rescue_main.py --viewer [cổng]` phát ra (`Rasp_Pi/modules/viewer.py`), khoảng 5 hình/giây,
+chỉ đọc dữ liệu chứ không tác động tới phao. Trên Pi thật dùng được y như vậy qua wifi:
+`http://<địa chỉ Pi>:8090/`. Với `--pi=simulated` không có ảnh camera, chỉ có bản đồ LiDAR và hình quạt.
+
 Không dùng `--pi` thì giả lập chạy như cũ với riêng Mission Planner. (Khi đã nạp `avoidance.parm` mà không
 có Pi gửi dữ liệu vật cản, ArduPilot từ chối arm.)
 
@@ -93,11 +106,19 @@ nước. Bộ phát hiện bị giữ ở 5 khung hình/giây (`camera.max_fps` 
 Pi 4, chưa đo trên Pi thật.
 
 **Servo camera quét khi đang tìm** (`camera.scan` trong `settings.yaml`). Khi phao đã arm, đang ở AUTO và
-chưa thấy ai, camera lần lượt dừng ở **0° → −60° → 0° → +60°** rồi lặp lại; ba hướng này ghép lại kín 180°
-phía trước, hướng mũi được nhìn gấp đôi. Ở mỗi hướng: chờ 0.25 s cho servo đứng yên (khung hình chụp lúc
-đang xoay bị bỏ, vì nhòe và không biết chính xác góc), xét 3 khung hình, rồi sang hướng kế. Thấy người
-là dừng quét, servo chuyển sang bám; mất dấu 1.5 s thì quét tiếp từ hướng gần nhất. Ở chế độ khác
-(lái tay, GUIDED, LOITER, RTL) camera nhìn thẳng mũi.
+chưa thấy ai, camera quay qua lại giữa −60° và +60°, phủ 180° phía trước. Thấy người là dừng quét, servo
+chuyển sang bám; mất dấu 1.5 s thì quét tiếp từ đúng góc đang nhìn. Ở chế độ khác (lái tay, GUIDED, LOITER,
+RTL) camera nhìn thẳng mũi. Có hai kiểu quét (`camera.scan.mode`):
+
+- `sweep` (mặc định): quay mượt với tốc độ `sweep_rate_deg_s` (30°/giây). Lệnh servo gửi theo từng khung
+  hình camera, mỗi bước khoảng 2°. Một người nằm trong khung hình 60 / tốc độ giây (2 giây ở 30°/giây); một
+  vòng trái–phải–trái mất 240 / tốc độ giây (8 giây), trong lúc đó phao vẫn chạy. Quay chậm hơn thì nhìn
+  mỗi hướng lâu hơn nhưng lâu hơn mới quay lại.
+- `step`: dừng ở **0° → −60° → 0° → +60°**; ở mỗi hướng chờ 0.25 s cho servo đứng yên (bỏ khung hình chụp
+  lúc đang xoay), xét 3 khung hình rồi sang hướng kế. Hướng mũi được nhìn gấp đôi.
+
+Trong giả lập hai kiểu cho kết quả như nhau (bảng dưới). Camera của Gazebo không có nhòe chuyển động, nên
+ảnh hưởng của việc quay lên chất lượng ảnh phải thử trên camera thật.
 
 Pi không tự dừng phao để quét. Muốn nhìn kỹ một chỗ, đặt thời gian chờ ở waypoint đó (cột Delay trong
 Mission Planner): phao đứng yên, vẫn ở AUTO, camera vẫn quét.
@@ -108,21 +129,25 @@ khung là đếm lại từ đầu.
 
 Dải tìm kiếm đo trong cảnh hồ, phao chạy 1 m/s trên lộ trình thẳng đi ngang cách nạn nhân một khoảng:
 
-| Lộ trình cách nạn nhân | Camera cố định (`--no-scan`) | Có quét |
-|---|---|---|
-| 2 m | thấy | thấy |
-| 3.5 m | thấy | thấy, 2 lần trên 2 |
-| 5 m | thấy | thấy |
-| 6.5 m | **không thấy** | thấy |
-| 6.5 m, chờ 12 s ở waypoint ngang nạn nhân | **không thấy** | thấy |
+| Lộ trình cách nạn nhân | Camera cố định (`noscan`) | Dừng–nhảy (`scan`) | Quay mượt 30°/s (`sweep`) |
+|---|---|---|---|
+| 2 m | thấy | thấy | — |
+| 3.5 m | thấy | thấy, 2 lần trên 2 | thấy |
+| 5 m | thấy | thấy | thấy |
+| 6.5 m | **không thấy** | thấy, 2 lần trên 2 | thấy, 2 lần trên 2 |
+| 6.5 m, chờ 12 s ở waypoint ngang nạn nhân | **không thấy** | thấy | — |
+| 8 m | — | **không thấy** | **không thấy** |
 
-Tọa độ báo về lệch 0.2–0.9 m. Mỗi ô là 1–2 lần chạy; chưa thử xa hơn 6.5 m khi chạy ngang qua. Tức với
-camera cố định các tuyến quét nên cách nhau không quá khoảng 10 m, có quét thì khoảng 13 m. Đo lại:
+Quay mượt ở 20°/giây và 45°/giây cũng thấy người ở 6.5 m (mỗi tốc độ một lần chạy). Tọa độ báo về lệch
+0.2–1.7 m. Mỗi ô là 1–2 lần chạy. Tức với camera cố định các tuyến quét nên cách nhau không quá khoảng
+10 m, có quét thì khoảng 13 m. Đo lại:
 
 ```bash
-bash sim/tools/scan_test.sh camera 6.5 scan        # lệch 6.5 m, có quét
+bash sim/tools/scan_test.sh camera 6.5 sweep       # lệch 6.5 m, quay mượt
+bash sim/tools/scan_test.sh camera 6.5 sweep=20    # quay mượt 20 độ/giây
+bash sim/tools/scan_test.sh camera 6.5 scan        # dừng–nhảy
 bash sim/tools/scan_test.sh camera 6.5 noscan      # camera cố định
-bash sim/tools/scan_test.sh camera 6.5 scan 12     # dừng 12 s ở waypoint ngang nạn nhân
+bash sim/tools/scan_test.sh camera 6.5 sweep 12    # dừng 12 s ở waypoint ngang nạn nhân
 ```
 
 Khi nạn nhân lệch hẳn sang bên, lúc phao quay mũi để tiến lại camera có khi mất dấu vài giây
@@ -195,13 +220,21 @@ người ngập tới ngực, nếu không khoảng cách bị đọc ngắn đi
 
 **Waypoint rơi trúng vật cản.** Người vẽ lộ trình không thấy cây, xe hay mái nhà trên bản đồ, nên một
 waypoint có thể nằm ngay trên chúng. BendyRuler không cho phao vào đó, và phao sẽ loanh quanh mãi trước
-vật cản. Pi xử lý bằng hai luật (`rescue.blocked_*` trong `Rasp_Pi/config/settings.yaml`), rồi cho mission
+vật cản. Pi xử lý bằng ba luật (`rescue.blocked_*` trong `Rasp_Pi/config/settings.yaml`), rồi cho mission
 nhảy sang điểm kế và báo `WP n BLOCKED, SKIPPED` (tab Messages):
 
 - LiDAR thấy vật trong vòng 1.5 m quanh chính waypoint, liên tục 3 giây: bỏ qua ngay, từ xa;
-- hoặc phao đã ở trong 6 m quanh waypoint, 20 giây không lại gần thêm, và có vật cản trong 4 m.
+- hoặc phao đã ở trong 6 m quanh waypoint, 20 giây không lại gần thêm, và có vật cản trong 4 m;
+- hoặc, dù waypoint xa bao nhiêu (giữa một tòa nhà lớn), 45 giây liền phao không lại gần hơn mức gần nhất
+  đã đạt.
 
-Điểm cuối cùng của mission bị chắn thì chỉ báo `WP n BLOCKED`, không có điểm nào để nhảy tới.
+Phao đã vào trong 2.5 m quanh waypoint thì coi là đã tới (có thể đang chờ theo Delay), không tính là bị chắn.
+
+Nếu điểm bị chắn là **điểm cuối cùng** của mission thì không còn điểm nào để nhảy tới: Pi chuyển phao sang
+HOLD (`rescue.blocked_last_mode`) và báo `WP n BLOCKED, HOLD`, thay vì để phao lượn vòng mãi.
+
+Đã thử với waypoint đặt giữa mái một căn nhà 7 × 5 m: phao lượn quanh nhà 55–106 giây rồi bỏ qua điểm đó;
+khi đó là điểm cuối, phao dừng sau 75 giây.
 
 Kiểm thử tự động (trên instance 1, chạy song song được với phiên đang mở):
 
