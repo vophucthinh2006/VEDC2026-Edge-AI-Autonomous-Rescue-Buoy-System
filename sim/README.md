@@ -102,8 +102,8 @@ bash sim/tools/rescue_test.sh simulated   # bộ phát hiện hình học
 ```
 
 **Camera trong giả lập**: 640 × 480, 15 khung/giây, góc nhìn ngang 60° (dọc 46.8°), cao 0.295 m trên mặt
-nước. Bộ phát hiện bị giữ ở 5 khung hình/giây (`camera.max_fps` trong `sim.yaml`), tốc độ giả định cho
-Pi 4, chưa đo trên Pi thật.
+nước. Bộ phát hiện bị giữ ở 8 khung hình/giây (`camera.max_fps` trong `sim.yaml`), tốc độ đội báo cho Pi 4.
+Các số đo trong tài liệu này được lấy khi còn giả định 5 khung hình/giây.
 
 **Servo camera quét khi đang tìm** (`camera.scan` trong `settings.yaml`). Khi phao đã arm, đang ở AUTO và
 chưa thấy ai, camera quay qua lại giữa −60° và +60°, phủ 180° phía trước. Thấy người là dừng quét, servo
@@ -225,8 +225,9 @@ nhảy sang điểm kế và báo `WP n BLOCKED, SKIPPED` (tab Messages):
 
 - LiDAR thấy vật trong vòng 1.5 m quanh chính waypoint, liên tục 3 giây: bỏ qua ngay, từ xa;
 - hoặc phao đã ở trong 6 m quanh waypoint, 20 giây không lại gần thêm, và có vật cản trong 4 m;
-- hoặc, dù waypoint xa bao nhiêu (giữa một tòa nhà lớn), 45 giây liền phao không lại gần hơn mức gần nhất
-  đã đạt.
+- hoặc, dù waypoint xa bao nhiêu (giữa một tòa nhà lớn), 120 giây liền phao không lại gần hơn mức gần
+  nhất đã đạt. (Từng đặt 45 giây: bộ lái có lúc chần chừ cả phút trước một vật cản rồi mới vòng qua, và luật
+  này đã bỏ nhầm một waypoint không bị chắn.)
 
 Phao đã vào trong 2.5 m quanh waypoint thì coi là đã tới (có thể đang chờ theo Delay), không tính là bị chắn.
 
@@ -258,6 +259,111 @@ Giới hạn đã biết của cảnh này:
   thật nếu ESC sau chỉ quay một chiều thì phải thử lại.
 - Nước vẫn màu xanh: lớp sóng của asv_wave_sim tự tô màu, chưa đổi được sang màu nước lũ.
 - Mọi thứ trừ phao đều đứng yên (không có vật trôi).
+
+## Nhiều người trong khung hình
+
+Camera giữ lại **mọi** người model phát hiện trong một khung hình, và Pi ghi từng người lên bản đồ
+(`Rasp_Pi/modules/rescue.py`):
+
+- một phát hiện là người đã biết khi nó nằm đúng hướng của họ (lệch ngang không quá 1 m, hoặc 6°) và ở
+  khoảng cách xấp xỉ (trong 3 m: khoảng cách đọc từ chiều cao khung kém chắc hơn hướng nhiều); không thì là
+  người mới. `rescue.revisit_radius_m`, `rescue.same_person_range_m`;
+- mỗi người được xác nhận riêng (3 khung hình, 1 giây) và có trạng thái riêng;
+- phao tới người chưa xử lý gần nhất, xong thì tới người kế, không cần thấy lại từ đầu;
+- trong lúc tiếp cận, chỉ phát hiện rơi đúng vào người đang nhắm mới làm vị trí của họ thay đổi, và camera
+  bám người đó (kể cả quay về phía họ khi họ chưa ở trong khung hình);
+- người đã xử lý, người chưa tới lượt và người vừa bị mất dấu đều là vùng cấm với bộ né vật cản;
+- khi có từ hai người, Pi báo `PEOPLE 2 FOUND 1 ATTENDED`.
+
+```bash
+bash sim/tools/two_person_test.sh side      # hai người đứng ngang nhau, cách nhau 3 m
+bash sim/tools/two_person_test.sh behind    # một người gần, một người xa hơn 4.5 m và lệch 1.5 m
+```
+
+Đạt khi cả hai người được xử lý, mọi tọa độ báo về lệch dưới 3 m, và phao không tới gần ai dưới 0.8 m.
+
+| | Trước (chỉ giữ một người mỗi khung hình, bán kính "người cũ" 8 m) | Sau |
+|---|---|---|
+| Xử lý đủ 2 người | 0 trên 6 lần chạy | 4 trên 4 |
+| Tọa độ báo về lệch | 0.3–0.6 m | 0.1–0.7 m |
+
+Còn vụng ở cảnh `side`: cả hai lần phao mất dấu người thứ hai hai lần rồi mới tới nơi (5 lần chuyển quyền lái
+thay vì 2), và có lần báo cùng một người hai lần. Người thứ hai đứng cách người vừa xử lý 3 m, mà người vừa
+xử lý lại là vùng cấm. Chưa thử: ba người trở lên, hai người sát nhau dưới 1 m, một người dưới nước cạnh một
+người trên mái.
+
+**Cắt ảnh theo dải chân trời** (đưa vào model hai ô cắt quanh đường chân trời thay cho cả khung hình, để mỗi
+người chiếm nhiều điểm ảnh hơn) đã được đo và **không được đưa vào code**. Điểm tin cậy của model, camera đứng
+yên, ngưỡng 0.60:
+
+| Cự ly | Người bơi: cả khung / hai ô | Người trên mái: cả khung / hai ô |
+|---|---|---|
+| 6 m | 0.72 / 0.71 | 0.61 / 0.43 |
+| 8 m | 0.66 / 0.48 | 0.64 / 0.51 |
+| 10 m | 0.54 / 0.62 | 0.48 / 0.64 |
+| 12 m | 0.59 / 0.57 | 0.52 / 0.54 |
+| 14–16 m | 0.51–0.55 / 0.48–0.56 | 0.40–0.45 / 0.63 |
+
+Hai ô giúp ở 10 m và với người trên mái ở 14–16 m, nhưng làm hỏng ở 8 m và với người trên mái ở gần (dải cắt
+mất một phần người). Điểm của model không tăng đều theo kích thước người trong ảnh mà dao động quanh ngưỡng,
+nên phóng to ảnh không phải lối ra; muốn nhìn xa hơn một cách chắc chắn thì phải huấn luyện lại model trên ảnh
+thật.
+
+## So sánh thuật toán né vật cản
+
+Bài báo trong `papers/` (Jo, Kim, Kim, Park, *J. Mar. Sci. Eng.* 2022, 10, 2036) so sánh hai cách tránh va
+chạm cho tàu mặt nước: trường thế thiên lệch (B-APF) và chướng ngại vận tốc (VO), cùng cổng rủi ro
+TCPA/DCPA. Bài báo xét các tàu trong một đội hình, biết chính xác vị trí và vận tốc của nhau, và chỉ mô
+phỏng. Ở đây hai cách đó được thử cho việc khác: một phao né vật cản đứng yên mà LiDAR thấy.
+
+`Rasp_Pi/pi_steer.py` là chương trình thí nghiệm: bộ lái ở GUIDED, Pi tính hướng và tốc độ 5 lần mỗi giây
+(`Rasp_Pi/modules/navigation.py`) rồi ra lệnh. Không có phát hiện người. Phao bình thường **không** chạy
+kiểu này; nó dùng BendyRuler của bộ lái.
+
+```bash
+bash sim/tools/avoid_compare.sh bendyruler street   # cách hiện tại
+bash sim/tools/avoid_compare.sh paper street        # B-APF của bài báo
+bash sim/tools/avoid_compare.sh vo gap              # VO của bài báo, lộ trình khe hẹp
+bash sim/tools/avoid_compare.sh bapf street         # trường thế của nhánh STM32 (main.py)
+```
+
+Hai lộ trình trong cảnh lũ: **dọc phố** (tới 38.5 m rồi quay về, qua cây, xe, cột điện, khoảng 75 m) và
+**khe hẹp** (ba waypoint buộc phao đi giữa chiếc xe và dãy nhà bắc, khe rộng 4.3 m). Ba lần chạy mỗi ô, ghi
+khoảng nhỏ nhất – lớn nhất. "Dưới 1 L" là tổng thời gian tâm phao cách vật cản dưới một chiều dài phao
+(1.1 m), thước đo an toàn của bài báo.
+
+| Lộ trình | Cách | Xong | Thời gian | Gần vật cản nhất | Dưới 1 L | Tổng góc quay mũi |
+|---|---|---|---|---|---|---|
+| Dọc phố | BendyRuler | 3/3 | 115–133 s | 0.63–1.09 m | 0.5–8.1 s | 1128–1532° |
+| Dọc phố | B-APF bài báo | 3/3 | 144–176 s | 0.08–0.40 m | 34–56 s | 5092–6825° |
+| Dọc phố | VO bài báo | 2/3 | 97–127 s | 0.48–0.95 m | 0.5–17 s | 1595–3543° |
+| Dọc phố | Trường thế STM32 | 0/1 | kẹt sau 8 m | | | |
+| Khe hẹp | BendyRuler | 3/3, nhưng bỏ 2 trong 3 waypoint | 56–83 s | 0.40–0.70 m | 2.3–3.3 s | 689–1503° |
+| Khe hẹp | B-APF bài báo | 3/3 | 37–39 s | 1.15–1.22 m | 0 s | 608–694° |
+| Khe hẹp | VO bài báo | 1/3 | 71 s | 1.24 m | 0 s | 2193° |
+| Khe hẹp | Trường thế STM32 | 0/1 | kẹt | | | |
+
+Với VO, các số là của những lần chạy xong; ba lần không xong (hết 240 s) đều lượn vòng, tổng góc quay
+16 500–18 200°, và có lúc "cách vật cản" 0.02–0.08 m. Vùng tính khoảng cách tới hai dãy nhà gồm cả các hẻm
+giữa nhà, nên số sát 0 có thể là phao chui vào hẻm chứ chưa chắc chạm tường; bài test không phân biệt được.
+
+Đọc bảng này thế nào:
+
+- **Không cách nào hơn hẳn.** BendyRuler là cách duy nhất đi hết lộ trình dọc phố cả ba lần mà không lần nào
+  sát vật cản dưới 0.6 m. B-APF đi khe hẹp gọn và đều nhất, nhưng trên phố nó ở sát vật cản gần một phút và
+  lắc gấp bốn. VO có lần chạy nhanh nhất trên phố, nhưng ba trong sáu lần không tới đích.
+- **Giữ BendyRuler làm mặc định.** Điểm yếu của nó lộ ra ở khe hẹp: nó bỏ waypoint đặt gần vật cản thay vì
+  luồn tới.
+- **Trường thế của nhánh STM32 (`BapfNavigator`) kẹt vĩnh viễn** ở cả hai lộ trình: quy tắc "vật cản gần
+  hơn `stop_distance_m` thì dừng" không có lối ra, đã dừng thì không rời được vật cản.
+  Sau lượt đo này quy tắc đó đã được sửa: chỉ dừng khi hướng đi được lệnh dẫn vào vật cản, còn lại thì bò ra.
+  Phao hết đứng im (đi 78–104 m trong 240 s) nhưng vẫn lượn vòng không tới đích, 4 trên 4 lần chạy.
+- So sánh không hoàn toàn công bằng: BendyRuler chạy trong bộ lái, ba cách kia chạy trên Pi ở 5 Hz qua
+  MAVLink. Hệ số của bài báo (cho tàu 4.88 m, ô 25 m) phải thu nhỏ cho phao 1.1 m trong phố rộng 12 m, qua
+  hai vòng chỉnh; hệ số và lý do từng lần đổi ghi ở đầu `pi_steer.py`. VO với vật cản đứng yên cũng mất lợi
+  thế chính của nó là dùng vận tốc của vật cản.
+- Ba lần chạy mỗi ô là ít, và kết quả dao động mạnh giữa các lần (VO trên phố: 97 s lần này, không tới đích
+  lần sau).
 
 ## Xem trên dashboard web
 
@@ -294,6 +400,8 @@ Kiểm thử tự động (không cần Mission Planner): chạy `--headless`, r
 | `models/vedc_flood_waves/` | mặt nước của cảnh lũ: gió 1.5 m/s (sóng lăn tăn) |
 | `tools/flood_test.sh` | kiểm thử trọn cảnh lũ với code Pi, trên instance 1 |
 | `tools/scan_test.sh` | đo dải tìm kiếm của camera: lộ trình đi lệch bên cạnh nạn nhân, có quét hoặc camera cố định |
+| `tools/two_person_test.sh` | hai người trong cùng khung hình: phải xử lý đủ cả hai |
+| `tools/avoid_compare.sh` | so sánh BendyRuler với các thuật toán né vật cản chạy trên Pi (thí nghiệm) |
 | `models/victim_person/` | người giống thật (mesh "Standing person" của Gazebo Fuel, CC0, tự tải lần đầu), ngập nước tới ngực |
 | `tools/rescue_test.sh` | kiểm thử trọn kịch bản cứu hộ với code Pi, trên instance 1 |
 | `tools/smoke_test.py` | Kiểm thử nhanh qua pymavlink: arm, GUIDED 20 m |
@@ -358,7 +466,7 @@ Chân vịt không quay trên hình (lực đẩy vẫn đúng). STL không mang
 | Pin 12 V, 5600 mAh | `BATT_CAPACITY`, `SIM_BATT_*`, failsafe pin yếu → RTL (giả định pin lithium 3S, đầy 12.6 V) | đội cung cấp |
 | Servo pod **DS51150-12V** | tốc độ khớp pod 5 rad/s (0.21 s/60° ở 12 V) | thông số nhà sản xuất |
 | Servo camera **SG90** | khớp `camera_pan_joint`, ±90°, 10 rad/s; lệnh góc (rad, dương là quay phải) trên `/model/vedc_buoy/joint/camera_pan_joint/cmd_pos` | thông số phổ biến của SG90 |
-| Camera **OV9726**, ống kính **60°** | 640 × 480, 15 khung/giây, góc nhìn ngang 60° (dọc 46.8° ở tỉ lệ 4:3); `settings.yaml` của Pi cũng đặt 60° | đội cung cấp |
+| Camera **OV9726**, ống kính **60°** | 640 × 480, góc nhìn ngang 60° (dọc 46.8° ở tỉ lệ 4:3); `settings.yaml` của Pi cũng đặt 60°. Phát 15 khung/giây: số tự chọn cho giả lập, chưa đối chiếu với camera thật | mã camera và góc: đội cung cấp |
 | LiDAR **LDS-008** (loại của robot hút bụi) | 360 điểm/vòng, 5 vòng/giây theo model cùng họ LDS-006; tầm 0.15–8 m **chưa xác nhận** | ảnh nhãn + tài liệu LDS-006 |
 | GPS Holybro M10 | GPS mặc định của ArduPilot SITL | — |
 
