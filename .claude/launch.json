@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard-static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8766", "--bind", "127.0.0.1", "--directory", "esp32-lora-station/web"],
+      "port": 8766
+    }
+  ]
+}
