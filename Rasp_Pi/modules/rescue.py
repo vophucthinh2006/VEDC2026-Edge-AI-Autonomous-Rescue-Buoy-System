@@ -22,8 +22,8 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 
-from modules.state_store import Snapshot
-from utils.geometry import haversine_m, offset_latlon
+from modules.state_store import HumanTarget, Snapshot
+from utils.geometry import bearing_deg, haversine_m, offset_latlon, signed_angle_deg
 
 MODE_GRACE_S = 2.0   # the autopilot needs a moment to report a mode the Pi has just asked for
 STALL_PROGRESS_M = 0.3   # getting this much closer counts as progress on the approach
@@ -47,6 +47,25 @@ class Action:
     text: str = ""
 
 
+@dataclass
+class Person:
+    """Somebody the detector has seen, kept as a place on the map. A detection in their direction
+    and at about their range is this person again; anything else is somebody else."""
+    position: tuple[float, float]
+    first_seen: float
+    last_seen: float = 0.0
+    last_stamp: float = -1.0          # detector timestamp of the last frame they were in
+    sightings: int = 0                # frames they were in
+    confidence: float = 0.0           # best so far
+    confirmed: bool = False           # seen often and long enough to go to
+    attended_at: float | None = None  # when the boat reached them (or gave up getting closer)
+    lost_at: float | None = None      # when an approach to them was given up for want of seeing them
+
+    @property
+    def attended(self) -> bool:
+        return self.attended_at is not None
+
+
 class RescueMission:
     def __init__(self, vehicle: dict, rescue: dict) -> None:
         self.standoff_m = float(vehicle["target_standoff_m"])
@@ -59,7 +78,8 @@ class RescueMission:
         self.hold_s = float(rescue["hold_s"])
         self.lost_s = float(rescue["lost_s"])
         self.arrive_m = float(rescue["arrive_m"])
-        self.revisit_m = float(rescue["revisit_radius_m"])
+        self.same_person_m = float(rescue["revisit_radius_m"])
+        self.same_person_range_m = float(rescue.get("same_person_range_m", 3.0))
         self.goto_period_s = float(rescue["goto_period_s"])
         self.stall_s = float(rescue.get("stall_s", 10.0))
         self.hold_clear_m = float(rescue.get("hold_clear_m", 1.5))
@@ -70,52 +90,115 @@ class RescueMission:
         self.blocked_obstacle_m = float(rescue.get("blocked_obstacle_m", 4.0))
         self.blocked_clear_m = float(rescue.get("blocked_clear_m", 1.5))
         self.blocked_clear_s = float(rescue.get("blocked_clear_s", 3.0))
-        self.blocked_far_s = float(rescue.get("blocked_far_s", 45.0))
+        self.blocked_far_s = float(rescue.get("blocked_far_s", 120.0))
         self.blocked_arrived_m = float(rescue.get("blocked_arrived_m", 2.5))
         self.blocked_last_mode = str(rescue.get("blocked_last_mode", "HOLD")).upper()
         self._wp_occupied_since: float | None = None
         self._wp = (-1, 0.0, 0.0)                                 # mission item, best distance to it, when
         self.phase = Phase.SEARCH
-        self.victim: tuple[float, float] | None = None            # best estimate of the person's position
-        self.confidence = 0.0
-        self.reported: list[tuple[float, float]] = []             # people already attended
-        self._seen_since: float | None = None
-        self._sightings: set[float] = set()                       # detector timestamps since _seen_since
-        self._last_located = 0.0
-        self._last_seen = 0.0
+        self.people: list[Person] = []                            # everybody seen so far
+        self.target: Person | None = None                         # the one the boat is going to or holding next to
+        self._counts = (0, 0)                                     # people found, attended, as last told to the shore
         self._hold_since = 0.0
+        self._approach_since = 0.0
         self._last_goto = 0.0
         self._best_range = 0.0
         self._progress_at = 0.0
         self._expected_mode = ""
         self._mode_asked_at = 0.0
 
+    @property
+    def victim(self) -> tuple[float, float] | None:
+        """Best estimate of where the person being attended is."""
+        return self.target.position if self.target else None
+
+    @property
+    def confidence(self) -> float:
+        return self.target.confidence if self.target else 0.0
+
+    @property
+    def reported(self) -> list[tuple[float, float]]:
+        """People already attended, in the order the boat got to them."""
+        return [p.position for p in sorted((p for p in self.people if p.attended), key=lambda p: p.attended_at)]
+
     # A detection gives bearing from the bow and range; the boat's fix and heading place it on the map.
     @staticmethod
-    def _locate(snap: Snapshot) -> tuple[float, float]:
-        target = snap.human_target
+    def _locate(snap: Snapshot, target: HumanTarget) -> tuple[float, float]:
         return offset_latlon(snap.gps.lat_deg, snap.gps.lon_deg, snap.imu.yaw_deg + target.bearing_body_deg, target.distance_m)
 
+    def _track(self, snap: Snapshot, now: float) -> None:
+        """Put every person in the frame on the map: the same person as before, or a new one."""
+        if snap.gps.fix < 3:
+            return
+        targets = snap.human_targets or ((snap.human_target,) if snap.human_target is not None else ())
+        for target in targets:
+            if now - target.timestamp > 1.0:
+                continue
+            position = self._locate(snap, target)
+            person = self._same_person(snap, target)
+            if person is None:
+                person = Person(position, now)
+                self.people.append(person)
+            if target.timestamp == person.last_stamp:
+                continue                                    # the frame this step has already counted
+            person.position, person.last_stamp, person.last_seen = position, target.timestamp, now
+            person.sightings += 1
+            person.confidence = max(person.confidence, target.confidence)
+            # One frame is not a person: they have to persist, over confirm_s and in confirm_frames frames.
+            person.confirmed = person.confirmed or (person.sightings >= self.confirm_frames and now - person.first_seen >= self.confirm_s)
+        # A detection near the threshold drops out for a frame or two, more so at the few frames per
+        # second of the Pi: only a longer gap forgets somebody not yet confirmed.
+        self.people = [p for p in self.people
+                       if p.confirmed or p.attended or p is self.target or now - p.last_seen <= self.confirm_gap_s]
+
+    def _same_person(self, snap: Snapshot, target: HumanTarget) -> Person | None:
+        """The known person this detection is, if any. A detection's bearing is good to a degree or
+        two; its range, read off the height of a box, can be metres out, and jumps when the box is
+        cut by the frame's edge. So the match is narrow across the line of sight (half of
+        same_person_m, or 6 deg) and wide along it (same_person_range_m). Matched on map distance
+        alone, a person whose range read 2 m differently became a second person, and the boat
+        going to the first "lost" them while looking straight at them."""
+        best, best_off = None, float("inf")
+        for person in self.people:
+            distance = haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *person.position)
+            bearing = signed_angle_deg(bearing_deg(snap.gps.lat_deg, snap.gps.lon_deg, *person.position) - snap.imu.yaw_deg)
+            off_deg = abs(signed_angle_deg(target.bearing_body_deg - bearing))
+            across = target.distance_m * math.sin(math.radians(min(off_deg, 90.0)))
+            if (off_deg <= 6.0 or across <= self.same_person_m / 2.0) and abs(target.distance_m - distance) <= self.same_person_range_m \
+                    and off_deg < best_off:
+                best, best_off = person, off_deg
+        return best
+
     def keep_outs(self) -> list[tuple[float, float]]:
-        """People the boat must now steer clear of. The one being held next to is left out until
-        the boat leaves: as an obstacle it would make the autopilot back away from them."""
-        return self.reported[:-1] if self.phase is Phase.HOLD else list(self.reported)
+        """People the boat must steer clear of: those already attended, and those seen but not yet
+        gone to, so it does not run past them at arm's length on its way to somebody else. The one
+        it is going to or holding next to is left out: as an obstacle they would make the autopilot
+        stop short of them or back away."""
+        return [p.position for p in self.people if (p.attended or p.confirmed) and p is not self.target]
 
     def attending(self) -> tuple[float, float] | None:
-        """The person the boat is going to or holding next to: not an obstacle for now."""
-        if self.phase is Phase.APPROACH:
-            return self.victim
-        return self.reported[-1] if self.phase is Phase.HOLD and self.reported else None
+        """The person the boat is going to or holding next to: not an obstacle for now. The
+        detector keeps the camera on them (rescue_main passes this to the state as the focus)."""
+        return self.target.position if self.target and self.phase in (Phase.APPROACH, Phase.HOLD) else None
 
-    def _already_reported(self, position: tuple[float, float]) -> bool:
-        return any(haversine_m(position[0], position[1], lat, lon) < self.revisit_m for lat, lon in self.reported)
+    def _attend(self, now: float) -> None:
+        self.phase, self._hold_since = Phase.HOLD, now
+        self.target.attended_at = now
+
+    def _count_report(self) -> list[Action]:
+        """With more than one person about, tell the shore how many there are and how many are done."""
+        counts = (sum(p.confirmed or p.attended for p in self.people), sum(p.attended for p in self.people))
+        if counts == self._counts or counts[0] < 2:
+            return []
+        self._counts = counts
+        return [Action("report", text=f"PEOPLE {counts[0]} FOUND {counts[1]} ATTENDED")]
 
     def _ask_mode(self, mode: str, now: float) -> Action:
         self._expected_mode, self._mode_asked_at = mode, now
         return Action("mode", mode=mode)
 
     def _to_search(self) -> None:
-        self.phase, self.victim, self._seen_since = Phase.SEARCH, None, None
+        self.phase, self.target = Phase.SEARCH, None
 
     def _blocked_waypoint(self, snap: Snapshot, now: float) -> list[Action]:
         vehicle = snap.vehicle
@@ -147,9 +230,11 @@ class RescueMission:
         return [Action("skip", seq=seq + 1), Action("report", text=f"WP {seq} BLOCKED, SKIPPED")]
 
     def step(self, snap: Snapshot, now: float) -> list[Action]:
-        vehicle, target = snap.vehicle, snap.human_target
-        fresh = target is not None and now - target.timestamp <= 1.0
-        located = self._locate(snap) if fresh and snap.gps.fix >= 3 else None
+        self._track(snap, now)
+        return self._decide(snap, now) + self._count_report()
+
+    def _decide(self, snap: Snapshot, now: float) -> list[Action]:
+        vehicle = snap.vehicle
 
         if self.phase is not Phase.SEARCH or not (vehicle.armed and vehicle.mode == self.search_mode):
             # Holding next to a person is not being blocked: the clocks restart afterwards.
@@ -157,25 +242,16 @@ class RescueMission:
 
         if self.phase is Phase.SEARCH:
             searching = vehicle.armed and vehicle.mode == self.search_mode
-            if not searching or located is None or self._already_reported(located):
-                # A detection near the threshold drops out for a frame or two, more so at the few
-                # frames per second of the Pi: a short gap does not restart the confirmation.
-                if not searching or located is not None or now - self._last_located > self.confirm_gap_s:
-                    self._seen_since = None
+            # Somebody an approach was given up on is only gone to again once seen again.
+            waiting = [p for p in self.people if p.confirmed and not p.attended and (p.lost_at is None or p.last_seen > p.lost_at)]
+            if not searching or not waiting:
                 return self._blocked_waypoint(snap, now) if searching else []
-            # One frame is not a person: the detection has to persist, over confirm_s and in
-            # at least confirm_frames frames.
-            if self._seen_since is None:
-                self._seen_since, self._sightings = now, set()
-            self._last_located = now
-            self._sightings.add(target.timestamp)
-            if now - self._seen_since < self.confirm_s or len(self._sightings) < self.confirm_frames:
-                return []
-            self.phase, self.victim, self.confidence = Phase.APPROACH, located, target.confidence
-            self._last_seen, self._last_goto = now, 0.0
+            # Somebody confirmed and not yet gone to: the nearest of them first.
+            self.target = min(waiting, key=lambda p: haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *p.position))
+            self.phase, self._last_goto, self._approach_since = Phase.APPROACH, 0.0, now
             self._best_range, self._progress_at = float("inf"), now
             return [self._ask_mode("GUIDED", now),
-                    Action("report", lat=located[0], lon=located[1], confidence=target.confidence, text="VICTIM SEEN")]
+                    Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM SEEN")]
 
         # From here on the Pi has asked for a mode. Whoever changes it to something else takes over.
         if not vehicle.armed:
@@ -191,17 +267,20 @@ class RescueMission:
             return []
 
         if self.phase is Phase.APPROACH:
-            if located is not None:
-                self.victim, self.confidence, self._last_seen = located, max(self.confidence, target.confidence), now
-            elif now - self._last_seen > self.lost_s:
-                # Lost before reaching it: resume the search rather than hold at a guess.
-                self.phase = Phase.HANDBACK
+            # Only detections that fall on this person move their position (_track): somebody else
+            # in the frame is somebody else on the map, and does not pull the boat over to them.
+            # Out of sight for lost_s since the approach began (the second of two people may not
+            # have been in view for a while when the boat turns to them): resume the search rather
+            # than hold at a guess. They stay on the map, so the boat keeps clear of where they
+            # were, and are gone to again once seen again.
+            if now - max(self.target.last_seen, self._approach_since) > self.lost_s:
+                self.target.lost_at = now
+                self.phase, self.target = Phase.HANDBACK, None
                 return [self._ask_mode(self.search_mode, now), Action("report", text="VICTIM LOST")]
             boat = (snap.gps.lat_deg, snap.gps.lon_deg)
             range_m = haversine_m(boat[0], boat[1], self.victim[0], self.victim[1])
             if range_m <= self.standoff_m + self.arrive_m:
-                self.phase, self._hold_since = Phase.HOLD, now
-                self.reported.append(self.victim)
+                self._attend(now)
                 return [self._ask_mode(self.hold_mode, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM REACHED")]
             # The stand-off is measured from the person, not from what they stand on: coming in at
@@ -213,8 +292,7 @@ class RescueMission:
             ahead = min((o.distance_m for o in snap.obstacles if abs(o.bearing_body_deg) <= 45.0), default=float("inf"))
             around = min((o.distance_m for o in snap.obstacles), default=float("inf"))
             if around < self.hold_min_m or (ahead < self.hold_clear_m and range_m <= self.standoff_m + self.hold_clear_within_m):
-                self.phase, self._hold_since = Phase.HOLD, now
-                self.reported.append(self.victim)
+                self._attend(now)
                 near = range_m <= self.standoff_m + self.hold_clear_within_m
                 return [self._ask_mode(self.hold_mode, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence,
@@ -224,8 +302,7 @@ class RescueMission:
             elif now - self._progress_at > self.stall_s:
                 # No closer for a while: something is in the way (a person on a roof, behind debris).
                 # Stay here and tell the shore where they are.
-                self.phase, self._hold_since = Phase.HOLD, now
-                self.reported.append(self.victim)
+                self._attend(now)
                 return [self._ask_mode(self.hold_mode, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM UNREACHABLE")]
             if now - self._last_goto < self.goto_period_s:
@@ -239,5 +316,5 @@ class RescueMission:
         # HOLD
         if now - self._hold_since < self.hold_s:
             return []
-        self.phase = Phase.HANDBACK
+        self.phase, self.target = Phase.HANDBACK, None      # from now on they are an obstacle like any other
         return [self._ask_mode(self.after_hold, now), Action("report", text="RESUMING " + self.after_hold)]

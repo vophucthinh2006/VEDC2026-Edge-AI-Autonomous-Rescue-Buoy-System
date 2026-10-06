@@ -10,9 +10,9 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from modules.perception import SweepPattern, associate_person, make_scan, box_bottom_elevation_deg, estimate_distance_bbox, track_pan
+from modules.perception import SweepPattern, associate_person, estimate_distance_bbox, make_scan, standing_score, track_pan
 from modules.state_store import HumanTarget, StateStore
-from utils.geometry import signed_angle_deg
+from utils.geometry import bearing_deg, signed_angle_deg
 
 
 @dataclass(frozen=True)
@@ -42,16 +42,21 @@ class VisionWorker(threading.Thread):
         self._scan_modes = {str(mode).upper() for mode in scan.get("modes", [])}
         self._scanning = False
         self._last_frame = 0.0
+        self._ranged_standing: bool | None = None
+        self._frame_aspect = 4.0 / 3.0       # width over height, taken from the frames once they come
         # For the live viewer (modules/viewer.py): the last frame read and what was made of the last one looked at.
         self._view_frame: np.ndarray | None = None
         self._view_result: tuple[PersonDetection | None, float, float | None, float] = (None, 0.0, None, 0.0)
+        self._view_others: list[tuple[PersonDetection, float | None]] = []
+        self._followed_bearing: float | None = None      # from the bow, of the person followed in the last frame
 
     @staticmethod
     def _dequantize(value: np.ndarray, detail: dict) -> np.ndarray:
         scale, zero = detail.get("quantization", (0.0, 0))
         return (value.astype(np.float32) - zero) * scale if scale else value.astype(np.float32)
 
-    def _detect(self, interpreter: object, details: list[dict], frame: np.ndarray) -> PersonDetection | None:
+    def _detect(self, interpreter: object, details: list[dict], frame: np.ndarray) -> list[PersonDetection]:
+        """Every person in the frame over the confidence threshold, tallest box (nearest) first."""
         input_detail = details[0]
         height, width = int(input_detail["shape"][1]), int(input_detail["shape"][2])
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -74,7 +79,7 @@ class VisionWorker(threading.Thread):
         vectors = [array for array in outputs if array.ndim == 1 and array.size > 1]
         if boxes is None or len(vectors) < 2:
             self.log.error("unsupported TFLite output layout; adapt ai_vision.py to this model")
-            return None
+            return []
         def named(token: str) -> np.ndarray | None:
             return next((array for detail, array in output_pairs if token in str(detail.get("name", "")).lower()), None)
         scores = named("score")
@@ -84,7 +89,7 @@ class VisionWorker(threading.Thread):
             scores = vectors[1] if len(vectors) >= 2 else vectors[0]
         if classes is None:
             classes = vectors[0] if vectors[0] is not scores else vectors[1]
-        best: PersonDetection | None = None
+        found: list[PersonDetection] = []
         for index, score in enumerate(scores[: len(boxes)]):
             if score < self.c["confidence_threshold"] or index >= len(classes) or int(round(float(classes[index]))) != 0:
                 continue
@@ -92,16 +97,38 @@ class VisionWorker(threading.Thread):
             center_x = (xmin + xmax) / 2.0
             bearing = (center_x - 0.5) * float(self.c["horizontal_fov_deg"])
             height = max(0.0, ymax - ymin)
-            # The nearest person is the one with the tallest box.
-            if best is None or height > best.box_height_frac:
-                best = PersonDetection(bearing, float(score), height, ymin < 0.02 or ymax > 0.98, (ymin, xmin, ymax, xmax))
-        return best
+            found.append(PersonDetection(bearing, float(score), height, ymin < 0.02 or ymax > 0.98, (ymin, xmin, ymax, xmax)))
+        return sorted(found, key=lambda d: -d.box_height_frac)
 
-    def _distance(self, detection: PersonDetection, bearing_body_deg: float) -> float | None:
+    def _focus_bearing(self) -> float | None:
+        """Bearing from the bow of the person the rescue logic named, if it named one."""
         snap = self.state.snapshot()
-        # Somebody standing clear of the water has the bottom of their box above the horizon.
-        bottom_deg = box_bottom_elevation_deg(detection.box[2], self.c["vertical_fov_deg"], snap.imu.pitch_deg)
-        elevated = bottom_deg > float(self.c.get("elevated_min_deg", 0.5))
+        if snap.focus is None or snap.gps.fix < 3:
+            return None
+        return signed_angle_deg(bearing_deg(snap.gps.lat_deg, snap.gps.lon_deg, *snap.focus) - snap.imu.yaw_deg)
+
+    def _follow(self, detections: list[PersonDetection], pan_deg: float) -> PersonDetection:
+        """Which of several people the camera stays on. The one the rescue logic is going to, if it
+        named one (state focus); else the one followed in the last frame; else the nearest. Without
+        this the tallest box won every frame, and with two people equally far the choice, the servo
+        and the position sent to the autopilot could change from one frame to the next."""
+        focus = self._focus_bearing()
+        wanted = focus if focus is not None else self._followed_bearing
+        if wanted is None:
+            return detections[0]
+        nearest = min(detections, key=lambda d: abs(signed_angle_deg(pan_deg + d.bearing_cam_deg - wanted)))
+        gate = float(self.c.get("follow_gate_deg", 15.0))
+        return nearest if abs(signed_angle_deg(pan_deg + nearest.bearing_cam_deg - wanted)) <= gate else detections[0]
+
+    def _distance(self, detection: PersonDetection, bearing_body_deg: float, followed: bool = True) -> float | None:
+        snap = self.state.snapshot()
+        # Somebody standing clear of the water (on a roof) or a swimmer: by the shape of the box and
+        # where its bottom edge falls (perception.standing_score).
+        score = standing_score(detection.box, self._frame_aspect, self.c["vertical_fov_deg"], snap.imu.pitch_deg)
+        elevated = score >= float(self.c.get("standing_score_min", 2.5))
+        if followed and elevated != self._ranged_standing:
+            self._ranged_standing = elevated
+            self.log.info("person ranged as %s (score %.1f)", "standing" if elevated else "in the water", score)
         source = self.c["distance_source"]
         # fused: the LiDAR ranges only people standing on something, whose wall it hits. A swimmer is
         # below the scan plane: the return at their bearing is whatever stands behind them, and with
@@ -129,6 +156,7 @@ class VisionWorker(threading.Thread):
         detection, pan_deg, distance_m, at = self._view_result
         return {"frame": self._view_frame, "box": detection.box if detection else None,
                 "confidence": detection.confidence if detection else 0.0, "distance_m": distance_m,
+                "others": [(d.box, d.confidence, range_m) for d, range_m in self._view_others],
                 "pan_deg": self._pan if detection is None else pan_deg, "scanning": self._scanning, "age_s": monotonic() - at}
 
     def _searching(self) -> bool:
@@ -175,6 +203,7 @@ class VisionWorker(threading.Thread):
                     continue
                 now = monotonic()
                 self._view_frame = frame
+                self._frame_aspect = frame.shape[1] / frame.shape[0]
                 # A smooth sweep is commanded on every camera frame, not only on those the detector
                 # gets to look at: at 5 frames a second the servo would move in 6 deg jumps.
                 if self._scanning and isinstance(self._scan, SweepPattern):
@@ -186,13 +215,20 @@ class VisionWorker(threading.Thread):
                 if self._scanning and not self._scan.usable(now):
                     continue   # the servo is still moving: blurred frame, angle unknown
                 self._last_frame = now
-                detection = self._detect(interpreter, details, frame)
+                detections = self._detect(interpreter, details, frame)
                 now = monotonic()
-                if detection is None:
-                    self._view_result = (None, self._pan, None, now)
+                if not detections:
+                    self._view_result, self._view_others = (None, self._pan, None, now), []
                     if now - self._last_seen > self.c["detection_hold_s"]:
                         self.state.update_human_target(None)
-                        if now - self._last_seen > self.c["recenter_after_s"]:
+                        self._followed_bearing = None
+                        focus = self._focus_bearing()
+                        if focus is not None:
+                            # The rescue logic is going to somebody not in the frame: look their way.
+                            self._scanning = False
+                            self._pan = max(-float(self.c["pan_limit_deg"]), min(float(self.c["pan_limit_deg"]), focus))
+                            self._publish_pan(now)
+                        elif now - self._last_seen > self.c["recenter_after_s"]:
                             if self._searching():
                                 self._pan = self._scan.frame_done(now) if self._scanning else self._scan.start(now, self._pan)
                                 self._scanning = True
@@ -204,16 +240,27 @@ class VisionWorker(threading.Thread):
                 self._scanning = False   # somebody in view: stop the sweep, the servo now follows them
                 self._last_seen = now
                 pan_at_capture = self._pan
+                detection = self._follow(detections, pan_at_capture)
                 self._pan = track_pan(self._pan, detection.bearing_cam_deg, self.c["pan_gain"], self.c["pan_deadband_deg"], self.c["pan_limit_deg"])
                 self._publish_pan(now)
-                bearing_body = signed_angle_deg(pan_at_capture + detection.bearing_cam_deg)
-                distance = self._distance(detection, bearing_body)
-                self._view_result = (detection, pan_at_capture, distance, now)
-                if distance is None:
-                    self.state.update_human_target(None)
+                # Everybody in the frame goes to the rescue logic, each with a bearing and a range.
+                targets, target, others = [], None, []
+                for found in detections:
+                    bearing_body = signed_angle_deg(pan_at_capture + found.bearing_cam_deg)
+                    distance = self._distance(found, bearing_body, followed=found is detection)
+                    if found is detection:
+                        self._followed_bearing = bearing_body
+                        self._view_result = (detection, pan_at_capture, distance, now)
+                    else:
+                        others.append((found, distance))
+                    if distance is not None:
+                        targets.append(HumanTarget(bearing_body, distance, found.confidence, now))
+                        if found is detection:
+                            target = targets[-1]
+                self._view_others = others
+                self.state.update_human_targets(tuple(targets), target)
+                if target is None:
                     continue
-                target = HumanTarget(bearing_body, distance, detection.confidence, now)
-                self.state.update_human_target(target)
                 if now - self._last_report >= self.c["report_cooldown_s"]:
                     self.on_confirmed(target)
                     self._last_report = now

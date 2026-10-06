@@ -44,17 +44,23 @@ class SimulatedDetector(threading.Thread):
             snap = self.state.snapshot()
             now = monotonic()
             best: HumanTarget | None = None
+            seen: list[tuple[HumanTarget, tuple[float, float]]] = []
             if snap.gps.fix >= 3 and not (scanning and not self._scan.usable(now)):
                 for lat, lon, range_m in self.victims:
                     distance = haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, lat, lon)
                     bearing = signed_angle_deg(bearing_deg(snap.gps.lat_deg, snap.gps.lon_deg, lat, lon) - snap.imu.yaw_deg)
                     if distance > range_m or abs(signed_angle_deg(bearing - pan)) > self.half_fov:
                         continue
-                    if best is None or distance < best.distance_m:
-                        # A bounding box gives the range to about +-10 %.
-                        best = HumanTarget(bearing + random.gauss(0.0, 1.0), distance * random.gauss(1.0, 0.05),
-                                           max(0.6, 0.9 - 0.05 * distance), monotonic())
-            self.state.update_human_target(best)
+                    # A bounding box gives the range to about +-10 %.
+                    seen.append((HumanTarget(bearing + random.gauss(0.0, 1.0), distance * random.gauss(1.0, 0.05),
+                                             max(0.6, 0.9 - 0.05 * distance), now), (lat, lon)))
+            if seen:
+                # Followed: the person the rescue logic named, if in view, else the nearest.
+                if snap.focus is not None:
+                    best = min(seen, key=lambda s: haversine_m(s[1][0], s[1][1], *snap.focus))[0]
+                else:
+                    best = min(seen, key=lambda s: s[0].distance_m)[0]
+            self.state.update_human_targets(tuple(target for target, _ in seen), best)
             if best is not None:
                 pan, scanning = max(-self.pan_limit, min(self.pan_limit, best.bearing_body_deg)), False
             elif self._scan is not None and snap.vehicle.armed and snap.vehicle.mode in self._scan_modes:

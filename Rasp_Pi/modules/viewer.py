@@ -62,6 +62,12 @@ def draw_camera(view: dict | None) -> np.ndarray:
             distance = view.get("distance_m")
             label = f"person {view.get('confidence', 0.0):.2f}" + (f"  {distance:.1f} m" if distance else "  range ?")
             _text(panel, label, (p1[0], max(18, p1[1] - 6)), GREEN, 0.55)
+        if view.get("age_s", 0.0) < 1.0:
+            for other_box, confidence, distance in view.get("others", []):      # people in view the camera is not following
+                ymin, xmin, ymax, xmax = other_box
+                p1 = (int(xmin * CAMERA_W), int(ymin * CAMERA_H))
+                cv2.rectangle(panel, p1, (int(xmax * CAMERA_W), int(ymax * CAMERA_H)), ORANGE, 1)
+                _text(panel, f"person {confidence:.2f}" + (f"  {distance:.1f} m" if distance else ""), (p1[0], max(18, p1[1] - 6)), ORANGE, 0.45)
         cv2.line(panel, (CAMERA_W // 2, CAMERA_H // 2 - 8), (CAMERA_W // 2, CAMERA_H // 2 + 8), DIM, 1)
         cv2.line(panel, (0, CAMERA_H // 2), (CAMERA_W, CAMERA_H // 2), DIM, 1)       # horizon of a level boat
     if view:
@@ -105,6 +111,9 @@ def draw_map(snap: Snapshot, sector_cm: list[int], max_m: float, keep_outs: list
         if distance - radius <= max_m:
             cv2.circle(panel, point(bearing, distance), max(2, int(radius * scale)), ORANGE, 2, cv2.LINE_AA)
     target = snap.human_target
+    for other in snap.human_targets:
+        if other is not target and monotonic() - other.timestamp < 1.0:
+            cv2.drawMarker(panel, point(other.bearing_body_deg, min(other.distance_m, max_m)), ORANGE, cv2.MARKER_TILTED_CROSS, 10, 1, cv2.LINE_AA)
     if target is not None and monotonic() - target.timestamp < 1.0:
         p = point(target.bearing_body_deg, min(target.distance_m, max_m))
         cv2.drawMarker(panel, p, GREEN, cv2.MARKER_TILTED_CROSS, 14, 2, cv2.LINE_AA)

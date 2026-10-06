@@ -77,6 +77,27 @@ def box_bottom_elevation_deg(box_ymax_frac: float, vertical_fov_deg: float, pitc
     return (0.5 - box_ymax_frac) * vertical_fov_deg + pitch_deg
 
 
+def standing_score(box: tuple[float, float, float, float], frame_aspect: float, vertical_fov_deg: float, pitch_deg: float) -> float:
+    """How much a person's box looks like somebody standing clear of the water rather than a
+    swimmer: its height over its width, plus 0.4 per degree its bottom edge is above the horizon.
+    box: ymin, xmin, ymax, xmax as fractions of the frame; frame_aspect: frame width over height.
+
+    Measured on the simulated camera (640 x 480, 60 deg lens, 0.3 m above the water):
+
+        distance          2 m    4 m    6 m    8 m
+        swimmer  h/w      1.16   1.28   1.50   1.87      bottom  -9.6  -4.5  -2.6  -1.4 deg
+        on a roof h/w      -     2.53   2.98   3.44      bottom    -   +2.9  +1.9  +1.3 deg
+        score, swimmer   -2.7   -0.5    0.5    1.3
+        score, on a roof   -     3.7    3.7    4.0
+
+    Either cue alone is thin at 8 m: the bottom edges are 1.3 deg either side of the horizon, less
+    than the boat pitches, and the swimmer's box grows narrow. Together they leave 2.4 between the
+    two, and 2.5 splits it."""
+    ymin, xmin, ymax, xmax = box
+    aspect = (ymax - ymin) / max((xmax - xmin) * frame_aspect, 1e-6)
+    return aspect + 0.4 * box_bottom_elevation_deg(ymax, vertical_fov_deg, pitch_deg)
+
+
 class ScanPattern:
     """Search sweep of the camera servo: step to an angle, let it settle, look at a few frames, step on.
 

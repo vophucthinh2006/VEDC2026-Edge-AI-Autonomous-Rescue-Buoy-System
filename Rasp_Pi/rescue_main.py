@@ -135,7 +135,9 @@ def main() -> int:
                          "armed" if snapshot.vehicle.armed else "disarmed", snapshot.gps.fix, snapshot.imu.yaw_deg,
                          f"{target.bearing_body_deg:+.0f} deg {target.distance_m:.1f} m" if target else "none",
                          f"{nearest:.1f} m" if nearest is not None else "none", mission.phase.value)
-            for action in mission.step(snapshot, now):
+            actions = mission.step(snapshot, now)
+            state.set_focus(mission.attending())      # the detector keeps the camera on the person being attended
+            for action in actions:
                 if action.kind == "mode":
                     link.set_mode(action.mode)
                 elif action.kind == "goto":

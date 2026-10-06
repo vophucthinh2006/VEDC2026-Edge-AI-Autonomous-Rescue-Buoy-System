@@ -66,8 +66,10 @@ class Snapshot:
     obstacles: tuple[object, ...]
     scan_timestamp: float
     waypoint: tuple[float, float] | None
-    human_target: HumanTarget | None
+    human_target: HumanTarget | None          # the person the camera follows
     vehicle: VehicleState = VehicleState()
+    human_targets: tuple[HumanTarget, ...] = ()  # everybody in the last frame, the followed one included
+    focus: tuple[float, float] | None = None     # lat, lon of the person the rescue logic wants watched
 
 
 class StateStore:
@@ -80,6 +82,8 @@ class StateStore:
         self._scan_timestamp = 0.0
         self._waypoint: tuple[float, float] | None = None
         self._human_target: HumanTarget | None = None
+        self._human_targets: tuple[HumanTarget, ...] = ()
+        self._focus: tuple[float, float] | None = None
         self._vehicle = VehicleState()
 
     def update_vehicle(self, mode: str, armed: bool, mission_seq: int, mission_total: int = 0, wp_dist_m: float = -1.0,
@@ -111,7 +115,19 @@ class StateStore:
     def update_human_target(self, target: HumanTarget | None) -> None:
         with self._lock:
             self._human_target = target
+            self._human_targets = (target,) if target is not None else ()
+
+    def update_human_targets(self, targets: tuple[HumanTarget, ...], followed: HumanTarget | None) -> None:
+        """Everybody the detector found in one frame, and which of them the camera follows."""
+        with self._lock:
+            self._human_targets, self._human_target = targets, followed
+
+    def set_focus(self, position: tuple[float, float] | None) -> None:
+        """The person (lat, lon) the detector should keep the camera on, or None for its own choice."""
+        with self._lock:
+            self._focus = position
 
     def snapshot(self) -> Snapshot:
         with self._lock:
-            return Snapshot(self._imu, self._gps, self._system, self._obstacles, self._scan_timestamp, self._waypoint, self._human_target, self._vehicle)
+            return Snapshot(self._imu, self._gps, self._system, self._obstacles, self._scan_timestamp, self._waypoint, self._human_target, self._vehicle,
+                            self._human_targets, self._focus)
