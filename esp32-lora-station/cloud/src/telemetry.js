@@ -68,7 +68,10 @@ export function sanitizeBuoy(m) {
     if (nav) out.nav = nav; else out.nav_bad = 1;
   }
 
-  const attitudeKeys = ["roll", "pitch", "yaw", "target_yaw", "mode", "imu_ok", "calib", "seq"];
+  // Số người phao đã báo phát hiện từ lúc khởi động; firmware cũ không gửi trường này
+  if (Number.isInteger(m.victims) && inRange(m.victims, 0, 255)) out.victims = m.victims;
+
+  const attitudeKeys =["roll", "pitch", "yaw", "target_yaw", "mode", "imu_ok", "calib", "seq"];
   const hasAttitude = attitudeKeys.some(key => Object.hasOwn(m, key));
   if (!hasAttitude) return out;
 

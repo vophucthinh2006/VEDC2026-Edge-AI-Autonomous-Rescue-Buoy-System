@@ -110,7 +110,8 @@ function renderList() {
     const meta = document.createElement('div');
     const name = document.createElement('div'); name.className = 'name'; name.textContent = id;
     const sub = document.createElement('div'); sub.className = 'sub';
-    sub.textContent = `${STATUS_TEXT[statusOf(b)]} | ${fmtAgeSec((Date.now() - b.lastSeen) / 1000)} | ${linkLabel(b)}`;
+    sub.textContent = `${STATUS_TEXT[statusOf(b)]} | ${fmtAgeSec((Date.now() - b.lastSeen) / 1000)} | ${linkLabel(b)}`
+      + (b.victims > 0 ? ` | Đã báo ${b.victims} người` : '');
     meta.append(name, sub);
     let br;
     if (b.rssi === null) {
@@ -507,7 +508,7 @@ function onMissionMessage(m) {
 function onBuoyMessage(m) {
   const id = String(m.id || 'PHAO-01');
   const existed = state.buoys.get(id);
-  const prev = existed ? { fix: existed.fix, imuOk: existed.imuOk, nav: existed.nav } : null;
+  const prev = existed ? { fix: existed.fix, imuOk: existed.imuOk, nav: existed.nav, victims: existed.victims } : null;
   const b = existed || { hasPos: false, marker: null };
   const snapshot = (Number(m.age_s) || 0) > 0;   // bản phát lại lúc mở trang, không phải gói mới
   b.fix = m.fix;
@@ -519,6 +520,8 @@ function onBuoyMessage(m) {
   b.lastSeen = Date.now() - (Number(m.age_s) || 0) * 1000;
   // Nhóm điều hướng (ARMED, chế độ, tốc độ, ga, waypoint, pin, GPS) chỉ có ở MAVLink
   b.nav = m.nav && typeof m.nav === 'object' ? m.nav : null;
+  // Số người phao đã báo phát hiện (bản STM32, qua LoRa); gói không có trường này thì giữ số cũ
+  if (Number.isInteger(m.victims)) b.victims = m.victims;
   const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S'].includes(m.mode);
   if (attitudeValid) {
     b.hasAttitude = true;
@@ -543,6 +546,7 @@ function onBuoyMessage(m) {
     pushHistory(id, s);
   }
   emit('buoy', { id, prev, b, snapshot });
+  if (!snapshot && prev && Number.isInteger(prev.victims) && b.victims > prev.victims) toast(`${id} phát hiện người`);
 
   $('empty').hidden = true;
   updateMarker(id);

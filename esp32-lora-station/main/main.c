@@ -180,6 +180,10 @@ static void xu_ly_goi_lora(const char *raw, int rssi, float snr) {
                  payload.mode, payload.imu_ok, payload.calibration,
                  (unsigned long)payload.sequence);
     }
+    if (payload.has_victims) {
+        json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"victims\":%u", payload.victims);
+        if (payload.victims > 0U) ESP_LOGW(TAG, "[NHAN] id=%s da bao phat hien nguoi: %u", co_id ? id_sach : "(khong co)", payload.victims);
+    }
     json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, "}");
     if (!json_ok) {
         ESP_LOGE(TAG, "JSON telemetry vuot qua %u byte", (unsigned int)sizeof(m.json));
