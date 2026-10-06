@@ -44,6 +44,11 @@ class Stm32Uart(threading.Thread):
             elif packet.command == "SYS" and len(packet.fields) >= 5:
                 _, battery, motor_fault, estop, link_ok = packet.fields[:5]
                 self._state.update_system(float(battery), bool(int(motor_fault)), bool(int(estop)), bool(int(link_ok)))
+                if len(packet.fields) >= 7:
+                    # Newer firmware adds armed and the RC mode switch; the camera's search sweep
+                    # (camera.scan.modes) runs on them as it does on the autopilot's mode.
+                    armed, auto = bool(int(packet.fields[5])), bool(int(packet.fields[6]))
+                    self._state.update_vehicle("AUTO" if auto else "MANUAL", armed, 0)
             elif packet.command == "LRA" and len(packet.fields) >= 3 and packet.fields[1] == "WAYPOINT":
                 # Format: LRA,seq,WAYPOINT,lat;lon - semicolon prevents CSV ambiguity.
                 lat, lon = packet.fields[2].split(";")

@@ -3,8 +3,12 @@ serial:
   stm32_baud: 115200
   lidar_port: /dev/ttyAMA3
   lidar_baud: 115200
+  # main.py (STM32 boat) only. lds008: the fitted module, decoded as its sibling LDS-006 (check
+  # with tools/lidar_capture.py). ld14: LDROBOT LD14. none: no LiDAR, same as --no-lidar.
+  lidar_model: lds008
 vehicle:
-  lidar_yaw_offset_deg: 0.0  # calibrate: LD14 angle zero -> bow; positive clockwise
+  lidar_yaw_offset_deg: 0.0  # calibrate: LiDAR angle zero -> bow; positive clockwise
+  lidar_anticlockwise: false # true if the LiDAR's angle grows anticlockwise seen from above
   boat_radius_m: 0.35
   safety_margin_m: 0.40
   max_speed_mps: 0.50
@@ -51,10 +55,11 @@ camera:
   # Height the box covers. 1.7 is a standing person; a swimmer shows only head and
   # shoulders (about 0.4 m), so with 1.7 the range to a person in the water reads several times too far.
   person_height_m: 1.7
-  # A box whose bottom edge is more than elevated_min_deg above the horizon is somebody standing
-  # clear of the water (on a roof): their box covers standing_height_m.
+  # A box that scores standing_score_min or more (perception.standing_score: tall and narrow,
+  # bottom edge above the horizon) is somebody standing clear of the water, on a roof: their box
+  # covers standing_height_m. Below it, a swimmer: person_height_m.
   standing_height_m: 1.7
-  elevated_min_deg: 0.5
+  standing_score_min: 2.5
   # Camera servo (STM32 CAM packet) follows the person, positive right of the bow.
   pan_gain: 0.25
   pan_deadband_deg: 2.0
@@ -93,7 +98,12 @@ rescue:
   hold_s: 20.0
   lost_s: 5.0                 # person out of sight this long on the way: back to the search
   arrive_m: 0.5               # within stand-off + this counts as arrived
-  revisit_radius_m: 8.0       # a person already attended is not approached again
+  # A detection is a person already on the Pi's map when it lies in their direction (within half of
+  # revisit_radius_m across the line of sight, or 6 deg) and at about their range (within
+  # same_person_range_m: a range read off a box is far less sure than its bearing). Anything else is
+  # somebody new. One 8 m circle was used before, and of two people 3 m apart only one was attended.
+  revisit_radius_m: 2.0
+  same_person_range_m: 3.0
   goto_period_s: 1.0
   stall_s: 10.0               # no closer for this long on the approach: report the person as unreachable and hold
   # Within stand-off + hold_clear_within_m of the person, a LiDAR return closer than hold_clear_m
@@ -110,8 +120,9 @@ rescue:
   blocked_clear_m: 1.5
   blocked_clear_s: 3.0
   # Or, at any distance (a waypoint in the middle of a large building): no closer than the best
-  # so far for blocked_far_s.
-  blocked_far_s: 45.0
+  # so far for blocked_far_s. Long on purpose: the autopilot can dither for a minute in front of
+  # an obstacle it then gets around, and at 45 s this rule gave up a waypoint that was not blocked.
+  blocked_far_s: 120.0
   blocked_arrived_m: 2.5      # a little over WP_RADIUS: closer than this the boat has arrived and may be waiting (Delay)
   # The blocked waypoint is the last mission item: nothing to move on to, switch to this mode.
   blocked_last_mode: HOLD

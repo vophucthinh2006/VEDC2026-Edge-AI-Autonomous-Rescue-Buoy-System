@@ -16,9 +16,10 @@ camera:
   # A person on a roof fills far more of the frame than the swimmer person_height_m is set for;
   # the wall below them gives the LiDAR a range. The swimmer's head is at the scan plane: seen
   # on some scans, else the box height is used.
-  # Not measured on the Pi 4 yet: the detector is held to this rate so the search sweep runs at
-  # the pace expected on the boat, not at the laptop's.
-  max_fps: 5.0
+  # The detector is held to the rate of the Pi 4, so the search sweep and the confirmation run at
+  # the pace of the boat, not of the laptop: 8 frames a second, as reported by the team (it was an
+  # assumed 5 until then; whether 8 is the model alone or the whole loop is still to be confirmed).
+  max_fps: 8.0
   distance_source: fused
   # Only a LiDAR return right at the person's bearing counts. With the 8 deg of settings.yaml the
   # utility pole of the flood scene, a few metres off to the side, was taken for the range of the

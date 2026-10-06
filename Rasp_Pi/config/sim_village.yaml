@@ -1,0 +1,12 @@
+# On top of sim.yaml for the village scene (sim/worlds/vedc_village.sdf), for rescue.detector: simulated.
+# [lat, lon] or [lat, lon, range_m]: people standing on a roof are seen from further.
+sim:
+  victims:
+    - [10.8834335, 106.7962660]   # one person in the water
+    - [10.8834425, 106.7964169, 9.0]   # one person on a roof
+    - [10.8834919, 106.7963941]   # group in the water
+    - [10.8835000, 106.7964105]
+    - [10.8835099, 106.7963977]
+    - [10.8833796, 106.7963209, 9.0]   # group on a roof
+    - [10.8833796, 106.7963318, 9.0]
+    - [10.8833796, 106.7963428, 9.0]
