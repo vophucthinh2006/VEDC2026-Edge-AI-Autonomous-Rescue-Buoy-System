@@ -1,0 +1,6 @@
+# On top of sim.yaml for the two-person scene (sim/worlds/vedc_two.sdf), for rescue.detector: simulated.
+# Both 32 m east of home, 6.5 and 9.5 m north of it.
+sim:
+  victims:
+    - [10.8834964, 106.7963117]
+    - [10.8835233, 106.7963117]

@@ -36,7 +36,8 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
     } else if (strcmp(fields[0], "SOS") == 0 && count >= 3U) {
         command->sos_on = strtoul(fields[2], NULL, 10) != 0U;
     } else if (strcmp(fields[0], "TXD") == 0 && count >= 6U) {
-        /* Validation/ack is local. Attach an SX1278 driver here once its wiring is fixed. */
+        /* Acknowledged by the main loop, which also hands the victim count to the LoRa beacon. */
+        if (strcmp(fields[2], "VICTIM_FOUND") == 0 && command->victim_count < 0xFFU) command->victim_count++;
         command->txd_sequence = (uint16_t)strtoul(fields[1], NULL, 10);
         command->txd_pending = true;
     }

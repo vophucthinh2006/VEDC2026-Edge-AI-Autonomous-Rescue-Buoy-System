@@ -85,7 +85,9 @@ static void send_telemetry(uint16_t sequence)
   Protocol_Send(&huart4, "IMU", payload);
   snprintf(payload, sizeof(payload), "%u,%.6f,%.6f,%u,%.1f,%.2f,%.1f", sequence, gps.latitude_deg, gps.longitude_deg, gps.fix, gps.hdop, gps.speed_mps, gps.course_deg);
   Protocol_Send(&huart4, "GPS", payload);
-  snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U);
+  /* The last two fields let the Pi sweep its camera while the boat waits in AUTO. */
+  snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U,
+           control.armed ? 1U : 0U, control.auto_requested ? 1U : 0U);
   Protocol_Send(&huart4, "SYS", payload);
 }
 #endif
@@ -185,6 +187,7 @@ int main(void)
         snprintf(ack, sizeof(ack), "%u,TXD,ACCEPTED", pi_command.txd_sequence);
         Protocol_Send(&huart4, "ACK", ack);
         pi_command.txd_pending = false;
+        LoraBeacon_SetVictims(pi_command.victim_count, now);
       }
     }
 

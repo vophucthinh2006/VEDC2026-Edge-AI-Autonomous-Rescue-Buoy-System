@@ -77,6 +77,10 @@ export function initEventLog() {
     if (!prev) log('ok', `Phát hiện phao mới: ${id}`);
     if (prev && prev.fix === 1 && b.fix !== 1) log('warn', `${id} mất GPS, giữ vị trí cuối`);
     if (prev && prev.fix !== 1 && b.fix === 1) log('ok', `${id} có lại GPS`);
+    // Số đếm tăng so với gói trước: phao vừa báo thêm người. Phao khởi động lại thì đếm lại từ 0.
+    if (prev && Number.isInteger(prev.victims) && b.victims > prev.victims) {
+      log('err', `${id} PHÁT HIỆN NGƯỜI (lần ${b.victims}) tại ${b.hasPos ? `${b.lat.toFixed(5)}, ${b.lon.toFixed(5)}` : 'vị trí chưa rõ'}`);
+    }
     if (b.link === 'mavlink') {
       // MAVLink đến 1-2 gói/giây: chỉ ghi khi arm/disarm hoặc đổi chế độ, không ghi từng gói
       const was = prev && prev.nav, now = b.nav;

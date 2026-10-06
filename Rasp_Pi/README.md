@@ -44,13 +44,41 @@ python3 rescue_main.py                              # trên phao: /dev/serial0, 
 python3 rescue_main.py --overlay config/sim.yaml    # trong giả lập (sim/run_boat.sh --pi làm sẵn việc này)
 ```
 
-Chưa có trong `rescue_main.py`: đọc LiDAR (module LDS-008 dùng giao thức khác LD14, chưa viết bộ giải mã),
+Hai bản dùng chung cổng `/dev/serial0` nên mỗi lúc chỉ chạy một bản, đúng với bộ điều khiển đang nối dây.
+`run.sh` chọn bản, bật `.venv` nếu có và kiểm tra cổng trước khi chạy; tham số phía sau được chuyển nguyên
+cho chương trình:
+
+```bash
+./run.sh pixhawk --viewer      # rescue_main.py
+./run.sh stm32 --no-lidar      # main.py
+```
+
+### Bản STM32 (`main.py`)
+
+Bản trình diễn trên cạn. Pi gửi hướng và tốc độ (`$NAV`), nhịp sống (`$HBT`), góc camera (`$CAM`) và
+sự kiện phát hiện người (`$TXD,VICTIM_FOUND`); STM32 đưa số người đã báo vào khung LoRa để trạm bờ và
+dashboard hiện cảnh báo. Khi tay điều khiển đã arm và gạt sang AUTO mà chưa thấy ai, camera quét tìm theo
+`camera.scan` (STM32 báo `armed`, `auto` trong gói `$SYS`).
+
+LiDAR chọn bằng `serial.lidar_model` (`lds008`, `ld14`, `none`) hoặc `--no-lidar`. Với
+`vehicle.lidar_required: false`, mất cổng LiDAR chỉ ghi cảnh báo và chạy tiếp, không né vật cản.
+Module LDS-008 không có datasheet: `modules/lidar_lds008.py` viết theo model cùng họ LDS-006. Trước khi
+tin bộ giải mã, ghi dữ liệu thô từ module thật:
+
+```bash
+python3 tools/lidar_capture.py        # /dev/ttyAMA3 @ 115200, 5 giây, ghi lidar_capture.bin
+```
+
+Nếu `valid packets` ra 0 điểm thì giao thức khác giả định, cần viết lại bộ giải mã theo file ghi được.
+Sau đó chỉnh `vehicle.lidar_yaw_offset_deg` và `vehicle.lidar_anticlockwise` cho đúng hướng mũi phao.
+
+Chưa có trong `rescue_main.py`: đọc LiDAR thật (bộ giải mã LDS-008 mới chỉ nối vào `main.py`),
 điều khiển servo camera và LoRa qua bo STM32F103.
 
 ## Kết nối
 
 - STM32: `/dev/serial0`, 115200 8N1, GPIO14/15.
-- LD14: `/dev/ttyAMA3`, 115200 8N1, chỉ nối LD14 TX -> Pi GPIO5. Bật `enable_uart=1` và `dtoverlay=uart3` trong boot configuration; tắt serial login console trên UART STM32.
+- LiDAR: `/dev/ttyAMA3`, 115200 8N1. LD14 chỉ cần TX -> Pi GPIO5; LDS-008 cần thêm Pi GPIO4 (TX) -> RX của module để gửi lệnh `startlds$`. Bật `enable_uart=1` và `dtoverlay=uart3` trong boot configuration; tắt serial login console trên UART STM32.
 - Hiệu chuẩn `vehicle.lidar_yaw_offset_deg` để góc 0 của LD14 đúng hướng mũi phao.
 
 ## Hành vi phát hiện người

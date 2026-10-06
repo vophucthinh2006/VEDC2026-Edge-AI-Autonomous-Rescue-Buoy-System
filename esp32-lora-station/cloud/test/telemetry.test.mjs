@@ -33,6 +33,14 @@ test("drops only the attitude group when it is incomplete or out of range", () =
   }
 });
 
+test("keeps a valid victim count and drops a bad one", () => {
+  assert.equal(sanitizeBuoy({ ...base, ...attitude, victims: 2 }).victims, 2);
+  assert.equal(sanitizeBuoy({ ...base, victims: 0 }).victims, 0);
+  for (const bad of [-1, 256, 1.5, "2", null]) {
+    assert.deepEqual(sanitizeBuoy({ ...base, victims: bad }), base);
+  }
+});
+
 test("wraps headings that round up to 360", () => {
   const result = sanitizeBuoy({ ...base, ...attitude, yaw: 359.97, target_yaw: 359.96 });
   assert.equal(result.yaw, 0);

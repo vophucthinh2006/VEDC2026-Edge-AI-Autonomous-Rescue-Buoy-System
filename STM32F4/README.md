@@ -95,7 +95,7 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 
 | Chức năng | Peripheral | Chân | Tham số | Nối tới |
 |---|---|---|---|---|
-| UART Raspberry Pi | USART1 | PA9 TX, PA10 RX | 115200 8N1, RX interrupt | Pi GPIO15/RXD0 ← PA9; Pi GPIO14/TXD0 → PA10 |
+| UART Raspberry Pi | UART4 | PC10 TX, PC11 RX | 115200 8N1, RX interrupt | Pi GPIO15/RXD0 ← PC10; Pi GPIO14/TXD0 → PC11 |
 | GPS Holybro M10 V2 | USART3 | PB10 TX, PB11 RX | 9600 8N1, RX interrupt | GPS TX → PB11; GPS RX ← PB10 |
 | RC receiver FS-iA6B | USART2 | PA2 (single-wire half-duplex) | 115200 8N1, RX interrupt | cổng i-BUS SERVO: S → PA2, + → 5 V, − → GND |
 | IMU BNO055 | I2C1 | PB8 SCL, PB9 SDA | Fast Mode 400 kHz | địa chỉ 0x29 (ADR thả nổi) |
@@ -402,8 +402,12 @@ STM32 → Raspberry Pi:
 ```
 $IMU,seq,pitch,roll,yaw,imu_ok,overturned*CS\n
 $GPS,seq,lat,lon,fix,hdop,speed,course*CS\n
-$SYS,seq,battery,motor_fault,estop,link_ok*CS\n
+$SYS,seq,battery,motor_fault,estop,link_ok,armed,auto*CS\n
+$ACK,seq,TXD,ACCEPTED*CS\n
 ```
+
+`armed` và `auto` (công tắc SwB đang ở AUTO) để Pi biết lúc nào cho camera quét tìm. Mỗi gói
+`TXD` có sự kiện `VICTIM_FOUND` làm tăng số người đã báo, số này đi theo khung LoRa (mục LoRa, trường `v`).
 
 Checksum là XOR của các ký tự ASCII giữa `$` và `*`, giống `Rasp_Pi/utils/nmea_packet.py`.
 
@@ -498,9 +502,12 @@ Tham số radio (`App/app_config.h`) **phải khớp trạm** (`esp32-lora-stati
 Khung gửi, một dòng text dưới 100 ký tự:
 
 ```
-id=PHAO-01,10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=280.0,m=A,i=1,c=3,q=12
-id=PHAO-01,NO_FIX,r=2.1,p=-1.4,y=278.5,t=-1.0,m=S,i=0,c=0,q=13
+id=PHAO-01,10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=280.0,m=A,i=1,c=3,q=12,v=0
+id=PHAO-01,NO_FIX,r=2.1,p=-1.4,y=278.5,t=-1.0,m=S,i=0,c=0,q=13,v=1
 ```
+
+`v` là số người Pi đã báo phát hiện từ lúc khởi động (dừng ở 255). Khung nào cũng mang số này
+nên mất một gói không mất cảnh báo; khi số tăng, khung mới được phát ngay, không chờ đủ chu kỳ.
 
 `r/p/y` là Roll/Pitch/Yaw thật, `t` là hướng đích (`-1.0` khi không có; `y` và `t` được
 làm tròn 0.1° rồi mới quấn nên không bao giờ in ra `360.0`), `m` là

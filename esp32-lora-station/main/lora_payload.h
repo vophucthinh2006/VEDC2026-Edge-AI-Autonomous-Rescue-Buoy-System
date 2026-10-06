@@ -18,6 +18,8 @@ typedef struct {
     uint8_t imu_ok;
     uint8_t calibration;
     uint32_t sequence;
+    bool has_victims;         /* v= present and in range; older buoy firmware does not send it */
+    uint8_t victims;          /* people the buoy has reported since it booted */
 } lora_payload_t;
 
 /* Parses both the legacy GPS-only frame and the attitude-extended frame.

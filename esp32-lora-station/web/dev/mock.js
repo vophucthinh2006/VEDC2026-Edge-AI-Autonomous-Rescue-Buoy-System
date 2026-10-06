@@ -64,7 +64,8 @@
             if (b.id === 'PHAO-02' && n % 10 >= 6) {             // PHAO-02 mất GPS từng đợt
               send({ id: b.id, fix: 0, rssi, snr, raw: `TRIGGER,${n},NO_FIX`, roll: 5 * Math.sin(t), pitch: 2 * Math.cos(t), yaw: (n * 7) % 360, target_yaw: 90, mode: 'A', imu_ok: 1, calib: 3, seq: n });
             } else {
-              send({ id: b.id, fix: 1, lat: p.lat, lon: p.lon, rssi, snr, raw: `TRIGGER,${n},${p.lat.toFixed(6)},${p.lon.toFixed(6)},sats=8,hdop=0.9`, roll: 5 * Math.sin(t), pitch: 2 * Math.cos(t), yaw: (n * 7) % 360, target_yaw: 90, mode: 'A', imu_ok: 1, calib: 3, seq: n, age_s: 0 });
+              send({ id: b.id, fix: 1, lat: p.lat, lon: p.lon, rssi, snr, raw: `TRIGGER,${n},${p.lat.toFixed(6)},${p.lon.toFixed(6)},sats=8,hdop=0.9`, roll: 5 * Math.sin(t), pitch: 2 * Math.cos(t), yaw: (n * 7) % 360, target_yaw: 90, mode: 'A', imu_ok: 1, calib: 3, seq: n, age_s: 0,
+                     ...(b.id === 'PHAO-01' ? { victims: Math.min(2, Math.floor(n / 4)) } : {}) });   // PHAO-01 báo phát hiện người sau ~12 và ~24 giây
             }
           }
           if (n % 3 === 0) send({ type: 'station', fix: 1, lat: BASE.lat, lon: BASE.lon, sats: 9, hdop: 0.9, age_s: 0 });

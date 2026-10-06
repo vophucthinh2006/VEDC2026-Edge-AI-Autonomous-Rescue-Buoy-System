@@ -24,6 +24,7 @@ typedef struct {
     bool overturned;
     bool motor_fault;
     bool estop;
+    bool auto_requested;        /* RC mode switch at AUTO, whether or not the Pi is steering yet */
     heading_controller_t heading;
     float heading_target_deg;
     float heading_cmd;            /* PID output u, -1..1, positive turns the bow right */

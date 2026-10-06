@@ -1,7 +1,7 @@
 import unittest
 
 from modules.obstacle_feed import objects_from, sectors
-from modules.perception import Obstacle, ScanPattern, SweepPattern, box_bottom_elevation_deg, make_scan, ray_obstacles
+from modules.perception import Obstacle, ScanPattern, SweepPattern, box_bottom_elevation_deg, make_scan, ray_obstacles, standing_score
 from modules.state_store import GpsState, ImuState, Snapshot, SysState
 from utils.geometry import offset_latlon
 
@@ -121,6 +121,21 @@ class BoxElevationTest(unittest.TestCase):
         self.assertAlmostEqual(box_bottom_elevation_deg(0.5 + 4.3 / 47.0, 47.0, 0.0), -4.3, places=3)
         # Feet on a roof 0.25 m above the camera, 9 m away: 1.6 deg above it.
         self.assertGreater(box_bottom_elevation_deg(0.5 - 1.6 / 47.0, 47.0, 0.0), 0.5)
+
+    def test_standing_score_separates_a_roof_from_a_swimmer_even_with_the_boat_pitching(self):
+        def box(height_over_width, bottom_deg, height=0.2):
+            width = height / height_over_width * 3 / 4          # 4:3 frame
+            ymax = 0.5 - bottom_deg / 47.0
+            return (ymax - height, 0.5 - width / 2, ymax, 0.5 + width / 2)
+        frame = 4 / 3
+        # The two hardest cases measured at 8 m, each with 2 deg of unaccounted pitch against it.
+        swimmer = standing_score(box(1.87, -1.4 + 2.0), frame, 47.0, 0.0)
+        on_roof = standing_score(box(3.44, 1.3 - 2.0), frame, 47.0, 0.0)
+        self.assertLess(swimmer, 2.5)
+        self.assertGreater(on_roof, 2.5)
+        # Near, they are far apart.
+        self.assertLess(standing_score(box(1.16, -9.6, 0.4), frame, 47.0, 0.0), 0.0)
+        self.assertGreater(standing_score(box(2.53, 2.9, 0.44), frame, 47.0, 0.0), 3.0)
 
     def test_pitch_is_taken_out(self):
         # Bow down 3 deg: the swimmer's box moves up the frame by 3 deg, and still reads as below the horizon.

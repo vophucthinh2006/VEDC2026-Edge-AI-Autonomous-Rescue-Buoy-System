@@ -84,6 +84,11 @@ bool lora_payload_parse(const char *message, lora_payload_t *out) {
         } else if (strcmp(token, "q") == 0) {
             saw_attitude = true;
             found_q = parse_uint(value, &out->sequence);
+        } else if (strcmp(token, "v") == 0) {
+            /* Not part of the attitude group: a frame without it is still complete. */
+            uint32_t parsed;
+            out->has_victims = parse_uint(value, &parsed) && parsed <= 255U;
+            if (out->has_victims) out->victims = (uint8_t)parsed;
         }
     }
 

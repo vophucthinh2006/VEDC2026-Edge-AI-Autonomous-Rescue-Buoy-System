@@ -40,6 +40,7 @@ class MavlinkLink(threading.Thread):
         self._waypoint_asked = 0.0
         self._wp_dist_m = -1.0
         self._wp_bearing_deg = 0.0
+        self._last_refusal: tuple[int, int] | None = None
         self.log = logging.getLogger(__name__)
         self.ready = threading.Event()       # set once the autopilot's heartbeat is heard
 
@@ -91,6 +92,11 @@ class MavlinkLink(threading.Thread):
                 self._waypoint_asked = now
                 with self._tx:
                     self._master.mav.mission_request_int_send(self._master.target_system, self._master.target_component, self._mission_seq)
+        elif kind == "COMMAND_ACK":
+            # A refused command is otherwise silent: say so, once per command and result.
+            if msg.result != M.MAV_RESULT_ACCEPTED and (msg.command, msg.result) != self._last_refusal:
+                self._last_refusal = (msg.command, msg.result)
+                self.log.warning("autopilot refused command %d: result %d", msg.command, msg.result)
         elif kind == "MISSION_ITEM_INT":
             is_waypoint = msg.command == M.MAV_CMD_NAV_WAYPOINT and (msg.x or msg.y)
             if msg.seq == self._mission_seq:
@@ -146,8 +152,15 @@ class MavlinkLink(threading.Thread):
                 0b110111111000, int(lat * 1e7), int(lon * 1e7), 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     def heading_speed(self, heading_deg: float, speed_mps: float) -> None:
-        """GUIDED heading and speed. Must be repeated: the autopilot drops it after 3 s."""
-        self._command(M.MAV_CMD_NAV_SET_YAW_SPEED, heading_deg % 360.0, speed_mps, 0)
+        """GUIDED heading and speed, as a velocity vector (north, east). Must be repeated: the
+        autopilot drops it after 3 s. (MAV_CMD_NAV_SET_YAW_SPEED, the direct way to say this, is
+        compiled out of ArduRover 4.7: it answers "unsupported".)"""
+        heading = math.radians(heading_deg)
+        with self._tx:
+            self._master.mav.set_position_target_local_ned_send(
+                0, self._master.target_system, self._master.target_component, M.MAV_FRAME_LOCAL_NED,
+                0b110111000111,                                   # velocity only
+                0, 0, 0, speed_mps * math.cos(heading), speed_mps * math.sin(heading), 0, 0, 0, 0, 0, 0)
 
     def statustext(self, text: str, severity: int = M.MAV_SEVERITY_NOTICE) -> None:
         """Shown on every ground station that hears this link."""

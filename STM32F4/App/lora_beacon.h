@@ -35,3 +35,6 @@ extern volatile lora_debug_t lora_debug;
 void LoraBeacon_Init(SPI_HandleTypeDef *hspi, const gps_state_t *gps,
                      const bno055_euler_t *imu, const controller_t *control);
 void LoraBeacon_Tick(uint32_t now_ms);
+/* Number of people the Pi has reported. Every frame carries it, so one lost
+ * packet does not lose the alert; a new count is sent without waiting for the period. */
+void LoraBeacon_SetVictims(uint8_t count, uint32_t now_ms);
