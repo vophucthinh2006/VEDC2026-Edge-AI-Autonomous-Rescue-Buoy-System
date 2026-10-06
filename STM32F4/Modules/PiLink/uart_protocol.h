@@ -15,8 +15,9 @@ typedef struct {
     uint32_t last_hbt_ms;
     bool pi_link_ok;
     bool sos_on;
-    bool txd_pending;             /* Event accepted from Pi; LoRa forwarding is board-specific. */
+    bool txd_pending;             /* Event accepted from Pi, to be acknowledged by the main loop. */
     uint16_t txd_sequence;
+    uint8_t victim_count;         /* VICTIM_FOUND events since boot, stops at 255; sent to shore in the LoRa beacon */
     float cam_pan_deg;            /* camera servo angle from the bow, positive right */
     uint32_t last_cam_ms;         /* 0 until the first CAM packet */
 } pi_command_t;

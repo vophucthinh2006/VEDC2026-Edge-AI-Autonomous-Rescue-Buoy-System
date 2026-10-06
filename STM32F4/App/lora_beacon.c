@@ -7,8 +7,9 @@
 #include <string.h>
 
 /* Compact frame, always below 100 bytes because the station keeps 100 bytes:
- * id=PHAO-01,10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=280.0,m=A,i=1,c=3,q=12
- * id=PHAO-01,NO_FIX,r=2.1,p=-1.4,y=278.5,t=-1.0,m=S,i=0,c=0,q=13
+ * id=PHAO-01,10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=280.0,m=A,i=1,c=3,q=12,v=0
+ * id=PHAO-01,NO_FIX,r=2.1,p=-1.4,y=278.5,t=-1.0,m=S,i=0,c=0,q=13,v=1
+ * v is the number of people the Pi has reported since boot.
  * The two decimal tokens without '=' remain lat/lon for backward compatibility. */
 
 #define TX_TIMEOUT_MS      1500U   /* SF9 BW125 takes ~0.4 s on air, over 1.5 s means a fault */
@@ -26,6 +27,7 @@ static const controller_t *control_src;
 static uint32_t next_tx_ms;
 static uint32_t tx_start_ms;
 static uint32_t last_poll_ms;
+static uint8_t victims;
 
 /* Round to the 0.1 deg the frame carries, then wrap: 359.96 would print as
  * "360.0", which the station rejects as out of range. */
@@ -53,15 +55,15 @@ static uint16_t build_frame(char *buf, size_t size, uint32_t now_ms)
     int n;
     if (fix) {
         n = snprintf(buf, size,
-                     "id=%s,%.6f,%.6f,r=%.1f,p=%.1f,y=%.1f,t=%.1f,m=%c,i=%u,c=%u,q=%lu",
+                     "id=%s,%.6f,%.6f,r=%.1f,p=%.1f,y=%.1f,t=%.1f,m=%c,i=%u,c=%u,q=%lu,v=%u",
                      LORA_BUOY_ID, (double)gps_src->latitude_deg, (double)gps_src->longitude_deg,
                      roll, pitch, yaw, target, mode, imu_ok ? 1U : 0U, calib,
-                     (unsigned long)lora_debug.seq);
+                     (unsigned long)lora_debug.seq, (unsigned int)victims);
     } else {
         n = snprintf(buf, size,
-                     "id=%s,NO_FIX,r=%.1f,p=%.1f,y=%.1f,t=%.1f,m=%c,i=%u,c=%u,q=%lu",
+                     "id=%s,NO_FIX,r=%.1f,p=%.1f,y=%.1f,t=%.1f,m=%c,i=%u,c=%u,q=%lu,v=%u",
                      LORA_BUOY_ID, roll, pitch, yaw, target, mode, imu_ok ? 1U : 0U, calib,
-                     (unsigned long)lora_debug.seq);
+                     (unsigned long)lora_debug.seq, (unsigned int)victims);
     }
     lora_debug.gps_valid = fix ? 1U : 0U;
     if (n < 0) return 0U;
@@ -109,6 +111,18 @@ void LoraBeacon_Init(SPI_HandleTypeDef *hspi, const gps_state_t *gps,
     lora_debug.init_ok = 1U;
     lora_debug.state = LORA_STATE_IDLE;
     next_tx_ms = HAL_GetTick() + FIRST_TX_DELAY_MS;
+#endif
+}
+
+void LoraBeacon_SetVictims(uint8_t count, uint32_t now_ms)
+{
+#if LORA_ENABLED
+    if (count == victims) return;
+    victims = count;
+    next_tx_ms = now_ms;   /* a frame on air finishes first, then this one goes out */
+#else
+    (void)count;
+    (void)now_ms;
 #endif
 }
 

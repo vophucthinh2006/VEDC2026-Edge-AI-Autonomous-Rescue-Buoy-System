@@ -124,6 +124,7 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
     control->estop = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == (ESTOP_CONTACT_NC ? GPIO_PIN_SET : GPIO_PIN_RESET);
     control->overturned = imu_fresh && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
+    control->auto_requested = auto_requested;
     bool was_armed = control->armed;
     bool arm_switch = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD;
     bool safe = rc_fresh && (imu_fresh || !ARM_REQUIRES_IMU) && !control->estop && !control->overturned;
