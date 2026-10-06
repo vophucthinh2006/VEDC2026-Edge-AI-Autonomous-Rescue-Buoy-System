@@ -10,9 +10,8 @@ pip install -r requirements.txt
 python3 main.py --no-camera
 ```
 
-Model nhận diện là **SSD MobileNet v1 COCO (quantized)** của TensorFlow, không lưu trong git (thư mục
-`models/` nằm trong `.gitignore`). Tải và giải nén vào `models/`, được `detect.tflite` và `labelmap.txt`
-(lớp `person` là lớp số 0):
+Model nhận diện là **SSD MobileNet v1 COCO (quantized)** của TensorFlow, đã có sẵn trong git ở
+`models/detect.tflite` và `models/labelmap.txt` (lớp `person` là lớp số 0). Nguồn gốc, nếu cần tải lại:
 
 ```bash
 mkdir -p models && cd models

@@ -4,5 +4,3 @@
 # Python bytecode
 __pycache__/
 
-# Detection model: downloaded, not versioned (link in Rasp_Pi/README.md)
-Rasp_Pi/models/
