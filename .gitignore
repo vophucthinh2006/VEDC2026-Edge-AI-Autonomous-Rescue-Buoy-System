@@ -9,3 +9,6 @@ __pycache__/
 boat.local.cmd
 # Written on the Pi by boat.bat deploy
 Rasp_Pi/.boat_profile
+
+# Local state of wrangler dev when it is started from here (.claude/launch.json)
+.wrangler/
