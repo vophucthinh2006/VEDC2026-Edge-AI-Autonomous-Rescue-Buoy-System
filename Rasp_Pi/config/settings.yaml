@@ -3,8 +3,8 @@ serial:
   stm32_baud: 115200
   lidar_port: /dev/ttyAMA3
   lidar_baud: 115200
-  # main.py (STM32 boat) only. lds008: the fitted module, decoded as its sibling LDS-006 (check
-  # with tools/lidar_capture.py). ld14: LDROBOT LD14. none: no LiDAR, same as --no-lidar.
+  # lds008: the fitted module, decoded as its sibling LDS-006 (check with tools/lidar_capture.py).
+  # ld14: LDROBOT LD14. none (main.py only): no LiDAR, same as --no-lidar.
   lidar_model: lds008
 vehicle:
   lidar_yaw_offset_deg: 0.0  # calibrate: LiDAR angle zero -> bow; positive clockwise
@@ -40,7 +40,7 @@ camera:
   source: device              # device: the USB camera below. gazebo: the simulator's camera topic
   device: 0
   horizontal_fov_deg: 60.0    # OV9726 with the 60 deg lens
-  model_path: /home/khanh/human_detect_project/detect.tflite
+  model_path: models/detect.tflite   # in the repository; relative to this directory, where run.sh starts the program
   confidence_threshold: 0.60
   detection_hold_s: 0.40
   report_cooldown_s: 10.0
@@ -83,6 +83,17 @@ camera:
     sweep_limit_deg: 60
     sweep_rate_deg_s: 30
     modes: [AUTO]
+# LiDAR of the Pixhawk boat (rescue_main.py). none: no LiDAR, only the keep-outs reach the autopilot.
+# serial: the module of serial.lidar_model on serial.lidar_port (config/boat_pixhawk.yaml).
+# gazebo: the simulator's (config/sim.yaml).
+lidar:
+  source: none
+# STM32F103 helper board of the Pixhawk boat (modules/helper_board.py): camera servo, alarm relays,
+# E-stop button, battery, LoRa beacon. none: not fitted (the simulator). config/boat_pixhawk.yaml
+# sets the port.
+helper:
+  port: none
+  baud: 115200
 # Pixhawk link (rescue_main.py). TELEM2 on the boat; config/sim.yaml points it at the simulator.
 mavlink:
   url: /dev/serial0
@@ -126,12 +137,14 @@ rescue:
   blocked_arrived_m: 2.5      # a little over WP_RADIUS: closer than this the boat has arrived and may be waiting (Delay)
   # The blocked waypoint is the last mission item: nothing to move on to, switch to this mode.
   blocked_last_mode: HOLD
+  estop_mode: HOLD            # the E-stop button of the helper board asks the autopilot for this mode
   detector: camera            # camera: the TFLite model. simulated: known positions (sim section)
 # Obstacles sent to the autopilot's avoidance (modules/obstacle_feed.py): MAVLink OBSTACLE_DISTANCE.
 avoidance:
   rate_hz: 5.0
   min_range_m: 0.15
   max_range_m: 8.0
+  lidar_stale_s: 1.0          # with a LiDAR: no scan for this long stops the feed, the autopilot then reports the sensor failed
   # Circle around a person already attended. The autopilot adds OA_MARGIN_MAX (1 m) to it; the
   # two together must stay below the stand-off, or the boat cannot leave the person it holds next to.
   keep_out_radius_m: 0.4

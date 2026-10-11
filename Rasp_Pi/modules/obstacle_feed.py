@@ -9,9 +9,10 @@ an obstacle they would make the autopilot stop short of the stand-off or back aw
 """
 from __future__ import annotations
 
+import logging
 import math
 import threading
-from time import sleep
+from time import monotonic, sleep
 from typing import Callable
 
 from modules.state_store import Snapshot, StateStore
@@ -62,18 +63,40 @@ def objects_from(snap: Snapshot, keep_outs: list[tuple[float, float]], keep_out_
     return found
 
 
+def lidar_fresh(scan_timestamp: float, now: float, stale_s: float | None) -> bool:
+    """Whether the obstacle list may be sent: always without a LiDAR (stale_s None), else only
+    while its last revolution is recent."""
+    return stale_s is None or now - scan_timestamp <= stale_s
+
+
 class ObstacleFeed(threading.Thread):
     def __init__(self, avoidance: dict, state: StateStore, stop_event: threading.Event,
                  keep_outs: Callable[[], list[tuple[float, float]]], attending: Callable[[], tuple[float, float] | None],
-                 send: Callable[[list[int], int, int], None]) -> None:
+                 send: Callable[[list[int], int, int], None], lidar_stale_s: float | None = None) -> None:
         super().__init__(name="obstacles", daemon=True)
         self.a, self.state, self.stop, self.keep_outs, self.send = avoidance, state, stop_event, keep_outs, send
         self.attending = attending
+        self.lidar_stale_s = lidar_stale_s       # None: no LiDAR fitted, the keep-outs alone are sent
+        self.log = logging.getLogger(__name__)
 
     def run(self) -> None:
         min_m, max_m = float(self.a["min_range_m"]), float(self.a["max_range_m"])
         period = 1.0 / float(self.a["rate_hz"])
+        silent = False
         while not self.stop.is_set():
-            objects = objects_from(self.state.snapshot(), list(self.keep_outs()), float(self.a["keep_out_radius_m"]), self.attending())
-            self.send(sectors(objects, min_m, max_m), int(min_m * 100), int(max_m * 100))
+            snap = self.state.snapshot()
+            # A LiDAR that has stopped must not read as open water: say nothing, and the autopilot
+            # reports its proximity sensor as failed (and refuses to arm) instead.
+            stale = not lidar_fresh(snap.scan_timestamp, monotonic(), self.lidar_stale_s)
+            if stale and not silent:
+                if snap.scan_timestamp == 0.0:
+                    self.log.info("waiting for the first LiDAR scan before feeding the autopilot")
+                else:
+                    self.log.error("no LiDAR scan for %.1f s: obstacle feed stopped", self.lidar_stale_s)
+            elif silent and not stale:
+                self.log.info("LiDAR scans are back: obstacle feed resumed")
+            silent = stale
+            if not stale:
+                objects = objects_from(snap, list(self.keep_outs()), float(self.a["keep_out_radius_m"]), self.attending())
+                self.send(sectors(objects, min_m, max_m), int(min_m * 100), int(max_m * 100))
             sleep(period)

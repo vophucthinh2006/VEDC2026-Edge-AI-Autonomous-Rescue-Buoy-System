@@ -121,6 +121,11 @@ class RescueMission:
         """People already attended, in the order the boat got to them."""
         return [p.position for p in sorted((p for p in self.people if p.attended), key=lambda p: p.attended_at)]
 
+    @property
+    def found(self) -> int:
+        """How many people have been confirmed so far, attended or not."""
+        return sum(p.confirmed or p.attended for p in self.people)
+
     # A detection gives bearing from the bow and range; the boat's fix and heading place it on the map.
     @staticmethod
     def _locate(snap: Snapshot, target: HumanTarget) -> tuple[float, float]:
@@ -187,7 +192,7 @@ class RescueMission:
 
     def _count_report(self) -> list[Action]:
         """With more than one person about, tell the shore how many there are and how many are done."""
-        counts = (sum(p.confirmed or p.attended for p in self.people), sum(p.attended for p in self.people))
+        counts = (self.found, sum(p.attended for p in self.people))
         if counts == self._counts or counts[0] < 2:
             return []
         self._counts = counts

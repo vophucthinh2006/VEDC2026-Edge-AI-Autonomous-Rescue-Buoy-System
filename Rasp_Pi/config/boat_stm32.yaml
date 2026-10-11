@@ -1,0 +1,3 @@
+# The STM32F407 boat (Raspberry Pi + STM32F407), on top of settings.yaml.
+# run.sh stm32 adds this file by itself. Nothing differs from settings.yaml yet: put here what
+# only this boat needs, so the Pixhawk boat's values stay untouched.

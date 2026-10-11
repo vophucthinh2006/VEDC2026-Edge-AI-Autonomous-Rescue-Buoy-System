@@ -167,6 +167,12 @@ class MavlinkLink(threading.Thread):
         with self._tx:
             self._master.mav.statustext_send(severity, text[:50].encode("ascii", "replace"))
 
+    def named_int(self, name: str, value: int) -> None:
+        """A named number for whoever listens on the autopilot's other ports: it forwards
+        broadcasts like this one to all of them."""
+        with self._tx:
+            self._master.mav.named_value_int_send(0, name[:10].encode("ascii"), int(value))
+
     def obstacle_distance(self, distances_cm: list[int], min_cm: int, max_cm: int) -> None:
         """72 sectors of 5 deg, clockwise from the bow, for the autopilot's avoidance (PRX1_TYPE = 2)."""
         with self._tx:

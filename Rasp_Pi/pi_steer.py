@@ -30,7 +30,7 @@ from modules.navigation import BapfNavigator, PaperBapfNavigator, VoNavigator
 from modules.obstacle_feed import SECTOR_DEG, sectors
 from modules.perception import Obstacle
 from modules.state_store import Snapshot, StateStore
-from rescue_main import load_config
+from utils.config import load_config
 
 HOME = (10.883438, 106.796019)            # sim/run_boat.sh HOME_LOCATION
 LIDAR_MIN_M, LIDAR_MAX_M = 0.15, 8.0

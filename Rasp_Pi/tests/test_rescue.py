@@ -178,6 +178,15 @@ class SeveralPeopleTest(unittest.TestCase):
         mission.step(snap(2.1, mode="GUIDED", target=self.B), 2.1)
         self.assertLess(haversine_m(*mission.victim, *going_to), 0.1)
 
+    def test_found_counts_confirmed_people_only(self):
+        mission = RescueMission(VEHICLE, dict(RESCUE, revisit_radius_m=2.0))
+        self.assertEqual(mission.found, 0)
+        mission.step(snap(0.0, target=(-10.0, 5.0), others=((25.0, 5.5),)), 0.0)
+        self.assertEqual(mission.found, 0)                      # one frame is nobody yet
+        for t in (0.5, 1.0, 1.5):
+            mission.step(snap(t, target=(-10.0, 5.0), others=((25.0, 5.5),)), t)
+        self.assertEqual(mission.found, 2)
+
     def test_after_the_first_the_boat_goes_to_the_second(self):
         mission = self._seen_both()
         mission.step(snap(1.1, target=self.A, others=[self.B]), 1.1)
