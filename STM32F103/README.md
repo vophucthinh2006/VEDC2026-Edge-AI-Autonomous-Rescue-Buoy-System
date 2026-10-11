@@ -41,7 +41,8 @@ main.c  →  App/  →  Modules/  →  HAL
 
 | File | Việc |
 |---|---|
-| `App/app.c` | vòng lặp: servo theo góc Pi gửi, relay khi số người tăng, nút dừng, INA226, báo cáo cho Pi, phát LoRa |
+| `App/app.c` | phần dính phần cứng: đọc chân và cảm biến, ghi servo/relay/LED, UART, phát LoRa |
+| `App/helper_logic.c` | mọi quyết định của bo (servo, báo động, nút dừng, nội dung beacon và báo cáo), không phụ thuộc HAL |
 | `App/app_config.h` | mọi hằng số chỉnh được: chiều servo, thời gian báo động, tham số LoRa |
 | `App/lora_frame.c` | dựng dòng beacon, cùng định dạng với phao STM32F4 |
 | `Modules/PiLink` | giao thức dòng với Pi (`$...*CS`), không phụ thuộc HAL |
@@ -89,6 +90,19 @@ Test trên máy tính cho phần không dính HAL (cần gcc):
 powershell -File Tools\run_host_tests.ps1
 ```
 
-Xem trạng thái bo đang chạy qua ST-LINK, không dừng chương trình: biến `helper_debug` (`App/app.h`)
-gồm `pi_ok`, `pi_rx_ok/bad`, `victims`, `alarm`, `estop`, `servo_us`, `bus_mv`, `ina_ok`,
-`lora_version` (phải là `0x12`), `lora_tx`, `lora_fail`, `ibus_polls`.
+Xem trạng thái bo đang chạy qua ST-LINK, không dừng chương trình:
+
+```
+python Tools\helper_monitor.py                # cập nhật liên tục
+python Tools\helper_monitor.py --csv run.csv  # ghi thêm ra file
+```
+
+Nó đọc biến `helper_debug` (`App/app.h`): Pi có đang nói chuyện không và bao nhiêu dòng hỏng, xung
+servo, số người và báo động, nút dừng, áp và dòng pin, chip LoRa (phải là `0x12`) cùng số beacon đã
+gửi/lỗi, số lần receiver hỏi cảm biến. Trình tự đưa lên phao: `docs/porting-checklist.md`.
+
+## Trong giả lập
+
+`Tests/helper_sim.c` biên dịch chính `helper_logic.c`, `pi_link.c`, `lora_frame.c` cho máy tính;
+`sim/tools/helper_board_sim.py` đặt nó sau một cổng nối tiếp ảo để code Pi nói chuyện với nó như với
+bo thật, và đưa xung servo vào khớp camera của Gazebo (`sim/run_boat.sh --pi --hw`).

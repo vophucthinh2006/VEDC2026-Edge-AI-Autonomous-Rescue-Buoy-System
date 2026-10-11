@@ -1,5 +1,6 @@
 #include "app.h"
 #include "app_config.h"
+#include "helper_logic.h"
 #include "i2c.h"
 #include "ibus_sensor.h"
 #include "ina226.h"
@@ -10,10 +11,8 @@
 #include "tim.h"
 #include "usart.h"
 #include <stdbool.h>
-#include <stdio.h>
 #include <string.h>
 
-#define FAST_PERIOD_MS       10U
 #define LORA_TX_TIMEOUT_MS   1500U   /* SF9 BW125 takes ~0.4 s on air, over 1.5 s means a fault */
 #define LORA_POLL_PERIOD_MS  5U
 #define LORA_FIRST_TX_MS     1000U
@@ -34,16 +33,10 @@ static uint8_t ibus_reply[IBUS_SENSOR_REPLY_MAX];
 static ina226_t ina = { &hi2c1, INA226_ADDRESS, INA226_CALIBRATION, INA226_CURRENT_LSB_UA };
 static sx127x_t radio;
 
-static uint32_t last_fast_ms, last_ina_ms, last_report_ms, alarm_until_ms;
+static helper_logic_t logic;          /* every decision: App/helper_logic.c */
+static helper_inputs_t inputs;
+static uint32_t last_fast_ms, last_ina_ms, last_report_ms;
 static uint32_t lora_next_ms, lora_start_ms, lora_poll_ms;
-static uint16_t report_sequence;
-static uint8_t seen_victims, estop_ticks;
-static bool alarm_on;
-
-/* Signed: an interrupt can stamp a tick newer than the now_ms the loop read. */
-static bool within(uint32_t now_ms, uint32_t stamp_ms, uint32_t timeout_ms) {
-    return (int32_t)(now_ms - stamp_ms) <= (int32_t)timeout_ms;
-}
 
 static void relays(bool on) {
     GPIO_PinState level = on ? RELAY_ON_LEVEL : (RELAY_ON_LEVEL == GPIO_PIN_SET ? GPIO_PIN_RESET : GPIO_PIN_SET);
@@ -77,14 +70,14 @@ static void lora_tick(uint32_t now_ms) {
         if ((int32_t)(now_ms - lora_next_ms) < 0) return;
         /* The Pi link's interrupt rewrites the status text: copy it with that interrupt held off. */
         char status[PI_LINK_STATUS_MAX];
-        bool fresh;
         HAL_NVIC_DisableIRQ(USART1_IRQn);
-        fresh = pi.status_seen && within(now_ms, pi.last_status_ms, PI_STATUS_STALE_MS);
+        bool status_seen = pi.status_seen;
+        uint32_t last_status_ms = pi.last_status_ms;
         memcpy(status, pi.status, sizeof(status));
         HAL_NVIC_EnableIRQ(USART1_IRQn);
 
         char frame[LORA_FRAME_SIZE];
-        size_t length = LoraFrame_Build(frame, sizeof(frame), LORA_BUOY_ID, fresh ? status : NULL, helper_debug.lora_seq, seen_victims);
+        size_t length = HelperLogic_Beacon(&logic, status, status_seen, last_status_ms, now_ms, helper_debug.lora_seq, frame, sizeof(frame));
         lora_next_ms = now_ms + LORA_BEACON_PERIOD_MS;
         helper_debug.lora_seq++;
         if (length > 0U && SX127x_StartTx(&radio, (const uint8_t *)frame, (uint8_t)length)) {
@@ -123,41 +116,23 @@ static void ibus_answer(void) {
 }
 
 static void fast_tick(uint32_t now_ms) {
-    bool pi_ok = pi.seen && within(now_ms, pi.last_hbt_ms, PI_LINK_TIMEOUT_MS);
-    helper_debug.pi_ok = pi_ok ? 1U : 0U;
+    inputs.estop_pressed = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == ESTOP_PRESSED_LEVEL;
+    inputs.lora_ok = helper_debug.lora_state >= LORA_IDLE;
+    HelperLogic_Fast(&logic, &pi, &inputs, now_ms);
+    if (HelperLogic_TakeBeaconRequest(&logic)) lora_next_ms = now_ms;
+
+    const helper_outputs_t *out = &logic.out;
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, out->servo_us);
+    relays(out->relays_on);
+    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, out->led_on ? GPIO_PIN_RESET : GPIO_PIN_SET);   /* lit when low */
+
+    helper_debug.pi_ok = out->pi_ok ? 1U : 0U;
     helper_debug.pi_rx_ok = pi.rx_ok;
     helper_debug.pi_rx_bad = pi.rx_bad;
-
-    /* Camera servo: the Pi's angle while it keeps coming, straight ahead otherwise. */
-    int32_t pan = pi.cam_seen && within(now_ms, pi.last_cam_ms, CAM_TIMEOUT_MS) ? pi.cam_pan_ddeg : 0;
-    if (pan > CAM_PAN_LIMIT_DDEG) pan = CAM_PAN_LIMIT_DDEG;
-    if (pan < -CAM_PAN_LIMIT_DDEG) pan = -CAM_PAN_LIMIT_DDEG;
-    uint32_t pulse = (uint32_t)(CAM_CENTER_US + CAM_PAN_DIR * pan * CAM_US_PER_10DEG / 100);
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pulse);
-    helper_debug.servo_us = (uint16_t)pulse;
-
-    /* Alarm: a higher count than the last one seen. A lower one is the Pi starting again. */
-    uint8_t victims = pi.victims;
-    if (victims > seen_victims) {
-        alarm_until_ms = now_ms + ALARM_HOLD_MS;
-        alarm_on = true;
-        lora_next_ms = now_ms;            /* the shore hears of it at once, not at the next period */
-    }
-    seen_victims = victims;
-    if (alarm_on && (int32_t)(now_ms - alarm_until_ms) >= 0) alarm_on = false;
-    relays(alarm_on);
-    helper_debug.victims = victims;
-    helper_debug.alarm = alarm_on ? 1U : 0U;
-
-    /* E-stop button, debounced over ESTOP_DEBOUNCE_TICKS samples. */
-    bool pressed = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == ESTOP_PRESSED_LEVEL;
-    if (!pressed) estop_ticks = 0U;
-    else if (estop_ticks < ESTOP_DEBOUNCE_TICKS) estop_ticks++;
-    helper_debug.estop = estop_ticks >= ESTOP_DEBOUNCE_TICKS ? 1U : 0U;
-
-    /* LED (lit when low): one blink a second with the Pi talking, five without. */
-    uint32_t half = pi_ok ? 500U : 100U;
-    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, (now_ms / half) % 2U == 0U ? GPIO_PIN_RESET : GPIO_PIN_SET);
+    helper_debug.servo_us = out->servo_us;
+    helper_debug.victims = out->victims;
+    helper_debug.alarm = out->relays_on ? 1U : 0U;
+    helper_debug.estop = out->estop ? 1U : 0U;
 }
 
 static void ina_tick(uint32_t now_ms) {
@@ -167,16 +142,18 @@ static void ina_tick(uint32_t now_ms) {
     last_ina_ms = now_ms;
     if (!helper_debug.ina_ok) {
         helper_debug.ina_ok = INA226_Init(&ina) ? 1U : 0U;
+        inputs.ina_ok = helper_debug.ina_ok != 0U;
         return;
     }
     uint16_t bus_mv;
     int32_t current_ma;
     if (INA226_Read(&ina, &bus_mv, &current_ma)) {
-        helper_debug.bus_mv = bus_mv;
-        helper_debug.current_ma = current_ma;
+        helper_debug.bus_mv = inputs.bus_mv = bus_mv;
+        helper_debug.current_ma = inputs.current_ma = current_ma;
         sensor.value = (uint16_t)(bus_mv / 10U);      /* the handset shows 0.01 V per count */
     } else {
         helper_debug.ina_ok = 0U;
+        inputs.ina_ok = false;
     }
 #else
     (void)now_ms;
@@ -187,17 +164,14 @@ static void report_tick(uint32_t now_ms) {
     if ((uint32_t)(now_ms - last_report_ms) < PI_REPORT_PERIOD_MS) return;
     last_report_ms = now_ms;
     if (huart1.gState != HAL_UART_STATE_READY) return;     /* the last report is still going out */
-    char payload[48];
-    snprintf(payload, sizeof(payload), "%u,%u,%ld,%u,%u,%u", (unsigned int)++report_sequence, (unsigned int)helper_debug.bus_mv,
-             (long)helper_debug.current_ma, (unsigned int)helper_debug.estop,
-             helper_debug.lora_state >= LORA_IDLE ? 1U : 0U, (unsigned int)helper_debug.alarm);
-    size_t length = PiLink_Encode(pi_tx, sizeof(pi_tx), "AUX", payload);
+    size_t length = HelperLogic_Report(&logic, &inputs, pi_tx, sizeof(pi_tx));
     if (length > 0U) (void)HAL_UART_Transmit_IT(&huart1, (uint8_t *)pi_tx, (uint16_t)length);
 }
 
 void App_Init(void) {
     memset((void *)&helper_debug, 0, sizeof(helper_debug));
     PiLink_Init(&pi);
+    HelperLogic_Init(&logic);
     IbusSensor_Init(&sensor);
     relays(false);
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, CAM_CENTER_US);
@@ -213,7 +187,7 @@ void App_Init(void) {
 void App_Tick(void) {
     ibus_answer();
     uint32_t now_ms = HAL_GetTick();
-    if ((uint32_t)(now_ms - last_fast_ms) >= FAST_PERIOD_MS) {
+    if ((uint32_t)(now_ms - last_fast_ms) >= HELPER_FAST_PERIOD_MS) {
         last_fast_ms = now_ms;
         fast_tick(now_ms);
     }

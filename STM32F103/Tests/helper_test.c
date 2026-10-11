@@ -1,4 +1,6 @@
 /* PC tests of the parts with no HAL in them: Tools\run_host_tests.ps1 */
+#include "app_config.h"
+#include "helper_logic.h"
 #include "ibus_sensor.h"
 #include "lora_frame.h"
 #include "pi_link.h"
@@ -112,7 +114,71 @@ static void test_ibus_sensor(void) {
     assert(poll(&sensor, 0xA1U, reply) == 6U);
 }
 
+static void test_helper_logic(void) {
+    pi_link_t link;
+    helper_logic_t logic;
+    helper_inputs_t in = { .ina_ok = true, .bus_mv = 12340U, .current_ma = -250, .lora_ok = true };
+    char text[LORA_FRAME_SIZE];
+    PiLink_Init(&link);
+    HelperLogic_Init(&logic);
+
+    /* Nothing from the Pi: camera ahead, no alarm, the Pi reported down. */
+    HelperLogic_Fast(&logic, &link, &in, 1000U);
+    assert(logic.out.servo_us == CAM_CENTER_US && !logic.out.relays_on && !logic.out.pi_ok && !logic.out.estop);
+    assert(!HelperLogic_TakeBeaconRequest(&logic));
+
+    /* The camera follows CAM, to the limit, and looks ahead again once CAM stops coming. */
+    feed(&link, "HBT", "1,search", 1000U);
+    feed(&link, "CAM", "2,30.0", 1000U);
+    HelperLogic_Fast(&logic, &link, &in, 1010U);
+    assert(logic.out.pi_ok && logic.out.servo_us == CAM_CENTER_US + CAM_PAN_DIR * 165);
+    feed(&link, "CAM", "3,-90.0", 1020U);
+    HelperLogic_Fast(&logic, &link, &in, 1030U);
+    assert(logic.out.servo_us == CAM_CENTER_US - CAM_PAN_DIR * 440);          /* 80 deg, the limit */
+    HelperLogic_Fast(&logic, &link, &in, 1020U + CAM_TIMEOUT_MS + 10U);
+    assert(logic.out.servo_us == CAM_CENTER_US);
+    HelperLogic_Fast(&logic, &link, &in, 1000U + PI_LINK_TIMEOUT_MS + 10U);
+    assert(!logic.out.pi_ok);
+
+    /* A higher count: alarm for ALARM_HOLD_MS and a beacon at once. The same count again: nothing new. */
+    feed(&link, "VIC", "4,1", 5000U);
+    HelperLogic_Fast(&logic, &link, &in, 5000U);
+    assert(logic.out.relays_on && logic.out.victims == 1U);
+    assert(HelperLogic_TakeBeaconRequest(&logic) && !HelperLogic_TakeBeaconRequest(&logic));
+    feed(&link, "VIC", "5,1", 6000U);
+    HelperLogic_Fast(&logic, &link, &in, 5000U + ALARM_HOLD_MS - 10U);
+    assert(logic.out.relays_on && !HelperLogic_TakeBeaconRequest(&logic));
+    HelperLogic_Fast(&logic, &link, &in, 5000U + ALARM_HOLD_MS);
+    assert(!logic.out.relays_on);
+    /* The Pi starts again and counts from zero: no alarm; its next find is one. */
+    feed(&link, "VIC", "6,0", 50000U);
+    HelperLogic_Fast(&logic, &link, &in, 50000U);
+    assert(!logic.out.relays_on && !HelperLogic_TakeBeaconRequest(&logic));
+    feed(&link, "VIC", "7,1", 51000U);
+    HelperLogic_Fast(&logic, &link, &in, 51000U);
+    assert(logic.out.relays_on && HelperLogic_TakeBeaconRequest(&logic));
+
+    /* E-stop: only after ESTOP_DEBOUNCE_TICKS samples in a row, released at once. */
+    in.estop_pressed = true;
+    for (unsigned i = 1U; i < ESTOP_DEBOUNCE_TICKS; i++) { HelperLogic_Fast(&logic, &link, &in, 52000U + 10U * i); assert(!logic.out.estop); }
+    HelperLogic_Fast(&logic, &link, &in, 52100U);
+    assert(logic.out.estop);
+    assert(HelperLogic_Report(&logic, &in, text, sizeof(text)) > 0U);
+    assert(strncmp(text, "$AUX,1,12340,-250,1,1,1*", 24) == 0);
+    in.estop_pressed = false;
+    HelperLogic_Fast(&logic, &link, &in, 52110U);
+    assert(!logic.out.estop);
+
+    /* Beacon: the Pi's position while it is fresh, NO_FIX once it is not; the count rides along. */
+    feed(&link, "POS", "8,1,10.762622,106.660172,2.1,-1.4,278.5,-1.0,A,1,3", 60000U);
+    assert(HelperLogic_Beacon(&logic, link.status, link.status_seen, link.last_status_ms, 60500U, 7U, text, sizeof(text)) > 0U);
+    assert(strcmp(text, "id=" LORA_BUOY_ID ",10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=-1.0,m=A,i=1,c=3,q=7,v=1") == 0);
+    HelperLogic_Beacon(&logic, link.status, link.status_seen, link.last_status_ms, 60000U + PI_STATUS_STALE_MS + 1U, 8U, text, sizeof(text));
+    assert(strcmp(text, "id=" LORA_BUOY_ID ",NO_FIX,r=0.0,p=0.0,y=0.0,t=-1.0,m=S,i=0,c=0,q=8,v=1") == 0);
+}
+
 int main(void) {
+    test_helper_logic();
     test_pi_link();
     test_lora_frame();
     test_ibus_sensor();

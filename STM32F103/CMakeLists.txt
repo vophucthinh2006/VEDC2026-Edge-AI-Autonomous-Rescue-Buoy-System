@@ -50,6 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/IbusSensor/ibus_sensor.c
     Modules/INA226/ina226.c
     App/app.c
+    App/helper_logic.c
     App/lora_frame.c
 )
 
