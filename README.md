@@ -40,6 +40,13 @@ boat <pixhawk|stm32> <build|flash|deploy|run|test> [tham số]
 Đổi kiến trúc trên cùng một Pi: nối dây đúng bộ điều khiển (cả hai dùng `/dev/serial0`), rồi
 `boat <tên> deploy`.
 
+## Từ giả lập lên phao thật
+
+- `sim/run_boat.sh --pi --hw`: giả lập đi qua đúng đường phần cứng của phao `pixhawk` (LiDAR qua cổng nối
+  tiếp, bo STM32F103 chạy chính logic firmware). Xem `sim/README.md`.
+- `docs/porting-checklist.md`: thứ tự đấu dây, nạp, và giá trị phải thấy ở từng bước.
+- `pixhawk/params/boat.parm`: tham số ArduPilot khởi đầu cho phao thật.
+
 ## Thư mục
 
 | Thư mục | Nội dung |
@@ -49,4 +56,6 @@ boat <pixhawk|stm32> <build|flash|deploy|run|test> [tham số]
 | `STM32F103/` | firmware STM32F103 (kiến trúc `pixhawk`) |
 | `sim/` | giả lập Gazebo + ArduPilot SITL cho kiến trúc `pixhawk` |
 | `esp32-lora-station/` | trạm bờ ESP32, Cloudflare Worker, dashboard, cầu nối MAVLink |
+| `pixhawk/` | tham số ArduPilot của phao thật |
+| `docs/` | danh sách kiểm tra khi đưa lên phần cứng |
 | `papers/` | bài báo nguồn của các thuật toán né vật cản |

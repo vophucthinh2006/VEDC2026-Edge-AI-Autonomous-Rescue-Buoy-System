@@ -75,7 +75,10 @@ Cấu hình chung nằm ở `config/settings.yaml`; phần riêng của từng p
 - **Số người lên dashboard qua MAVLink**: mỗi giây Pi cũng phát `NAMED_VALUE_INT "VICTIMS"` cho autopilot;
   cầu nối `esp32-lora-station/tools/mavlink_bridge.py` đọc nó khi phao nối trạm bờ bằng MAVLink.
 
-Trình tự thử trước khi xuống nước, **tháo chân vịt**:
+Thêm `--log` để ghi mỗi giây một dòng CSV vào `logs/run_<ngày>_<giờ>.csv` (chế độ, vị trí, hướng, pha cứu hộ,
+người đang thấy, vật cản gần nhất, tuổi vòng quét LiDAR, pin và trạng thái bo phụ): `./run.sh pixhawk --viewer --log`.
+
+Trình tự đầy đủ khi đưa lên phao nằm ở `docs/porting-checklist.md`. Tóm tắt, **tháo chân vịt**:
 
 1. `python3 tools/lidar_capture.py`: phải ra `valid packets` khác 0 (xem mục LiDAR bên dưới).
 2. `./run.sh pixhawk --viewer`, mở `http://<địa chỉ Pi>:8090/`: thấy ảnh camera, điểm LiDAR đúng phía
