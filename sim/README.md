@@ -402,6 +402,45 @@ giữa nhà, nên số sát 0 có thể là phao chui vào hẻm chứ chưa ch�
 - Ba lần chạy mỗi ô là ít, và kết quả dao động mạnh giữa các lần (VO trên phố: 97 s lần này, không tới đích
   lần sau).
 
+## ESC sau một chiều
+
+Hai ESC sau của phao thật chỉ quay một chiều; giả lập mặc định cho chúng đảo chiều.
+`params/oneway_esc.parm` chặn chiều lùi của hai motor sau (motor trước vẫn hai chiều):
+
+```bash
+bash sim/run_boat.sh --pi --oneway                                         # phiên tương tác
+EXTRA_PARM=$PWD/sim/params/oneway_esc.parm bash sim/tools/flood_test.sh    # bài test nào cũng nhận EXTRA_PARM
+```
+
+Mỗi dòng là **một** lần chạy với bộ phát hiện hình học (`simulated`). "Sát nhất" là khoảng cách nhỏ nhất
+từ tâm phao tới vật cản; bài test đòi 0.8 m (thân phao vươn 0.55 m từ tâm).
+
+| Cảnh | Motor sau | Tham số thêm | Kết quả | Sát nhất |
+|---|---|---|---|---|
+| Phố lũ | đảo chiều | — (mặc định) | **đạt**, về sau 190 s | 1.33 m |
+| Phố lũ | một chiều | — | không đạt | xe 0.37 m, nhà cuối phố 0.03 m; lượt về lệch tim đường 25 m, bỏ 1 waypoint |
+| Phố lũ | một chiều | `WP_PIVOT_ANGLE 0` | không đạt | chạm dãy nhà nam, xe 0.11 m, người dưới nước 0.62 m |
+| Phố lũ | một chiều | `WP_SPEED 0.6` | không đạt | xe 0.29 m, cột điện 0.54 m |
+| Phố lũ | một chiều | `WP_SPEED 0.6`, `OA_MARGIN_MAX 1.5`, `OA_BR_LOOKAHEAD 7` | không đạt | nhà cuối phố 0.05 m, người trên mái 0.38 m |
+| Hồ trống | một chiều | — | **đạt** | giữ cách người 1.64–2.57 m |
+| Hồ trống | một chiều | `WP_SPEED 0.6` | **đạt** | giữ cách người 1.95–2.49 m |
+
+Đọc bảng này thế nào:
+
+- **Trên mặt nước trống, ESC một chiều không cản trở kịch bản cứu hộ.** Tìm, tiếp cận, giữ vị trí, trả
+  lại lộ trình đều như bản đảo chiều.
+- **Trong phố hẹp có vật cản thì không an toàn.** Không lùi được, phao không dừng kịp và không lách ra
+  khỏi vật cản đã áp sát: lần nào cũng có một chỗ nó vào trong 0.5 m, tức thân phao chạm hoặc gần chạm.
+  Giảm tốc xuống 0.6 m/s đỡ hơn (không còn bỏ waypoint, không đi lạc) nhưng chưa đủ; nới lề né vật cản
+  đổi chỗ va chứ không hết va.
+- Mỗi cấu hình chỉ một lần chạy và kết quả giữa các lần dao động mạnh: bảng đủ để nói "không đạt", không
+  đủ để xếp hạng các biến thể một chiều với nhau.
+- Chưa thử: cho motor trước (hai chiều) phanh chủ động khi tới gần vật cản; lộ trình chỉ rẽ một phía.
+
+Hệ quả cho phao thật (`pixhawk/params/boat.parm`): chạy 0.6 m/s, chỉ ở vùng nước trống, cho tới khi hai
+ESC sau lùi được. ESC BLHeli_S thường đặt được chế độ hai chiều bằng phần mềm cấu hình của nó; nếu làm
+được trên ESC của đội thì dùng nguyên `params/avoidance.parm`, bản đã đạt cảnh phố lũ.
+
 ## Xem trên dashboard web
 
 `run_boat.sh` cho MAVProxy phát thêm ra cổng **14551**. Cầu nối

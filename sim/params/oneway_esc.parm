@@ -1,0 +1,8 @@
+# The boat's rear ESCs (BLHeli_S) turn one way only. Loaded on top of vedc_buoy.parm and
+# avoidance.parm (run_boat.sh --oneway, or EXTRA_PARM=... for the test scripts) to see in the
+# simulator what the real boat can do.
+#
+# With the output's lower end at its trim, a demand for reverse comes out as stop: the simulated
+# motor, which could turn backwards, never does. The front motor (SERVO4) stays bidirectional.
+SERVO1_MIN      1500
+SERVO3_MIN      1500

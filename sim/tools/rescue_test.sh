@@ -7,6 +7,7 @@
 #     simulated  geometric detector (default): tests the rescue logic and the MAVLink layer
 #     camera     the real TFLite model on the Gazebo camera: tests the whole perception chain
 set -o pipefail
+# EXTRA_PARM=<file>: one more parameter file on top, e.g. sim/params/oneway_esc.parm
 DETECTOR="${1:-simulated}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$REPO/sim/env.sh"
@@ -24,7 +25,7 @@ sleep 10
 cd "$T/run"
 setsid sim_vehicle.py -v Rover -f rover-skid --model JSON -I1 \
     --add-param-file="$REPO/sim/params/vedc_buoy.parm" \
-    --add-param-file="$REPO/sim/params/avoidance.parm" \
+    --add-param-file="$REPO/sim/params/avoidance.parm" ${EXTRA_PARM:+--add-param-file="$EXTRA_PARM"} \
     --custom-location=10.883438,106.796019,10,90 \
     --no-wsl2-network --no-rebuild --wipe-eeprom \
     --out=udp:127.0.0.1:14561 --mavproxy-args="--daemon" \
