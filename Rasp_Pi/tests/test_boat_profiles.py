@@ -104,3 +104,23 @@ class HelperBoardTest(unittest.TestCase):
         self.assertFalse(board.online(monotonic() + 10.0))
         board._handle(b"$AUX,5,x,0,0,0,0*00\n")                   # bad checksum: ignored
         self.assertTrue(board.state.estop)
+
+
+class RunLogTest(unittest.TestCase):
+    def test_a_run_is_written_one_line_per_call_with_the_board_when_it_answers(self):
+        from modules.helper_board import BoardState
+        from utils.run_log import COLUMNS, RunLog
+        import csv
+        with tempfile.TemporaryDirectory() as folder:
+            run = RunLog(Path(folder))
+            now = monotonic()
+            snap = HelperBoardTest.snap(now)
+            run.write(snap, now, "search", 0)
+            run.write(snap, now + 1.0, "approach", 1, BoardState(12.34, 1.5, True, True, True, now), True)
+            run.write(snap, now + 2.0, "approach", 1, BoardState(12.34, 1.5, True, True, True, now), False)
+            run.close()
+            rows = list(csv.DictReader(run.path.open(encoding="utf-8")))
+        self.assertEqual(tuple(rows[0].keys()), COLUMNS)
+        self.assertEqual((rows[0]["mode"], rows[0]["phase"], rows[0]["lat"], rows[0]["board"], rows[0]["battery_v"]), ("GUIDED", "search", "10.7626220", "", ""))
+        self.assertEqual((rows[1]["people_found"], rows[1]["board"], rows[1]["battery_v"], rows[1]["estop"]), ("1", "1", "12.34", "1"))
+        self.assertEqual((rows[2]["board"], rows[2]["battery_v"]), ("0", ""))

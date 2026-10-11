@@ -54,6 +54,8 @@ def main() -> int:
     parser.add_argument("--scan-rate", type=float, metavar="DEG_S", help="overrides camera.scan.sweep_rate_deg_s")
     parser.add_argument("--viewer", type=int, nargs="?", const=8090, metavar="PORT",
                         help="serve the live view of camera and LiDAR on http://<this machine>:PORT/ (default 8090)")
+    parser.add_argument("--log", type=Path, nargs="?", const=Path("logs"), metavar="DIR",
+                        help="write one CSV line a second of the run to DIR/run_<date>_<time>.csv (default logs/)")
     args = parser.parse_args()
     config = load_config(args.config, args.overlay)
     if args.detector:
@@ -90,11 +92,13 @@ def main() -> int:
     else:
         from modules.ai_vision import VisionWorker
         camera = config["camera"]
-        if camera.get("source") == "gazebo":
+        # The servo is on the helper board. In the simulator the Pi turns the Gazebo camera itself,
+        # unless a simulated board is there to do it (camera.pan_via: helper, config/sim_hw.yaml).
+        if helper is not None and (camera.get("source") != "gazebo" or camera.get("pan_via") == "helper"):
+            send_pan = helper.send_pan
+        elif camera.get("source") == "gazebo":
             from modules.gazebo_io import GazeboPan
             send_pan = GazeboPan(camera["pan_topic"])
-        elif helper is not None:
-            send_pan = helper.send_pan                    # the servo is on the helper board
         elif int(camera.get("pan_output", 0)) > 0:
             send_pan = pan_through_autopilot(link, camera)
         else:
@@ -154,6 +158,11 @@ def main() -> int:
     last_status = 0.0
     last_count = 0.0
     estop_held = False
+    run_log = None
+    if args.log:
+        from utils.run_log import RunLog
+        run_log = RunLog(args.log)
+        log.info("run log: %s", run_log.path)
     try:
         while not stop_event.is_set():
             snapshot, now = state.snapshot(), monotonic()
@@ -174,6 +183,9 @@ def main() -> int:
                 link.named_int(VICTIMS_NAME, mission.found)
                 if helper is not None:
                     helper.report(snapshot, now, mission.found, mission.phase.value)
+                if run_log is not None:
+                    run_log.write(snapshot, now, mission.phase.value, mission.found,
+                                  helper.state if helper is not None else None, helper is not None and helper.online(now))
             # The E-stop button is on the helper board, which cannot stop the motors: the Pi asks the
             # autopilot to. Once per press; whoever then changes the mode has the boat.
             pressed = helper is not None and helper.online(now) and helper.state.estop
@@ -202,6 +214,8 @@ def main() -> int:
         stop_event.set()
         for worker in workers:
             worker.join(timeout=1.0)
+        if run_log is not None:
+            run_log.close()
         log.info("stopped")
     return 0
 
