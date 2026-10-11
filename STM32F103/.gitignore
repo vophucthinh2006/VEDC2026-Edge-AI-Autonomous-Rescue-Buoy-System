@@ -1,0 +1,25 @@
+# Build output (build.bat / CMake presets)
+build/
+*.elf
+*.hex
+*.bin
+*.map
+*.o
+*.obj
+*.d
+
+# clangd / IDE local files
+.cache/
+.vscode/
+.idea/
+*.code-workspace
+
+# STM32CubeMX backups / temp
+*.ioc.bak
+Backup/
+.mxproject.bak
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
