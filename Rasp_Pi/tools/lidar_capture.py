@@ -40,8 +40,10 @@ def main() -> int:
     print("first 64 bytes:", raw[:64].hex(" "))
     print("most common bytes:", ", ".join(f"0x{byte:02X} x{count}" for byte, count in Counter(raw).most_common(5)))
     decoder = LDS008Decoder()
-    points = decoder.feed(bytes(raw))
-    print(f"valid packets: {len(raw) // PACKET_SIZE} possible, {decoder.bad_checksums} rejected starts, {len(points)} points")
+    readings = decoder.feed(bytes(raw))
+    points = [point for point in readings if point.intensity > 0]          # the rest saw nothing at their angle
+    print(f"valid packets: {len(raw) // PACKET_SIZE} possible, {len(readings) // 4} decoded, {decoder.bad_checksums} rejected starts, "
+          f"{len(points)} points with a range")
     if points:
         distances = [point.distance_m for point in points]
         print(f"angles {min(p.angle_deg for p in points):.0f}..{max(p.angle_deg for p in points):.0f} deg, "

@@ -3,7 +3,8 @@
 Every revolution is turned to the boat's frame (bearing from the bow, clockwise) and handed to
 to_obstacles, which decides what an obstacle is: clusters for the Pi's own potential field
 (main.py), one per ray for the autopilot's avoidance (rescue_main.py). A revolution with nothing
-in range still refreshes the state store, so "no obstacle" and "no LiDAR" stay apart.
+in range still refreshes the state store, so "no obstacle" and "no LiDAR" stay apart: the decoders
+pass a reading that saw nothing on as distance 0, intensity 0, which to_obstacles leaves out.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from modules.lidar_lds008 import LDS008Decoder, START_COMMAND
 from modules.state_store import StateStore
 
 MODELS = ("ld14", "lds008")
+REOPEN_S = 3.0
 
 
 def to_boat_frame(scan: tuple[LidarPoint, ...], yaw_offset_deg: float, anticlockwise: bool) -> tuple[LidarPoint, ...]:
@@ -39,20 +41,27 @@ class SerialLidar(threading.Thread):
         decoder, assembler = (LDS008Decoder() if self.model == "lds008" else LD14Decoder()), ScanAssembler()
         offset = float(self.vehicle["lidar_yaw_offset_deg"])
         anticlockwise = bool(self.vehicle.get("lidar_anticlockwise", False))
-        try:
-            with serial.Serial(self.port, self.baud, timeout=0.1) as ser:
-                self.log.info("%s UART open: %s @ %d", self.model.upper(), self.port, self.baud)
-                if self.model == "lds008":
-                    ser.write(START_COMMAND)   # the motor only spins once told to
-                while not self.stop.is_set():
-                    scan = assembler.add(decoder.feed(ser.read(256)))
-                    if scan is not None:
-                        self.state.update_obstacles(self.to_obstacles(to_boat_frame(scan, offset, anticlockwise)))
-        except serial.SerialException as exc:
-            # required: the program cannot go on without it. Otherwise the scans simply stop, and
-            # whoever reads them sees them go stale.
-            if self.required:
-                self.log.error("%s UART unavailable: %s", self.model.upper(), exc)
-                self.stop.set()
-            else:
-                self.log.warning("%s UART unavailable, no LiDAR data: %s", self.model.upper(), exc)
+        told = False
+        while not self.stop.is_set():
+            try:
+                with serial.Serial(self.port, self.baud, timeout=0.1) as ser:
+                    self.log.info("%s UART open: %s @ %d", self.model.upper(), self.port, self.baud)
+                    told = False
+                    if self.model == "lds008":
+                        ser.write(START_COMMAND)   # the motor only spins once told to
+                    while not self.stop.is_set():
+                        scan = assembler.add(decoder.feed(ser.read(256)))
+                        if scan is not None:
+                            self.state.update_obstacles(self.to_obstacles(to_boat_frame(scan, offset, anticlockwise)))
+            except (serial.SerialException, OSError) as exc:
+                # required: the program cannot go on without it. Otherwise the scans simply stop,
+                # whoever reads them sees them go stale, and the port is tried again (a USB adapter
+                # that came loose and was pushed back in).
+                if self.required:
+                    self.log.error("%s UART unavailable: %s", self.model.upper(), exc)
+                    self.stop.set()
+                    return
+                if not told:
+                    told = True
+                    self.log.warning("%s UART unavailable, no LiDAR data: %s", self.model.upper(), exc)
+                self.stop.wait(REOPEN_S)
