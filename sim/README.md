@@ -101,6 +101,43 @@ bash sim/tools/rescue_test.sh camera      # model thật trên camera Gazebo
 bash sim/tools/rescue_test.sh simulated   # bộ phát hiện hình học
 ```
 
+### Đi qua đúng đường phần cứng của phao (`--hw`)
+
+Mặc định code Pi lấy LiDAR thẳng từ topic Gazebo và tự quay camera. Trên phao thật thì khác: LiDAR
+LDS-008 vào Pi qua cổng nối tiếp, còn servo camera, relay báo động, nút dừng và LoRa nằm trên bo
+STM32F103. `--hw` đặt hai thứ thế chỗ vào giữa, mỗi thứ sau một cổng nối tiếp ảo:
+
+```bash
+wsl -d Ubuntu-24.04 -- bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh --pi --hw
+```
+
+| Trên phao | Thế chỗ trong giả lập | Code Pi được chạy thật |
+|---|---|---|
+| LDS-008 | `tools/lds008_emulator.py`: LiDAR Gazebo → dòng byte 22 byte/gói, chờ `startlds$` | `SerialLidar` → `LDS008Decoder` → `ray_obstacles` → `ObstacleFeed` |
+| Bo STM32F103 | `tools/helper_board_sim.py` chạy `STM32F103/Tests/helper_sim.c`, tức **chính** `pi_link.c`, `helper_logic.c`, `lora_frame.c` của firmware biên dịch cho máy tính | `HelperBoard`: `$CAM`, `$HBT`, `$VIC`, `$POS`, đọc `$AUX` |
+
+Bo ảo đưa xung servo vào khớp camera của Gazebo (camera chỉ quay nếu lệnh đi trọn qua bo), ghi mọi việc
+nó làm vào `~/vedc_sim/sitl_run/helper_events.log`, và coi file `estop` trong thư mục đó là nút dừng đang
+nhấn (`touch ~/vedc_sim/sitl_run/estop`). Đặt `VEDC_INGEST_TOKEN` thì dòng LoRa của nó được gửi lên Worker
+như trạm bờ ESP32 gửi, hiện thành phao `PHAO-01` trên dashboard.
+
+```bash
+bash sim/tools/hw_path_test.sh                           # model thật, 6 điểm kiểm
+VEDC_INGEST_TOKEN=... bash sim/tools/dashboard_test.sh   # cả hai đường lên dashboard, cần Worker đang chạy
+```
+
+`hw_path_test.sh` đạt khi: cứu hộ trọn vẹn qua LiDAR nối tiếp; khớp camera quét ±60°; bo bật relay và
+phát beacon có `v=1` đúng vị trí phao; nhấn nút dừng thì autopilot vào HOLD; LiDAR im thì Pi ngừng cấp
+dữ liệu và autopilot từ chối arm (`PRX1: No Data`); rút bo thì Pi chạy tiếp và báo `board off`.
+
+Lần chạy đầu của bài test này đã bắt được một lỗi không thể thấy bằng đường Gazebo trực tiếp: trên mặt nước
+trống LiDAR không trả điểm nào, Pi coi đó là LiDAR chết và autopilot không cho arm. Bộ giải mã giờ chuyển
+cả những góc "không thấy gì" để một vòng quét rỗng vẫn là một vòng quét.
+
+Giới hạn: trình thế chỗ LDS-008 phát đúng định dạng mà bộ giải mã **giả định** (theo LDS-006). Nó chứng
+minh đường nối tiếp của Pi, không chứng minh module thật nói đúng định dạng đó; việc ấy vẫn phải kiểm bằng
+`Rasp_Pi/tools/lidar_capture.py`. Cảm biến iBus, INA226, SPI của LoRa không có trong giả lập.
+
 **Camera trong giả lập**: 640 × 480, 15 khung/giây, góc nhìn ngang 60° (dọc 46.8°), cao 0.295 m trên mặt
 nước. Bộ phát hiện bị giữ ở 8 khung hình/giây (`camera.max_fps` trong `sim.yaml`), tốc độ đội báo cho Pi 4.
 Các số đo trong tài liệu này được lấy khi còn giả định 5 khung hình/giây.
