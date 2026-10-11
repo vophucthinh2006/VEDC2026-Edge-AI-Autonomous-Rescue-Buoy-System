@@ -106,6 +106,8 @@ python3 tools/lidar_capture.py
 
 - Kiểm tra chiều quay motor và chiều bánh lái bằng tay điều khiển ở MANUAL, chân vịt vẫn tháo.
 - Thử failsafe: tắt tay điều khiển, phao phải làm đúng điều đã cấu hình.
+- **Chỉ chạy vùng nước trống.** Hai ESC sau một chiều: trong giả lập phao vẫn cứu hộ tốt trên hồ trống nhưng
+  va vật cản trong phố hẹp (`sim/README.md`, mục "ESC sau một chiều"). `boat.parm` đặt sẵn 0.6 m/s.
 - Lắp chân vịt. Lộ trình đầu tiên: vùng nước trống, vài waypoint, không có người — chỉ để xem phao bám
   tuyến và chỉnh `ATC_STR_RAT_*`, `CRUISE_*` (các số trong giả lập **không** dùng cho phao thật).
 - Luôn chạy với `--log`: file `logs/run_<ngày>_<giờ>.csv` trên Pi ghi mỗi giây chế độ, vị trí, hướng,
