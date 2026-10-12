@@ -297,6 +297,69 @@ Giới hạn đã biết của cảnh này:
 - Nước vẫn màu xanh: lớp sóng của asv_wave_sim tự tô màu, chưa đổi được sang màu nước lũ.
 - Mọi thứ trừ phao đều đứng yên (không có vật trôi).
 
+## Cảnh miền Trung, tháng 11/2025 (`--world=central`)
+
+```bash
+wsl -d Ubuntu-24.04 -- bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh --pi --world=central
+```
+
+![Cảnh nhìn từ trên xuống: tây bên trái, bắc phía trên](docs/central_overview.jpg)
+
+Một luồng nước dài 77 m, rộng 12 m, đi qua **hai cảnh có thật của cùng một vùng, cách nhau hai tuần**. Đây là
+cảnh ghép: đợt lũ thứ hai là một đợt mưa khác, không phải do bão gây ra. Khi trình bày đừng gọi cả cảnh là
+"sau bão Kalmaegi".
+
+| | Phần một, x 0–36 m | Phần hai, x 40–77 m |
+|---|---|---|
+| Sự kiện | sau bão số 13 Kalmaegi, đổ bộ Đắk Lắk – Gia Lai tối 6/11/2025 | lũ ngày 19–20/11/2025 ở xã Hòa Thịnh, Đắk Lắk |
+| Nơi báo chí mô tả | làng ven đầm ở Tuy Phước Đông, An Lương (Gia Lai) | thôn Phú Hữu |
+| Nước | nước dâng ngập nhà hơn 1 m → dựng 1.2 m | nước tới mái nhà trong chưa đầy một giờ → dựng tới mép mái |
+| Nhà | tốc mái hàng loạt → 6 nhà chỉ còn tường, đòn nóc, vài cây kèo, một tấm tôn | nhà cấp bốn ngập tới mái → 7 nhà ngói và tôn |
+| Vật cản | tàu cá và thuyền thúng bị đắm, dạt bờ; cột điện đổ → 1 tàu cá nghiêng, 2 thuyền thúng, 1 cột điện gãy | thuyền cứu hộ phải lách qua bụi tre, gốc cây, cột điện gãy → 2 bụi tre, 1 cột điện gãy giữa luồng |
+| Người | dân dùng thuyền thúng ra cứu hàng xóm; có gia đình ngồi trong nhà tốc mái chờ → 1 người đứng trong nước, 1 người đứng ở cửa nhà | cả làng dỡ ngói leo lên mái kêu cứu → 1 người trên mái, 3 người cùng một mái, 1 người trên mái nhà cuối luồng, 1 người dưới nước |
+
+![Phần một, nhìn từ chỗ phao xuất phát](docs/central_part_one.jpg)
+![Phần hai](docs/central_part_two.jpg)
+
+Tọa độ từng vật ghi ở đầu `worlds/vedc_central.sdf`. Mô hình mới: `storm_house`, `wrecked_boat`,
+`basket_boat`, `bamboo_clump`, `broken_pole`.
+
+Những chỗ **không** lấy từ thực tế:
+
+- **Mặt bằng.** Dựng theo mô tả của báo chí, không theo bản đồ hay đo đạc: không con đường thật nào được tái hiện.
+  Bề rộng luồng 12 m là số của cảnh phố lũ cũ, chọn vì phao đi được, không phải bề rộng ngõ thôn thật (báo viết
+  ngõ ở Lệ Thủy hẹp tới mức chỉ thuyền nhôm nhỏ luồn được).
+- **Ban ngày, trời u ám.** Ngoài đời người dân kêu cứu trong đêm; model nhận diện mới chỉ được đo ban ngày.
+- **Nước đứng yên**, màu xanh (lớp sóng của asv_wave_sim tự tô màu), không có dòng chảy, không có vật trôi.
+- **Vị trí GPS** vẫn là Hồ Đá (điểm xuất phát mặc định), không phải Gia Lai hay Đắk Lắk.
+- Mọi vật cản nhô ít nhất 0.47 m khỏi mặt nước để LiDAR (0.37 m) thấy được; ngoài đời nhiều thứ nằm thấp hơn.
+
+```bash
+bash sim/tools/central_test.sh simulated      # hoặc camera: model thật
+python3 sim/tools/world_snapshot.py /vedc_central/overview anh.png    # chụp lại ảnh nhìn từ trên xuống
+```
+
+Kết quả với motor sau đảo chiều (mặc định của giả lập), lộ trình một waypoint ở x 66.5 m rồi RTL, model thật,
+hai lần chạy:
+
+| | Lần 1 | Lần 2 |
+|---|---|---|
+| Người/nhóm được tới (trên 6) | 5 | 4 |
+| Dừng lặp cho cùng người | không | không |
+| Số lần mất dấu người giữa chừng | 0 | 4 |
+| Về tới điểm xuất phát sau | 506 s | 484 s |
+| Sát vật cản nhất | (cách đo lần này chưa đúng) | xác tàu 1.06 m |
+
+Người hay bị sót là người đứng ở cửa nhà và người dưới nước của phần hai. Với ESC sau một chiều (`--oneway`) cảnh
+này **chưa được chạy**; theo kết quả ở cảnh phố lũ thì nhiều khả năng phao sẽ va vật cản.
+
+Nguồn: [Bão Kalmaegi giật sập nhiều nhà, nguy cơ ngập diện rộng (VnExpress)](https://vnexpress.net/bao-kalmaegi-do-bo-dak-lak-gia-lai-4960961-tong-thuat.html),
+[Bão số 13 Kalmaegi gây thiệt hại nặng nề tại Đắk Lắk và Gia Lai, người dân cầu cứu (Soha)](https://soha.vn/bao-so-13-kalmaegi-quan-thao-dak-lak-gia-lai-nha-sap-ngap-khap-noi-nhieu-nguoi-cau-cuu-198251107064939468.htm),
+[Bão Kalmaegi gây thiệt hại nặng nề tại nhiều nơi (Tuổi Trẻ)](https://tuoitre.vn/bao-kalmaegi-gay-thiet-hai-nang-ne-tai-nhieu-noi-20251106232940411.htm),
+[36 giờ sinh tử ở rốn lũ Hòa Thịnh (Báo Xây Dựng)](https://baomoi.com/36-gio-sinh-tu-o-ron-lu-hoa-thinh-ca-lang-leo-mai-nha-keu-cuu-trong-dem-c53829410.epi),
+[Tang thương ở rốn lũ Hòa Thịnh (Tiền Phong)](https://tienphong.vn/tang-thuong-o-ron-lu-hoa-thinh-canh-bao-xa-lu-co-kip-thoi-post1799204.tpo),
+[Lao vào biển nước cứu người ở tâm lũ Đắk Lắk (Eva/Dân Việt)](https://eva.vn/tin-tuc/vuot-nuoc-xoay-cuu-nguoi-giua-tam-lu-dak-lak-c73a654527.html).
+
 ## Nhiều người trong khung hình
 
 Camera giữ lại **mọi** người model phát hiện trong một khung hình, và Pi ghi từng người lên bản đồ
