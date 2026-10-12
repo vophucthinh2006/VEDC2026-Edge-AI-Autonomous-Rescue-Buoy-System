@@ -143,6 +143,7 @@ def nearest_person(lat, lon):
 
 start, mode, reports, spans, closest, shots = time.time(), "", [], [], {p: 1e9 for p in PEOPLE}, 0
 guided_since = None
+counted = (0, 0)
 while time.time() - start < 230:
     msg = m.recv_match(type=["HEARTBEAT", "GLOBAL_POSITION_INT", "STATUSTEXT"], blocking=True, timeout=2)
     if msg is None:
@@ -161,6 +162,8 @@ while time.time() - start < 230:
         if any(word in msg.text for word in ("VICTIM", "RESUMING", "BLOCKED", "PEOPLE")):
             print(f"  [{time.time() - start:5.1f} s] {msg.text}")
             words = msg.text.split()
+            if words[0] == "PEOPLE" and len(words) >= 5:      # PEOPLE n FOUND m ATTENDED
+                counted = (int(words[1]), int(words[3]))
             if ("SEEN" in msg.text or "REACHED" in msg.text or "UNREACHABLE" in msg.text) and len(words) >= 5:
                 reports.append((words[1], *nearest_person(float(words[-3]), float(words[-2]))))
             if "SEEN" in msg.text and shots < 3:          # what the Pi saw at that moment
@@ -193,17 +196,24 @@ def swings(t_from, t_to):
 
 attended = [r for r in reports if r[0] in ("REACHED", "UNREACHABLE")]
 people_attended = sorted({r[1] for r in attended if r[2] <= 3.0})
+# People standing together are one stop (rescue.group_radius_m): two people 3 m apart, their places
+# read from a distance, may come out as one group. Then one stop serves both, and what counts is
+# that the Pi has both on its map as attended.
+as_group = len(people_attended) == 1 and counted == (2, 2)
 for kind_, name, off, e, n in reports:
     print(f"report {kind_:11s} at east {e:5.1f} north {n:5.1f}: nearest is person {name}, {off:.1f} m off")
 for index, (a, b) in enumerate(spans, 1):
     count, (low, high) = swings(a, b)
     print(f"approach {index}: {b - a:4.1f} s in GUIDED, camera between {low:+.0f} and {high:+.0f} deg, {count} reversals of more than 8 deg")
-print(f"RESULT {SCENE}: takeovers {len(spans)}, people attended {len(people_attended)} of 2 ({', '.join(people_attended) or 'none'}), "
+print(f"RESULT {SCENE}: takeovers {len(spans)}, people attended {len(people_attended)} of 2 ({', '.join(people_attended) or 'none'})"
+      f"{', the other as one of the same group' if as_group else ''}, last count PEOPLE {counted[0]} FOUND {counted[1]} ATTENDED, "
       f"reports off by {', '.join(f'{r[2]:.1f}' for r in attended) or '-'} m, "
       f"closest the boat came: person 1 {closest['1']:.1f} m, person 2 {closest['2']:.1f} m")
 failures = []
-if len(people_attended) < 2:
+if len(people_attended) < 2 and not as_group:
     failures.append(f"only {len(people_attended)} of 2 people attended")
+if counted[0] > 2:
+    failures.append(f"counted {counted[0]} people where there are 2")
 if any(r[2] > 3.0 for r in attended):
     failures.append("a report more than 3 m from either person")
 if min(closest.values()) < 0.8:
