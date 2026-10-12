@@ -1,0 +1,31 @@
+<?xml version="1.0" ?>
+<!--
+  A round basket boat (thuyen thung), 1.9 m across, afloat and empty. Static, origin at the
+  water level. Its rim is 0.47 m above the water, in the plane of the buoy's LiDAR.
+-->
+<sdf version="1.9">
+  <model name="basket_boat">
+    <static>true</static>
+    <link name="link">
+      <visual name="basket">
+        <pose>0 0 0.17 0 0 0</pose>
+        <geometry><cylinder><radius>0.95</radius><length>0.6</length></cylinder></geometry>
+        <material><ambient>0.3 0.2 0.12 1</ambient><diffuse>0.3 0.2 0.12 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="basket">
+        <pose>0 0 0.17 0 0 0</pose>
+        <geometry><cylinder><radius>0.95</radius><length>0.6</length></cylinder></geometry>
+      </collision>
+      <visual name="inside">
+        <pose>0 0 0.46 0 0 0</pose>
+        <geometry><cylinder><radius>0.86</radius><length>0.04</length></cylinder></geometry>
+        <material><ambient>0.55 0.42 0.26 1</ambient><diffuse>0.55 0.42 0.26 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="thwart">
+        <pose>0 0 0.4 0 0 0.3</pose>
+        <geometry><box><size>1.7 0.14 0.05</size></box></geometry>
+        <material><ambient>0.36 0.25 0.16 1</ambient><diffuse>0.36 0.25 0.16 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+    </link>
+  </model>
+</sdf>

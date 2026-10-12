@@ -1,0 +1,35 @@
+<?xml version="1.0" ?>
+<!--
+  A concrete power pole snapped by the typhoon: the stump stands 2 m out of the water, the top
+  hangs from it down to the water along +x. Static, origin at the water level at the foot.
+-->
+<sdf version="1.9">
+  <model name="broken_pole">
+    <static>true</static>
+    <link name="link">
+      <visual name="stump">
+        <pose>0 0 0.4 0 0.06 0</pose>
+        <geometry><cylinder><radius>0.15</radius><length>3.2</length></cylinder></geometry>
+        <material><ambient>0.55 0.53 0.5 1</ambient><diffuse>0.55 0.53 0.5 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="stump">
+        <pose>0 0 0.4 0 0.06 0</pose>
+        <geometry><cylinder><radius>0.15</radius><length>3.2</length></cylinder></geometry>
+      </collision>
+      <visual name="top">
+        <pose>1.75 0 1.15 0 1.15 0</pose>
+        <geometry><cylinder><radius>0.13</radius><length>4.2</length></cylinder></geometry>
+        <material><ambient>0.55 0.53 0.5 1</ambient><diffuse>0.55 0.53 0.5 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="crossarm">
+        <pose>3.4 0 0.45 0 1.15 0</pose>
+        <geometry><box><size>0.1 1.4 0.1</size></box></geometry>
+        <material><ambient>0.36 0.25 0.16 1</ambient><diffuse>0.36 0.25 0.16 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="top">
+        <pose>1.1 0 1.45 0 1.15 0</pose>
+        <geometry><cylinder><radius>0.13</radius><length>2.4</length></cylinder></geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>
