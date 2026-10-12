@@ -81,7 +81,7 @@ người đang thấy, vật cản gần nhất, tuổi vòng quét LiDAR, pin v
 Trình tự đầy đủ khi đưa lên phao nằm ở `docs/porting-checklist.md`. Tóm tắt, **tháo chân vịt**:
 
 1. `python3 tools/lidar_capture.py`: phải ra `valid packets` khác 0 (xem mục LiDAR bên dưới).
-2. `./run.sh pixhawk --viewer`, mở `http://<địa chỉ Pi>:8090/`: thấy ảnh camera, điểm LiDAR đúng phía
+2. `./run.sh pixhawk --viewer`, mở `http://<địa chỉ Pi>:8090/` (trang có cả bản đồ quyết định, xem `sim/README.md`): thấy ảnh camera, điểm LiDAR đúng phía
    (đặt một vật trước mũi phao, chấm trắng phải nằm phía trên hình), khung quanh người.
 3. Log mỗi 5 giây có `board 12.3 V lora ok` (bo phụ đang trả lời; `board off` là chưa thấy bo). Đứng
    trước camera rồi đi sang một bên: servo quay theo. Sai chiều thì đổi `CAM_PAN_DIR` trên bo phụ.

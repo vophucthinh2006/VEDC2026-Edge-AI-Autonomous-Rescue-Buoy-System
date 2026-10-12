@@ -85,7 +85,22 @@ Arm, AUTO. Log của Pi: `~/vedc_sim/sitl_run/pi.log`. `--pi=simulated` dùng b�
 - bên phải là LiDAR nhìn từ trên xuống, mũi phao hướng lên: chấm trắng là điểm LiDAR quét được, vạch đỏ là
   72 ô 5° đúng như Pi gửi cho bộ lái, vòng cam là vùng cấm quanh nạn nhân đã tiếp cận, hình quạt là góc nhìn
   60° của camera (vàng khi quét, xanh khi bám), dấu × là người đang được bám;
+- phía dưới là **bản đồ quyết định**, Bắc ở trên, phao là mũi tên trắng: vệt phao đã đi, lộ trình và waypoint
+  hiện tại (xanh dương), những gì LiDAR đã thấy được nhớ lại đúng chỗ (chấm trắng, cũ thì xám), các ô Pi đang
+  báo là bị chắn (cung đỏ), và người trên bản đồ của Pi: xám là mới thấy, vàng là đã xác nhận đang chờ, xanh lá
+  là người đang tới (kèm vòng khoảng cách dừng và điểm đang nhắm), xanh dương là đã xử lý (kèm vòng mà ai nằm
+  trong đó sẽ không được tới lần nữa);
+- trên bản đồ có hai mũi tên từ phao: **mũi tên xanh mảnh** là hướng thẳng tới waypoint, **mũi tên vàng đậm** là
+  hướng bộ lái đang thật sự lái. Hai mũi tên lệch nhau nghĩa là bộ né vật cản đang bẻ đường đi; cột chữ bên
+  phải nói ra điều đó bằng lời, ví dụ `autopilot steers 109 deg = 14 deg RIGHT of the waypoint (095), going
+  round: 3.7 m on the way there`, cùng với việc Pi đang làm (SEARCH, APPROACH, HOLD…) và vì sao;
 - dòng dưới cùng: chế độ bay, pha cứu hộ, waypoint hiện tại, vật cản gần nhất.
+
+![Trang xem trực tiếp với bản đồ quyết định](docs/viewer_decision_map.jpg)
+
+Bản đồ này cho thấy **kết quả** quyết định của bộ né vật cản (BendyRuler chạy bên trong ArduPilot), không phải
+các phương án nó đã cân nhắc: Pi chỉ nhận được hướng đang lái, không nhận được lý do. Chữ trên trang là tiếng
+Anh vì bộ vẽ chữ của OpenCV không có dấu tiếng Việt.
 
 Trang này do chính `rescue_main.py --viewer [cổng]` phát ra (`Rasp_Pi/modules/viewer.py`), khoảng 5 hình/giây,
 chỉ đọc dữ liệu chứ không tác động tới phao. Trên Pi thật dùng được y như vậy qua wifi:
