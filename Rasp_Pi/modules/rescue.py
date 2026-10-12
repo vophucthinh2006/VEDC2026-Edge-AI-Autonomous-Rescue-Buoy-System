@@ -311,6 +311,44 @@ class RescueMission:
             return [Action("mode", mode=self.blocked_last_mode), Action("report", text=f"WP {seq} BLOCKED, {self.blocked_last_mode}")]
         return [Action("skip", seq=seq + 1), Action("report", text=f"WP {seq} BLOCKED, SKIPPED")]
 
+    def describe(self, snap: Snapshot, now: float) -> dict:
+        """For the viewer's map: everybody on the Pi's map with what they are to it, and in a few
+        lines what the Pi is doing and why. Called from the thread that calls step()."""
+        vehicle = snap.vehicle
+
+        def status(person: Person) -> str:
+            if person is self.target:
+                return "target"
+            if person.attended:
+                return "attended"
+            if person.confirmed:
+                return "lost" if person.lost_at is not None and person.last_seen <= person.lost_at else "waiting"
+            return "seen"
+
+        if self.phase is Phase.SEARCH:
+            if not (vehicle.armed and vehicle.mode == self.search_mode):
+                lines = [f"IDLE: the Pi acts only in {self.search_mode}, armed", "the camera looks ahead, nobody is gone to"]
+            else:
+                lines = [f"SEARCH: the autopilot runs the mission", "the camera sweeps; a person seen in"
+                         f" {self.confirm_frames} frames", f"over {self.confirm_s:.0f} s takes the boat to them"]
+        elif self.phase is Phase.APPROACH and self.target is not None:
+            range_m, bearing, off = self._to_person(snap)
+            unseen = now - max(self.target.last_seen, self._approach_since)
+            lines = [f"APPROACH: person {range_m:.1f} m away at {bearing:03.0f} deg",
+                     f"aim {self.standoff_m:.1f} m short of them ({off:+.0f} deg off the bow)",
+                     ("turning the bow to them first" if self._turning and abs(off) > self.face_tolerance_deg else
+                      f"not seen for {unseen:.0f} s (gives up at {self.lost_s:.0f} s)" if unseen > 1.0 else "in view")]
+        elif self.phase is Phase.HOLD and self.target is not None:
+            left = max(0.0, self.hold_s - (now - self._hold_since))
+            lines = [f"HOLD next to the person: {left:.0f} s left", f"then back to {self.after_hold}",
+                     "they and everybody near are attended"]
+        else:
+            lines = [f"HANDBACK: asked for {self._expected_mode}, waiting for it"]
+        attended = sum(p.attended for p in self.people)
+        lines.append(f"people: {self.found} found, {attended} attended, {len(self.people) - self.found} unconfirmed")
+        return {"phase": self.phase.value, "lines": lines, "people": [(*p.position, status(p)) for p in self.people],
+                "standoff_m": self.standoff_m, "group_radius_m": self.group_radius_m}
+
     def step(self, snap: Snapshot, now: float) -> list[Action]:
         self._track(snap, now)
         return self._decide(snap, now) + self._count_report()

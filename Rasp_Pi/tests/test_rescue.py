@@ -404,6 +404,21 @@ class AlreadyAttendedTest(unittest.TestCase):
         self.assertEqual(mission.step(snap(34.2, mode="AUTO", lon=near_lon), 34.2), [])
         self.assertTrue(all(person.attended for person in mission.people))
 
+    def test_describes_what_it_is_doing_for_the_map(self):
+        mission = RescueMission(VEHICLE, self.CONFIG)
+        idle = mission.describe(snap(0.0, mode="MANUAL"), 0.0)
+        self.assertTrue(idle["lines"][0].startswith("IDLE"))
+        self.assertTrue(mission.describe(snap(0.0), 0.0)["lines"][0].startswith("SEARCH"))
+        for t in (0.0, 0.5, 1.1):
+            mission.step(snap(t, target=(0.0, 6.0), others=((60.0, 7.0),)), t)
+        told = mission.describe(snap(1.5, mode="GUIDED", target=(0.0, 6.0)), 1.5)
+        self.assertEqual(told["phase"], "approach")
+        self.assertIn("APPROACH: person 6.0 m away at 090 deg", told["lines"][0])
+        self.assertEqual(sorted(status for _lat, _lon, status in told["people"]), ["target", "waiting"])
+        self.assertIn("2 found, 0 attended", told["lines"][-1])
+        mission, _victim, _ = self._attended()
+        self.assertEqual([status for _lat, _lon, status in mission.describe(snap(31.2), 31.2)["people"]], ["attended"])
+
     def test_two_people_three_metres_apart_stay_two_stops(self):
         mission, victim, reached = self._attended(frame=(SeveralPeopleTest.A, (SeveralPeopleTest.B,)))
         self.assertEqual(kinds(reached)[-1], ("report", "PEOPLE 2 FOUND 1 ATTENDED"))

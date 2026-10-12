@@ -1,8 +1,11 @@
 """Live view of what the Pi perceives, in a browser: http://<host>:<port>/
 
-Left, the camera frame with the detector's box, confidence and range, and where the servo points.
-Right, the LiDAR from above, bow up: the returns, the 72 sectors as sent to the autopilot, the
-keep-out circles, the camera's field of view and the person being followed.
+Top left, the camera frame with the detector's box, confidence and range, and where the servo
+points. Top right, the LiDAR from above, bow up: the returns, the 72 sectors as sent to the
+autopilot, the keep-out circles, the camera's field of view and the person being followed.
+Below, the decision map (modules/world_map.py): north up, the mission route, where the autopilot
+steers against where the waypoint is, the people as the rescue logic has them, and in words what
+the boat is doing and why.
 
 It reads the same state the rescue logic reads and changes nothing. One MJPEG stream, a few frames
 per second: for watching and for recording a demo, not for control.
@@ -21,6 +24,7 @@ import numpy as np
 
 from modules.obstacle_feed import SECTOR_DEG, SECTORS, objects_from, sectors
 from modules.state_store import Snapshot, StateStore
+from modules.world_map import WorldMemory, draw_world
 
 CAMERA_W, CAMERA_H = 640, 480
 MAP = 480                      # the LiDAR panel is MAP x MAP pixels
@@ -35,7 +39,9 @@ PAGE = b"""<!doctype html><html><head><meta charset="utf-8"><title>RedgeSCUE - P
 img{max-width:100%;height:auto;margin-top:8px}p{margin:8px}</style></head>
 <body><img src="/stream" alt="camera and LiDAR as the Pi sees them">
 <p>Camera with the detector's box &middot; LiDAR from above, bow up: white = returns, red = sectors sent to the autopilot,
-orange = keep-out circles, yellow/green wedge = camera searching/following</p></body></html>"""
+orange = keep-out circles, yellow/green wedge = camera searching/following</p>
+<p>Decision map, north up: thin blue arrow = straight to the waypoint, thick yellow arrow = where the autopilot steers.
+When they differ the boat is going round something.</p></body></html>"""
 
 
 def _text(image: np.ndarray, text: str, origin: tuple[int, int], colour=WHITE, scale: float = 0.5) -> None:
@@ -129,8 +135,11 @@ def draw_map(snap: Snapshot, sector_cm: list[int], max_m: float, keep_outs: list
 
 
 def render(snap: Snapshot, view: dict | None, sector_cm: list[int], max_m: float,
-           keep_outs: list[tuple[float, float, float]], fov_deg: float, phase: str) -> np.ndarray:
+           keep_outs: list[tuple[float, float, float]], fov_deg: float, phase: str, world: np.ndarray | None = None) -> np.ndarray:
+    """world: the decision map, the width of the two panels above it; None leaves it out."""
     top = np.hstack([draw_camera(view), draw_map(snap, sector_cm, max_m, keep_outs, view, fov_deg)])
+    if world is not None:
+        top = np.vstack([top, world])
     bar = np.full((BAR, top.shape[1], 3), 12, np.uint8)
     vehicle = snap.vehicle
     nearest = min((o.distance_m for o in snap.obstacles), default=None)
@@ -145,12 +154,15 @@ def render(snap: Snapshot, view: dict | None, sector_cm: list[int], max_m: float
 class Viewer(threading.Thread):
     def __init__(self, port: int, state: StateStore, stop_event: threading.Event, avoidance: dict, camera: dict,
                  camera_view: Callable[[], dict | None], keep_outs: Callable[[], list[tuple[float, float]]],
-                 attending: Callable[[], tuple[float, float] | None], phase: Callable[[], str], rate_hz: float = 5.0) -> None:
+                 attending: Callable[[], tuple[float, float] | None], phase: Callable[[], str], rate_hz: float = 5.0,
+                 decision: Callable[[], dict | None] | None = None) -> None:
         super().__init__(name="viewer", daemon=True)
         self.port, self.state, self.stop = port, state, stop_event
         self.a, self.fov = avoidance, float(camera["horizontal_fov_deg"])
         self.camera_view, self.keep_outs, self.attending, self.phase = camera_view, keep_outs, attending, phase
         self.period = 1.0 / rate_hz
+        self.decision = decision                # RescueMission.describe() and the point aimed at; None: no rescue logic
+        self.memory = WorldMemory()
         self.log = logging.getLogger(__name__)
         self._jpeg = b""
         self._fresh = threading.Condition()
@@ -162,7 +174,9 @@ class Viewer(threading.Thread):
         objects = objects_from(snap, circles, radius, self.attending())
         # objects_from appends one circle per keep-out after the LiDAR returns.
         keep = objects[len(objects) - len(circles):] if circles and snap.gps.fix >= 3 else []
-        return render(snap, self.camera_view(), sectors(objects, min_m, max_m), max_m, keep, self.fov, self.phase())
+        view, sector_cm = self.camera_view(), sectors(objects, min_m, max_m)
+        world = draw_world(snap, self.memory, self.decision() if self.decision else None, sector_cm, max_m, view, self.fov)
+        return render(snap, view, sector_cm, max_m, keep, self.fov, self.phase(), world)
 
     def run(self) -> None:
         viewer = self

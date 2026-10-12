@@ -135,10 +135,11 @@ def main() -> int:
     # proximity sensor as failed instead of taking silence for open water.
     obstacle_feed = ObstacleFeed(avoidance, state, stop_event, mission.keep_outs, mission.attending, link.obstacle_distance,
                                  None if lidar_source == "none" else float(avoidance.get("lidar_stale_s", 1.0)))
+    decision: dict = {}       # what the viewer's map shows of the rescue logic, replaced whole every step
     if args.viewer:
         from modules.viewer import Viewer   # needs OpenCV; only loaded when asked for
         workers.append(Viewer(args.viewer, state, stop_event, avoidance, config["camera"], detector.view,
-                              mission.keep_outs, mission.attending, lambda: mission.phase.value))
+                              mission.keep_outs, mission.attending, lambda: mission.phase.value, decision=lambda: decision.get("now")))
     for worker in workers:
         worker.start()
 
@@ -158,6 +159,7 @@ def main() -> int:
     last_status = 0.0
     last_count = 0.0
     estop_held = False
+    aimed_at = None           # the last point the boat was sent to
     run_log = None
     if args.log:
         from utils.run_log import RunLog
@@ -200,6 +202,7 @@ def main() -> int:
                     link.set_mode(action.mode)
                 elif action.kind == "goto":
                     link.goto(action.lat, action.lon)
+                    aimed_at = (action.lat, action.lon)
                 elif action.kind == "face":
                     link.heading_speed(action.heading, action.speed)
                 elif action.kind == "skip":
@@ -208,6 +211,8 @@ def main() -> int:
                     text = action.text if not action.lat else f"{action.text} {action.lat:.6f} {action.lon:.6f} c={action.confidence:.2f}"
                     link.statustext(text)
                     log.warning(text)
+            if args.viewer:
+                decision["now"] = {**mission.describe(snapshot, now), "goto": aimed_at if mission.phase.value == "approach" else None}
             if mission.phase is not last_phase:
                 log.info("phase %s -> %s", last_phase.value, mission.phase.value)
                 last_phase = mission.phase
