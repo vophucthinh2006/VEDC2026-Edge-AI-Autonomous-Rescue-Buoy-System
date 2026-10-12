@@ -52,6 +52,8 @@ def main() -> int:
     parser.add_argument("--no-scan", action="store_true", help="camera fixed ahead while searching (camera.scan.enabled off)")
     parser.add_argument("--scan-mode", choices=("step", "sweep"), help="overrides camera.scan.mode")
     parser.add_argument("--scan-rate", type=float, metavar="DEG_S", help="overrides camera.scan.sweep_rate_deg_s")
+    parser.add_argument("--scan-limit", type=float, metavar="DEG",
+                        help="overrides camera.scan.sweep_limit_deg: the sweep turns between -DEG and +DEG (step mode: its side angles)")
     parser.add_argument("--viewer", type=int, nargs="?", const=8090, metavar="PORT",
                         help="serve the live view of camera and LiDAR on http://<this machine>:PORT/ (default 8090)")
     parser.add_argument("--log", type=Path, nargs="?", const=Path("logs"), metavar="DIR",
@@ -68,6 +70,10 @@ def main() -> int:
         config["camera"]["scan"]["mode"] = args.scan_mode
     if args.scan_rate:
         config["camera"]["scan"]["sweep_rate_deg_s"] = args.scan_rate
+    if args.scan_limit:
+        scan = config["camera"]["scan"]
+        scan["sweep_limit_deg"] = args.scan_limit
+        scan["angles_deg"] = [0, -args.scan_limit, 0, args.scan_limit]
     logging.basicConfig(level=getattr(logging, config["logging"]["level"].upper()),
                         format="%(asctime)s %(levelname)s %(threadName)s %(name)s: %(message)s")
     log = logging.getLogger("rescue")

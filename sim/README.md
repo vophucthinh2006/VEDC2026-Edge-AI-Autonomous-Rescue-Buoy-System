@@ -202,6 +202,27 @@ bash sim/tools/scan_test.sh camera 6.5 noscan      # camera cố định
 bash sim/tools/scan_test.sh camera 6.5 sweep 12    # dừng 12 s ở waypoint ngang nạn nhân
 ```
 
+**Quét hẹp lại, ±30° thay vì ±60°** (tổng vùng nhìn 120° thay vì 180°; `SCAN_LIMIT=30` trước lệnh test, hoặc
+`rescue_main.py --scan-limit 30`, hoặc `camera.scan.sweep_limit_deg`). Model thật, mỗi ô một lần chạy:
+
+| Hồ, lộ trình cách nạn nhân | ±60° | ±30° |
+|---|---|---|
+| 5 m | thấy, từ 6.9 m | thấy, từ 6.9 m |
+| 5.5 m | — | thấy, từ 7.1 m |
+| 6.5 m | thấy, từ 7.2 m | thấy, từ 6.7 m |
+
+| Cảnh miền Trung | ±60° (ba lần chạy) | ±30° (hai lần chạy) |
+|---|---|---|
+| Người/nhóm được tới, trên 6 | 5, 4, 6 | 5, 4 |
+| Người đứng ở cửa nhà (lệch 6.5 m sang bên) được tới | 2 trên 3 lần | 0 trên 2 lần |
+| Số lần mất dấu giữa chừng | 0, 4, 0 | 4, 4 |
+| Lần chạy không đạt | 1 (dừng chỗ không người) | 1 (dừng hai lần cho nhóm trên mái) |
+
+Trên hồ không thấy khác biệt tới 6.5 m: cả hai kiểu đều bắt được người khi họ còn ở phía trước, cách khoảng
+7 m. Ở cảnh miền Trung hai kiểu ngang nhau trong mức dao động giữa các lần chạy; dấu hiệu duy nhất nghiêng về
+một phía là người đứng ở cửa nhà, bị sót cả hai lần với ±30°. Số lần chạy quá ít để kết luận, nhưng không có
+số nào ủng hộ việc thu hẹp góc quét. Mặc định giữ ±60°.
+
 Khi nạn nhân lệch hẳn sang bên, lúc phao quay mũi để tiến lại camera có khi mất dấu vài giây
 (`VICTIM LOST`) rồi bắt lại; phao vẫn tới nơi nhưng chậm hơn.
 

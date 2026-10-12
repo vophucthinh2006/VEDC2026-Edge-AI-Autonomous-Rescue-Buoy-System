@@ -11,6 +11,7 @@
 #     camera     the real TFLite model on the Gazebo camera (default)
 #     simulated  geometric detector
 set -o pipefail
+# SCAN_LIMIT=<deg>: the camera sweeps between -deg and +deg instead of the configured 60
 # EXTRA_PARM=<file>: one more parameter file on top, e.g. sim/params/oneway_esc.parm
 DETECTOR="${1:-camera}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -46,7 +47,7 @@ if [ -n "$HOLD_MODE" ]; then
     NO_SCAN=(--overlay "$T/hold_mode.yaml")
 fi
 setsid python3 -u rescue_main.py --overlay config/sim.yaml --overlay config/sim_central.yaml \
-    --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773 "${NO_SCAN[@]}" > "$T/pi.log" 2>&1 < /dev/null &
+    --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773 "${NO_SCAN[@]}" ${SCAN_LIMIT:+--scan-limit "$SCAN_LIMIT"} > "$T/pi.log" 2>&1 < /dev/null &
 PI=$!
 cleanup() {
     kill -- -$PI -$SITL -$GZ 2>/dev/null
