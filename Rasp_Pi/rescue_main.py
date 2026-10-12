@@ -200,6 +200,8 @@ def main() -> int:
                     link.set_mode(action.mode)
                 elif action.kind == "goto":
                     link.goto(action.lat, action.lon)
+                elif action.kind == "face":
+                    link.heading_speed(action.heading, action.speed)
                 elif action.kind == "skip":
                     link.set_mission_current(action.seq)
                 elif action.kind == "report":

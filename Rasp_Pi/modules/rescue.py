@@ -7,6 +7,14 @@ once a person has been seen for long enough, and gives the boat back afterwards.
 The operator always wins: any mode change the Pi did not ask for (RC switch, ground station)
 ends the takeover at once.
 
+Two ways of keeping the bow on the person exist and are both off by default, because in the
+simulator neither did better than leaving it to the autopilot: turn_first (a person seen off to
+one side is turned to at a creep, then gone to) and hold_mode FACE (the Pi holds next to them
+itself, steering the bow to them, instead of the autopilot's LOITER). A boat only turns while it
+moves; next to a person there is no room to move. They are steered with heading-and-speed
+commands, which the autopilot's avoidance does not bend: the LiDAR check of the approach
+(hold_min_m) guards them, and the boat is never driven closer than the stand-off.
+
 Nobody is gone to twice. Where an attended person is was fixed from 2 m away and is not moved
 again; a later sighting is them if its line of sight passes them, with the slack in range that a
 box seen from afar needs. People standing together are one stop: reaching one attends everybody
@@ -43,13 +51,15 @@ class Phase(Enum):
 
 @dataclass(frozen=True)
 class Action:
-    kind: str                # "mode" | "goto" | "report" | "skip"
+    kind: str                # "mode" | "goto" | "face" | "report" | "skip"
     mode: str = ""
     seq: int = 0             # skip: the mission item to continue from
     lat: float = 0.0
     lon: float = 0.0
     confidence: float = 0.0
     text: str = ""
+    heading: float = 0.0     # face: true heading to steer, degrees
+    speed: float = 0.0       # face: m/s, 0 to stand still
 
 
 @dataclass
@@ -85,6 +95,12 @@ class RescueMission:
         self.arrive_m = float(rescue["arrive_m"])
         self.same_person_m = float(rescue["revisit_radius_m"])
         self.same_person_range_m = float(rescue.get("same_person_range_m", 3.0))
+        self.face_tolerance_deg = float(rescue.get("face_tolerance_deg", 10.0))
+        self.face_speed_mps = float(rescue.get("face_speed_mps", 0.3))
+        self.face_timeout_s = float(rescue.get("face_timeout_s", 8.0))
+        self.turn_first = bool(rescue.get("turn_first", False))
+        self.hold_facing = self.hold_mode == "FACE"               # the Pi holds, bow on the person; else the autopilot's hold_mode
+        self._turning = False                                     # approach: still turning the bow to the person
         self.group_radius_m = float(rescue.get("group_radius_m", 2.5))
         self.range_sigma = float(rescue.get("range_sigma", 0.35))
         self.goto_period_s = float(rescue["goto_period_s"])
@@ -212,6 +228,33 @@ class RescueMission:
         detector keeps the camera on them (rescue_main passes this to the state as the focus)."""
         return self.target.position if self.target and self.phase in (Phase.APPROACH, Phase.HOLD) else None
 
+    def _to_person(self, snap: Snapshot) -> tuple[float, float, float]:
+        """Range to the person being attended, their true bearing, and how far off the bow that is
+        (positive: to starboard)."""
+        boat = (snap.gps.lat_deg, snap.gps.lon_deg)
+        bearing = bearing_deg(boat[0], boat[1], *self.victim)
+        return haversine_m(boat[0], boat[1], *self.victim), bearing, signed_angle_deg(bearing - snap.imu.yaw_deg)
+
+    def _hold_start(self, snap: Snapshot, now: float) -> Action:
+        """What begins the hold: the autopilot's hold mode, or, holding with the bow on the person,
+        a stop where the boat is (the Pi keeps GUIDED and steers from the next step on)."""
+        if not self.hold_facing:
+            return self._ask_mode(self.hold_mode, now)
+        self._last_goto = now
+        return Action("face", heading=self._to_person(snap)[1], speed=0.0)
+
+    def _hold_facing(self, snap: Snapshot) -> Action:
+        """Holding next to the person, bow on them. Forward only, and never closer than the
+        stand-off: drifted away, creep back; bow off them, creep round; too close or something
+        within hold_min_m of the LiDAR, stand still, whatever the bow does."""
+        range_m, bearing, off = self._to_person(snap)
+        around = min((o.distance_m for o in snap.obstacles), default=float("inf"))
+        speed = 0.0
+        if around >= self.hold_min_m and range_m >= self.standoff_m \
+                and (range_m > self.standoff_m + self.arrive_m or abs(off) > self.face_tolerance_deg):
+            speed = self.face_speed_mps
+        return Action("face", heading=bearing, speed=speed)
+
     def _attend(self, now: float) -> None:
         self.phase, self._hold_since = Phase.HOLD, now
         self.target.attended_at = now
@@ -292,6 +335,7 @@ class RescueMission:
             # Somebody confirmed and not yet gone to: the nearest of them first.
             self.target = min(waiting, key=lambda p: haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *p.position))
             self.phase, self._last_goto, self._approach_since = Phase.APPROACH, 0.0, now
+            self._turning = self.turn_first
             self._best_range, self._progress_at = float("inf"), now
             return [self._ask_mode("GUIDED", now),
                     Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM SEEN")]
@@ -330,7 +374,7 @@ class RescueMission:
             range_m = haversine_m(boat[0], boat[1], self.victim[0], self.victim[1])
             if range_m <= self.standoff_m + self.arrive_m:
                 self._attend(now)
-                return [self._ask_mode(self.hold_mode, now),
+                return [self._hold_start(snap, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM REACHED")]
             # The stand-off is measured from the person, not from what they stand on: coming in at
             # an angle, the stand-off point of somebody on a roof can lie against the wall. On the
@@ -343,7 +387,7 @@ class RescueMission:
             if around < self.hold_min_m or (ahead < self.hold_clear_m and range_m <= self.standoff_m + self.hold_clear_within_m):
                 self._attend(now)
                 near = range_m <= self.standoff_m + self.hold_clear_within_m
-                return [self._ask_mode(self.hold_mode, now),
+                return [self._hold_start(snap, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence,
                                text="VICTIM REACHED" if near else "VICTIM UNREACHABLE")]
             if range_m < self._best_range - STALL_PROGRESS_M:
@@ -352,11 +396,17 @@ class RescueMission:
                 # No closer for a while: something is in the way (a person on a roof, behind debris).
                 # Stay here and tell the shore where they are.
                 self._attend(now)
-                return [self._ask_mode(self.hold_mode, now),
+                return [self._hold_start(snap, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM UNREACHABLE")]
             if now - self._last_goto < self.goto_period_s:
                 return []
             self._last_goto = now
+            # First the bow to the person, then the boat to them: off to one side, turn at a creep
+            # until the bow is on them (or for face_timeout_s at most).
+            _range, bearing, off = self._to_person(snap)
+            if self._turning and abs(off) > self.face_tolerance_deg and now - self._approach_since <= self.face_timeout_s:
+                return [Action("face", heading=bearing, speed=self.face_speed_mps)]
+            self._turning = False
             # Stop short of the person: aim standoff_m before them on the line from the boat.
             fraction = (range_m - self.standoff_m) / range_m
             return [Action("goto", lat=boat[0] + (self.victim[0] - boat[0]) * fraction,
@@ -364,6 +414,9 @@ class RescueMission:
 
         # HOLD
         if now - self._hold_since < self.hold_s:
-            return []
+            if not self.hold_facing or now - self._last_goto < self.goto_period_s:
+                return []
+            self._last_goto = now               # repeated: the autopilot drops a heading and speed after 3 s
+            return [self._hold_facing(snap)]
         self.phase, self.target = Phase.HANDBACK, None      # from now on they are an obstacle like any other
         return [self._ask_mode(self.after_hold, now), Action("report", text="RESUMING " + self.after_hold)]

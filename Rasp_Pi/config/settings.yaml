@@ -106,7 +106,24 @@ mavlink:
 # Rescue logic on top of the autopilot (modules/rescue.py).
 rescue:
   search_mode: AUTO           # the Pi only takes over while the autopilot runs the search pattern
-  hold_mode: LOITER           # keeps station next to the person
+  # How the boat stays next to the person. LOITER: the autopilot's own station keeping. It holds
+  # the position; the bow stays roughly where the approach left it (12 and 31 deg off the person in
+  # two runs on open water, 55 deg in the village scene, where the approach bends round obstacles).
+  # FACE: the Pi holds in GUIDED and steers the bow to the person. Measured in the simulator and
+  # NOT better: a boat only turns while it moves, the turn uses up the half metre between
+  # stand-off and stand-off + arrive_m before the bow is round, and the boat is then left standing
+  # with the bow no nearer the person than under LOITER (51 deg on open water; with one-way rear
+  # motors it drifted 5 m off and never reported the person reached). Kept for a boat that can turn on the spot; see sim/README.md.
+  hold_mode: LOITER
+  # turn_first: somebody seen more than face_tolerance_deg off the bow is turned to first, at
+  # face_speed_mps, for face_timeout_s at most, and only then gone to. Off: in the simulator the
+  # boat arrived with the bow no nearer the person than when it simply goes to them (32 deg off,
+  # against 12 and 31 in two runs without it). The same speed and tolerance steer a FACE hold. These commands are
+  # not bent by the autopilot's avoidance: only hold_min_m guards them.
+  turn_first: false
+  face_tolerance_deg: 10.0
+  face_speed_mps: 0.3
+  face_timeout_s: 8.0
   after_hold: AUTO            # AUTO resumes the pattern where it stopped; RTL brings the boat home
   confirm_s: 1.0              # a detection must persist this long before the takeover,
   confirm_frames: 3           # in at least this many frames,

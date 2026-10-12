@@ -233,6 +233,101 @@ class SeveralPeopleTest(unittest.TestCase):
         self.assertIs(mission.phase, Phase.APPROACH)
 
 
+class FacingTest(unittest.TestCase):
+    """The bow follows the camera: turn to the person, then go; and hold with the bow on them."""
+    CONFIG = {**RESCUE, "revisit_radius_m": 2.0, "hold_mode": "FACE", "turn_first": True}
+    SIDE = (50.0, 6.0)             # 50 deg to starboard of a boat heading east: true bearing 140
+
+    def _taken_over(self, where):
+        mission = RescueMission(VEHICLE, self.CONFIG)
+        for t in (0.0, 0.5, 1.1):
+            mission.step(snap(t, target=where), t)
+        self.assertIs(mission.phase, Phase.APPROACH)
+        return mission
+
+    def test_the_bow_is_turned_to_the_person_before_the_boat_goes_to_them(self):
+        mission = self._taken_over(self.SIDE)
+        actions = mission.step(snap(1.5, mode="GUIDED", target=self.SIDE), 1.5)
+        self.assertEqual([a.kind for a in actions], ["face"])
+        self.assertAlmostEqual(actions[0].heading, 140.0, delta=0.5)
+        self.assertEqual(actions[0].speed, 0.3)
+        self.assertEqual(mission.step(snap(1.8, mode="GUIDED", target=self.SIDE), 1.8), [])       # rate limited, like goto
+        # The boat has turned to 136: they are 4 deg off the bow now. From here it goes to them.
+        actions = mission.step(snap(2.6, mode="GUIDED", yaw=136.0, target=(4.0, 6.0)), 2.6)
+        self.assertEqual([a.kind for a in actions], ["goto"])
+        # And it does not go back to turning if the bow swings off again on the way.
+        actions = mission.step(snap(3.7, mode="GUIDED", yaw=110.0, target=(30.0, 6.0)), 3.7)
+        self.assertEqual([a.kind for a in actions], ["goto"])
+
+    def test_turning_is_given_up_after_a_while(self):
+        mission = self._taken_over(self.SIDE)
+        self.assertEqual(mission.step(snap(5.0, mode="GUIDED", target=self.SIDE), 5.0)[0].kind, "face")
+        self.assertEqual(mission.step(snap(9.5, mode="GUIDED", target=self.SIDE), 9.5)[0].kind, "goto")    # 8 s after the takeover
+
+    def test_somebody_dead_ahead_is_gone_to_at_once(self):
+        mission = self._taken_over((3.0, 6.0))
+        self.assertEqual(mission.step(snap(1.5, mode="GUIDED", target=(3.0, 6.0)), 1.5)[0].kind, "goto")
+
+    def _holding(self):
+        mission = self._taken_over((0.0, 6.0))
+        victim = mission.victim
+        short = lambda metres: victim[1] - metres / (111_320.0 * 0.982)      # this far west of them, on their latitude
+        actions = mission.step(snap(10.0, mode="GUIDED", target=(0.0, 1.8), lon=short(1.8)), 10.0)
+        self.assertEqual(kinds(actions), [("face", ""), ("report", "VICTIM REACHED")])       # no mode change: the Pi holds in GUIDED
+        self.assertEqual(actions[0].speed, 0.0)
+        self.assertIs(mission.phase, Phase.HOLD)
+        return mission, short
+
+    def _hold_step(self, mission, t, **where):
+        actions = mission.step(snap(t, mode="GUIDED", **where), t)
+        self.assertEqual([a.kind for a in actions], ["face"])
+        return actions[0]
+
+    def test_holds_with_the_bow_on_the_person(self):
+        mission, short = self._holding()
+        self.assertEqual(mission.step(snap(10.4, mode="GUIDED", lon=short(1.8)), 10.4), [])       # rate limited
+        # In place, bow on them: stand still.
+        face = self._hold_step(mission, 11.5, lon=short(1.8))
+        self.assertEqual((face.speed, round(face.heading)), (0.0, 90))
+        # Drifted to 3 m: creep back, heading for them.
+        self.assertEqual(self._hold_step(mission, 13.0, lon=short(3.0)).speed, 0.3)
+        # In place but the bow 50 deg off them: creep round.
+        face = self._hold_step(mission, 14.5, lon=short(1.8), yaw=40.0)
+        self.assertEqual((face.speed, round(face.heading)), (0.3, 90))
+
+    def test_the_hold_never_drives_the_boat_closer_than_the_standoff_or_onto_something(self):
+        mission, short = self._holding()
+        # 1.2 m from them (stand-off 1.5), bow well off: still no creeping.
+        self.assertEqual(self._hold_step(mission, 11.5, lon=short(1.2), yaw=40.0).speed, 0.0)
+        # Drifted out, but something 0.7 m from the LiDAR: stand still.
+        self.assertEqual(self._hold_step(mission, 13.0, lon=short(3.0), obstacle_m=0.7).speed, 0.0)
+
+    def test_the_hold_ends_like_any_other_and_the_operator_still_wins(self):
+        mission, short = self._holding()
+        self._hold_step(mission, 20.0, lon=short(1.8))
+        actions = mission.step(snap(30.5, mode="GUIDED", lon=short(1.8)), 30.5)
+        self.assertEqual(kinds(actions), [("mode", "AUTO"), ("report", "RESUMING AUTO")])
+        mission, short = self._holding()
+        self.assertEqual(mission.step(snap(15.0, mode="HOLD", lon=short(1.8)), 15.0), [])         # E-stop, RC switch, ground station
+        self.assertIs(mission.phase, Phase.SEARCH)
+
+    def test_by_default_neither_is_on(self):
+        mission = RescueMission(VEHICLE, {**RESCUE, "revisit_radius_m": 2.0})
+        for t in (0.0, 0.5, 1.1):
+            mission.step(snap(t, target=self.SIDE), t)
+        self.assertEqual(mission.step(snap(1.5, mode="GUIDED", target=self.SIDE), 1.5)[0].kind, "goto")    # no turning first
+        self.assertFalse(mission.hold_facing)
+
+    def test_with_loiter_the_autopilot_holds_as_before(self):
+        mission = RescueMission(VEHICLE, {**self.CONFIG, "hold_mode": "LOITER"})
+        for t in (0.0, 0.5, 1.1):
+            mission.step(snap(t, target=(0.0, 6.0)), t)
+        near_lon = mission.victim[1] - 1.8 / (111_320.0 * 0.982)
+        actions = mission.step(snap(10.0, mode="GUIDED", target=(0.0, 1.8), lon=near_lon), 10.0)
+        self.assertEqual(kinds(actions), [("mode", "LOITER"), ("report", "VICTIM REACHED")])
+        self.assertEqual(mission.step(snap(20.0, mode="LOITER", lon=near_lon), 20.0), [])
+
+
 class AlreadyAttendedTest(unittest.TestCase):
     """Nobody is gone to twice, and people standing together are one stop."""
     CONFIG = {**RESCUE, "revisit_radius_m": 2.0}
