@@ -119,7 +119,8 @@ class RunLogTest(unittest.TestCase):
             run.write(snap, now + 1.0, "approach", 1, BoardState(12.34, 1.5, True, True, True, now), True)
             run.write(snap, now + 2.0, "approach", 1, BoardState(12.34, 1.5, True, True, True, now), False)
             run.close()
-            rows = list(csv.DictReader(run.path.open(encoding="utf-8")))
+            with run.path.open(encoding="utf-8") as written:
+                rows = list(csv.DictReader(written))
         self.assertEqual(tuple(rows[0].keys()), COLUMNS)
         self.assertEqual((rows[0]["mode"], rows[0]["phase"], rows[0]["lat"], rows[0]["board"], rows[0]["battery_v"]), ("GUIDED", "search", "10.7626220", "", ""))
         self.assertEqual((rows[1]["people_found"], rows[1]["board"], rows[1]["battery_v"], rows[1]["estop"]), ("1", "1", "12.34", "1"))

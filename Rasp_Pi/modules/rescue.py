@@ -7,6 +7,11 @@ once a person has been seen for long enough, and gives the boat back afterwards.
 The operator always wins: any mode change the Pi did not ask for (RC switch, ground station)
 ends the takeover at once.
 
+Nobody is gone to twice. Where an attended person is was fixed from 2 m away and is not moved
+again; a later sighting is them if its line of sight passes them, with the slack in range that a
+box seen from afar needs. People standing together are one stop: reaching one attends everybody
+within group_radius_m of them, and whoever turns up there afterwards belongs to that group.
+
 A search waypoint can land on something the operator could not see on the map: a tree, a car, a
 roof. The autopilot's avoidance then keeps the boat nosing around in front of it for ever. Three
 rules move the mission on to the next item, with a report to the shore: the LiDAR shows something
@@ -80,6 +85,8 @@ class RescueMission:
         self.arrive_m = float(rescue["arrive_m"])
         self.same_person_m = float(rescue["revisit_radius_m"])
         self.same_person_range_m = float(rescue.get("same_person_range_m", 3.0))
+        self.group_radius_m = float(rescue.get("group_radius_m", 2.5))
+        self.range_sigma = float(rescue.get("range_sigma", 0.35))
         self.goto_period_s = float(rescue["goto_period_s"])
         self.stall_s = float(rescue.get("stall_s", 10.0))
         self.hold_clear_m = float(rescue.get("hold_clear_m", 1.5))
@@ -146,7 +153,12 @@ class RescueMission:
                 self.people.append(person)
             if target.timestamp == person.last_stamp:
                 continue                                    # the frame this step has already counted
-            person.position, person.last_stamp, person.last_seen = position, target.timestamp, now
+            person.last_stamp, person.last_seen = target.timestamp, now
+            if not person.attended:
+                # Where an attended person is was fixed from the stand-off, the best view there will
+                # be. Sightings from further off, their range read off a small box, used to drag
+                # that position metres away, and the next sighting was then "somebody new".
+                person.position = position
             person.sightings += 1
             person.confidence = max(person.confidence, target.confidence)
             # One frame is not a person: they have to persist, over confirm_s and in confirm_frames frames.
@@ -164,6 +176,7 @@ class RescueMission:
         alone, a person whose range read 2 m differently became a second person, and the boat
         going to the first "lost" them while looking straight at them."""
         best, best_off = None, float("inf")
+        group, group_across = None, float("inf")
         for person in self.people:
             distance = haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *person.position)
             bearing = signed_angle_deg(bearing_deg(snap.gps.lat_deg, snap.gps.lon_deg, *person.position) - snap.imu.yaw_deg)
@@ -172,7 +185,20 @@ class RescueMission:
             if (off_deg <= 6.0 or across <= self.same_person_m / 2.0) and abs(target.distance_m - distance) <= self.same_person_range_m \
                     and off_deg < best_off:
                 best, best_off = person, off_deg
-        return best
+            if person.attended:
+                # Somebody already attended, or one of their group: how far the line of sight
+                # passes from them, and how far along it the detection reads from them. The first
+                # is as good as the bearing; the second gets the slack the range needs, which
+                # grows with the distance.
+                passes = distance * math.sin(math.radians(off_deg)) if off_deg < 90.0 else distance
+                along = abs(target.distance_m - distance * math.cos(math.radians(off_deg)))
+                if passes <= self.group_radius_m and along <= self.group_radius_m + self.range_sigma * target.distance_m \
+                        and passes < group_across:
+                    group, group_across = person, passes
+        # Somebody known by the narrow rule keeps their identity (a second person seen beside an
+        # attended one stays a second person). Only a detection that would otherwise be somebody
+        # new is taken for the attended person it falls on: in doubt, nobody is gone to twice.
+        return best if best is not None else group
 
     def keep_outs(self) -> list[tuple[float, float]]:
         """People the boat must steer clear of: those already attended, and those seen but not yet
@@ -189,6 +215,14 @@ class RescueMission:
     def _attend(self, now: float) -> None:
         self.phase, self._hold_since = Phase.HOLD, now
         self.target.attended_at = now
+        # People standing together are one stop: everybody on the map around the one reached.
+        for person in self._group_of(self.target):
+            person.attended_at = now
+
+    def _group_of(self, attended: Person) -> list[Person]:
+        """Everybody else, not yet attended, within group_radius_m of an attended person."""
+        return [p for p in self.people if p is not attended and not p.attended
+                and haversine_m(*p.position, *attended.position) <= self.group_radius_m]
 
     def _count_report(self) -> list[Action]:
         """With more than one person about, tell the shore how many there are and how many are done."""
@@ -248,6 +282,10 @@ class RescueMission:
         if self.phase is Phase.SEARCH:
             searching = vehicle.armed and vehicle.mode == self.search_mode
             # Somebody an approach was given up on is only gone to again once seen again.
+            # Somebody whose place has come out next to a person already attended is of that group.
+            for done in [p for p in self.people if p.attended]:
+                for person in self._group_of(done):
+                    person.attended_at = now
             waiting = [p for p in self.people if p.confirmed and not p.attended and (p.lost_at is None or p.last_seen > p.lost_at)]
             if not searching or not waiting:
                 return self._blocked_waypoint(snap, now) if searching else []
@@ -282,6 +320,12 @@ class RescueMission:
                 self.target.lost_at = now
                 self.phase, self.target = Phase.HANDBACK, None
                 return [self._ask_mode(self.search_mode, now), Action("report", text="VICTIM LOST")]
+            # Seen from afar they stood apart; closer up, their place has come out next to
+            # somebody already attended: one of that group, not another stop.
+            if any(p.attended and haversine_m(*p.position, *self.target.position) <= self.group_radius_m for p in self.people):
+                self.target.attended_at = now
+                self.phase, self.target = Phase.HANDBACK, None
+                return [self._ask_mode(self.search_mode, now), Action("report", text="SAME GROUP, RESUMING " + self.search_mode)]
             boat = (snap.gps.lat_deg, snap.gps.lon_deg)
             range_m = haversine_m(boat[0], boat[1], self.victim[0], self.victim[1])
             if range_m <= self.standoff_m + self.arrive_m:

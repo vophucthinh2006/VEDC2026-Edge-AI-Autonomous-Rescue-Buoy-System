@@ -19,6 +19,11 @@ vehicle:
   arrive_radius_m: 4.0
   target_standoff_m: 2.0     # from the boat's GPS position; the bow is 0.55 m ahead of it
   target_timeout_s: 2.0
+  # main.py (STM32 boat): the bow follows the camera. With the person more than face_tolerance_deg
+  # off the bow the boat turns to them at face_speed_mps before going to them, and keeps the bow on
+  # them at the stand-off (the STM32 only steers while it is given a speed).
+  face_tolerance_deg: 10.0
+  face_speed_mps: 0.15
   max_turn_rate_deg_s: 35.0
   max_pitch_deg: 35.0
   max_roll_deg: 35.0
@@ -115,6 +120,14 @@ rescue:
   # somebody new. One 8 m circle was used before, and of two people 3 m apart only one was attended.
   revisit_radius_m: 2.0
   same_person_range_m: 3.0
+  # Nobody is gone to twice, and people standing together are one stop. Reaching one person attends
+  # everybody on the map within group_radius_m of them; later, a detection whose line of sight
+  # passes within group_radius_m of an attended person, and whose range reads within
+  # group_radius_m + range_sigma * range of them, is that person (or one of their group) again.
+  # In doubt it is: somebody new standing right behind an attended person is not gone to until
+  # seen from another side. 2.5 keeps two people 3 m apart two stops.
+  group_radius_m: 2.5
+  range_sigma: 0.35           # how far off a range read from a box height can be, as a share of it
   goto_period_s: 1.0
   stall_s: 10.0               # no closer for this long on the approach: report the person as unreachable and hold
   # Within stand-off + hold_clear_within_m of the person, a LiDAR return closer than hold_clear_m

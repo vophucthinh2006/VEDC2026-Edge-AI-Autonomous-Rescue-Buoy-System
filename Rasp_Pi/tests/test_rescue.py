@@ -233,6 +233,89 @@ class SeveralPeopleTest(unittest.TestCase):
         self.assertIs(mission.phase, Phase.APPROACH)
 
 
+class AlreadyAttendedTest(unittest.TestCase):
+    """Nobody is gone to twice, and people standing together are one stop."""
+    CONFIG = {**RESCUE, "revisit_radius_m": 2.0}
+
+    def _attended(self, frame=((0.0, 6.0), ())):
+        """A person 6 m east of the start reached, held next to, and the search resumed. frame: the
+        followed person and the others in view while they are confirmed."""
+        mission = RescueMission(VEHICLE, self.CONFIG)
+        for t in (0.0, 0.5, 1.1):
+            mission.step(snap(t, target=frame[0], others=frame[1]), t)
+        self.assertIs(mission.phase, Phase.APPROACH)
+        victim = mission.victim
+        near_lon = victim[1] - 1.8 / (111_320.0 * 0.982)
+        reached = mission.step(snap(10.0, mode="GUIDED", target=(0.0, 1.8), lon=near_lon), 10.0)
+        mission.step(snap(30.5, mode="LOITER", lon=near_lon), 30.5)
+        mission.step(snap(31.0, mode="AUTO", lon=near_lon), 31.0)
+        self.assertIs(mission.phase, Phase.SEARCH)
+        return mission, victim, reached
+
+    def test_seen_again_from_afar_with_a_poor_range_is_not_somebody_new(self):
+        mission, victim, _ = self._attended()
+        # Back at the start, 6 m from them, looking straight at them. The box reads 3.5 m, then
+        # 8.5, 10 and 9 m: each used to move their place, until the next one no longer fell on it.
+        for t, read in ((40.0, 3.5), (40.5, 8.5), (41.0, 10.0), (41.5, 9.0), (42.0, 4.0), (42.5, 9.5)):
+            self.assertEqual(mission.step(snap(t, target=(0.0, read)), t), [], read)
+        self.assertEqual(len(mission.people), 1)
+        self.assertIs(mission.phase, Phase.SEARCH)
+        self.assertLess(haversine_m(*mission.people[0].position, *victim), 0.1)       # where they were reached, still
+        self.assertEqual(mission.found, 1)
+
+    def test_somebody_well_to_the_side_of_them_is_still_gone_to(self):
+        mission, victim, _ = self._attended()
+        # 45 deg to port at 8.5 m: 6 m north of the attended person.
+        for t in (40.0, 40.5):
+            self.assertEqual(mission.step(snap(t, target=(-45.0, 8.5)), t), [])
+        actions = mission.step(snap(41.1, target=(-45.0, 8.5)), 41.1)
+        self.assertEqual(kinds(actions), [("mode", "GUIDED"), ("report", "VICTIM SEEN"), ("report", "PEOPLE 2 FOUND 1 ATTENDED")])
+        self.assertAlmostEqual(haversine_m(*mission.victim, *victim), 6.0, delta=0.2)
+
+    def test_three_people_together_are_one_stop(self):
+        # A dead ahead at 6 m, B and C 12 deg either side of A: 1.3 m from A, three people on the map.
+        mission, victim, reached = self._attended(frame=((0.0, 6.0), ((-12.0, 6.1), (12.0, 6.1))))
+        self.assertEqual(len(mission.people), 3)
+        self.assertEqual(kinds(reached), [("mode", "LOITER"), ("report", "VICTIM REACHED"), ("report", "PEOPLE 3 FOUND 3 ATTENDED")])
+        self.assertTrue(all(person.attended for person in mission.people))
+        self.assertEqual(mission.step(snap(31.2, mode="AUTO"), 31.2), [])                 # nobody left to go to
+        self.assertEqual(len(mission.keep_outs()), 3)
+        # The three seen again on the way back: still nobody new.
+        for t in (40.0, 40.5, 41.1, 41.6):
+            self.assertEqual(mission.step(snap(t, target=(0.0, 7.5), others=((-12.0, 4.8), (12.0, 8.0))), t), [])
+        self.assertEqual(mission.found, 3)
+
+    def test_somebody_turning_up_next_to_them_later_is_of_their_group(self):
+        mission, _, _ = self._attended()
+        # 14 deg to starboard at 6.2 m: 1.5 m from the attended person.
+        for t in (40.0, 40.5, 41.1, 41.6):
+            self.assertEqual(mission.step(snap(t, target=(14.0, 6.2)), t), [])
+        self.assertEqual(len(mission.people), 1)
+
+    def test_somebody_who_turns_out_to_stand_next_to_them_is_not_a_second_stop(self):
+        # B, seen with A from the start, read 9 m away at 40 deg to port: 6 m from A, somebody else.
+        mission, victim, _ = self._attended(frame=((0.0, 6.0), ((-40.0, 9.0),)))
+        self.assertEqual(len(mission.people), 2)
+        near_lon = victim[1] - 1.8 / (111_320.0 * 0.982)
+        actions = mission.step(snap(31.2, mode="AUTO", lon=near_lon), 31.2)
+        self.assertEqual(kinds(actions), [("mode", "GUIDED"), ("report", "VICTIM SEEN")])
+        # From here B is 65 deg to port. The range, 9 m at first, now reads 3.6 m: still apart from A.
+        actions = mission.step(snap(32.5, mode="GUIDED", lon=near_lon, target=(-62.0, 3.6)), 32.5)
+        self.assertIn(actions[0].kind, ("goto", "face"))
+        # Then, the box whole, 2.4 m: that puts B two metres from A. One of A's group, no second stop.
+        actions = mission.step(snap(33.6, mode="GUIDED", lon=near_lon, target=(-58.0, 2.4)), 33.6)
+        self.assertEqual(kinds(actions), [("mode", "AUTO"), ("report", "SAME GROUP, RESUMING AUTO"), ("report", "PEOPLE 2 FOUND 2 ATTENDED")])
+        mission.step(snap(34.0, mode="AUTO", lon=near_lon), 34.0)
+        self.assertEqual(mission.step(snap(34.2, mode="AUTO", lon=near_lon), 34.2), [])
+        self.assertTrue(all(person.attended for person in mission.people))
+
+    def test_two_people_three_metres_apart_stay_two_stops(self):
+        mission, victim, reached = self._attended(frame=(SeveralPeopleTest.A, (SeveralPeopleTest.B,)))
+        self.assertEqual(kinds(reached)[-1], ("report", "PEOPLE 2 FOUND 1 ATTENDED"))
+        actions = mission.step(snap(31.2, mode="AUTO", lon=victim[1] - 1.8 / (111_320.0 * 0.982)), 31.2)
+        self.assertEqual(kinds(actions), [("mode", "GUIDED"), ("report", "VICTIM SEEN")])
+
+
 class BlockedWaypointTest(unittest.TestCase):
     def test_skips_a_waypoint_the_boat_cannot_get_closer_to(self):
         mission = RescueMission(VEHICLE, RESCUE)
