@@ -329,6 +329,72 @@ thay vì 2), và có lần báo cùng một người hai lần. Người thứ h
 xử lý lại là vùng cấm. Chưa thử: ba người trở lên, hai người sát nhau dưới 1 m, một người dưới nước cạnh một
 người trên mái.
 
+### Không dừng hai lần cho cùng một người, một nhóm là một lần dừng
+
+Trước đây phao hay quay lại người vừa xử lý. Hai nguyên nhân, đều ở `rescue.py`: vị trí của người đã xử lý
+bị ghi đè bởi mỗi lần thấy lại từ xa (khoảng cách đọc từ chiều cao khung lệch vài mét), và mỗi người
+trong một nhóm là một lần tiếp cận riêng. Giờ:
+
+- vị trí người đã xử lý được chốt lúc phao đứng cạnh họ và không dời nữa;
+- một phát hiện mà tia nhìn đi qua trong `rescue.group_radius_m` (2.5 m) của người đã xử lý, khoảng cách
+  đọc được lệch không quá `group_radius_m + range_sigma × khoảng cách`, là người đó (hoặc nhóm của họ);
+- tới một người thì mọi người trên bản đồ trong 2.5 m quanh họ được tính là đã xử lý; người mà lại gần
+  mới lộ ra là đứng cạnh người đã xử lý thì phao bỏ lần tiếp cận, báo `SAME GROUP, RESUMING AUTO`.
+
+Cảnh làng (`--world=village`: 8 người trong 4 cụm), model thật, lộ trình dọc phố rồi về, mỗi dòng **một**
+lần chạy:
+
+| | Lấy quyền lái | Lần dừng | Dừng lặp cho cùng cụm | Pi đếm được | Về sau |
+|---|---|---|---|---|---|
+| Trước | 18 | 11 | 3 cụm | 13 "người" | 564 s |
+| Sau | 2 | 2 | không | 5 | 233 s |
+| Sau, `group_radius_m: 2.0` | 7 | 4 | 1 cụm (hai điểm dừng cách 2.3 m) | 8 | 280 s |
+
+```bash
+bash sim/tools/village_test.sh camera     # đạt khi không cụm nào bị dừng hai lần
+bash sim/tools/revisit_test.sh camera     # hồ: đi ngang người rồi quay lại đi ngang lần nữa, chỉ được 1 lần dừng
+```
+
+Đánh đổi, cần biết khi đọc số liệu:
+
+- **Đếm thiếu.** Người chỉ lộ ra sau khi cụm của họ đã xử lý thì được coi là người cũ, không đếm thêm:
+  cảnh làng có 8 người, Pi đếm 5. Trước đây thì đếm thừa (13).
+- **Hai người cách nhau 3 m có thể thành một lần dừng.** Vị trí đọc từ xa lệch cỡ nửa mét, nên 3 m dễ ra
+  dưới 2.5 m. `two_person_test.sh side` chấp nhận cả hai kết quả, miễn Pi tính đủ hai người đã xử lý. Đặt
+  `group_radius_m: 2.0` thì họ lại là hai lần dừng, nhưng cụm ba người dưới nước của cảnh làng (cách nhau
+  tới 2.4 m) bị tách làm hai.
+- **Người mới đứng đúng sau lưng người cũ** trên cùng tia nhìn bị bỏ qua cho tới khi được nhìn từ góc khác.
+- Mỗi lượt cảnh làng model chỉ bắt được 2–3 trong 4 cụm (người bơi đơn lẻ ở tim đường hay bị sót): đó là
+  tầm của model, không liên quan thay đổi này.
+
+### Mũi phao và người: đã thử hai cách, cả hai đang tắt
+
+Mong muốn: camera thấy người ở 50° thì thân phao quay theo cho mũi hướng vào người, servo về 0°. Số đo là
+góc giữa mũi phao và hướng tới người **trong lúc giữ vị trí** (`rescue_test.sh` và `village_test.sh` in ra
+dòng `bow off the person while holding`), model thật, mỗi dòng một lần chạy:
+
+| Cảnh | Cách | Mũi lệch người, trung bình | Kết quả |
+|---|---|---|---|
+| Hồ | mặc định: tới thẳng điểm cách người 2 m, autopilot giữ (LOITER) | 12° và 31° (hai lần chạy) | đạt |
+| Hồ | quay mũi trước rồi mới tiến (`rescue.turn_first`) | 32° | đạt |
+| Hồ | Pi tự giữ và lái mũi về người (`rescue.hold_mode: FACE`) | 51° | đạt |
+| Hồ, ESC sau một chiều | `hold_mode: FACE` | 67° | **không đạt**: trôi xa người 5.5 m |
+| Làng | LOITER | 55° | đạt |
+| Làng | `hold_mode: FACE` | 69° | đạt, một lần mất dấu người |
+
+Mặc định tự nó đã dao động từ 12° tới 31° giữa hai lần chạy, nên bảng này không phân biệt được "quay mũi
+trước" với mặc định; nó chỉ cho thấy không cách nào **hơn** mặc định, và `FACE` với ESC một chiều thì hỏng hẳn.
+Vì vậy cả hai để tắt (`turn_first: false`, `hold_mode: LOITER`); code và test của chúng vẫn còn để thử lại. Lý do là vật lý chứ không phải tham số: phao chỉ quay mũi được khi đang tiến, mà
+đứng cạnh người thì không còn chỗ để tiến. Khoảng giữa "đã tới" (2.5 m) và "không được gần hơn" (2 m) là nửa
+mét, phao dùng hết trước khi quay xong rồi phải đứng yên với mũi còn lệch.
+
+Trên mặt nước trống, mặc định cho mũi lệch người 12–31°. Chỗ lệch nhiều là cảnh có vật cản (55°): phao
+phải đi vòng nên tới nơi theo hướng xiên. Muốn sửa tận gốc thì cần phao **xoay tại chỗ** được, tức hai ESC
+sau đảo chiều; khi đó giữ vị trí bằng lệnh hướng với tốc độ 0 mới có nghĩa. Chưa làm.
+
+Bản STM32 (`main.py`) thì khác: firmware lái theo hướng Pi gửi, nên ở đó Pi đã được đổi để quay mũi về
+người trước và giữ mũi ở khoảng cách dừng (`vehicle.face_*`); phần này mới có unit test, chưa chạy trên bo.
+
 **Cắt ảnh theo dải chân trời** (đưa vào model hai ô cắt quanh đường chân trời thay cho cả khung hình, để mỗi
 người chiếm nhiều điểm ảnh hơn) đã được đo và **không được đưa vào code**. Điểm tin cậy của model, camera đứng
 yên, ngưỡng 0.60:

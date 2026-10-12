@@ -5,6 +5,8 @@
 # or a group it has attended must not make it stop again, on the way out or on the way back.
 #
 #   bash sim/tools/village_test.sh [camera|simulated]
+#   HOLD_MODE=LOITER|FACE overrides rescue.hold_mode; the run reports how far the bow was off the
+#   people while the boat held next to them.
 #     camera     the real TFLite model on the Gazebo camera (default)
 #     simulated  geometric detector
 set -o pipefail
@@ -36,6 +38,12 @@ sleep 28
 cd "$REPO/Rasp_Pi"
 # Instance 1 shifts SITL's ports by 10: its SERIAL2 (TELEM2) is TCP 5773.
 NO_SCAN=()
+if [ -n "$HOLD_MODE" ]; then
+    printf 'rescue:
+  hold_mode: %s
+' "$HOLD_MODE" > "$T/hold_mode.yaml"
+    NO_SCAN=(--overlay "$T/hold_mode.yaml")
+fi
 setsid python3 -u rescue_main.py --overlay config/sim.yaml --overlay config/sim_village.yaml \
     --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773 "${NO_SCAN[@]}" > "$T/pi.log" 2>&1 < /dev/null &
 PI=$!
@@ -101,8 +109,9 @@ m.set_mode("AUTO")
 print("armed, AUTO")
 
 modes, texts, mode, start, home_at, returning, far_east = [], [], "", time.time(), None, False, 0.0
+held_at, yaw, bow_off, held_range = None, None, [], []     # between a REACHED report and RESUMING: the place reported
 while time.time() - start < 620:
-    msg = m.recv_match(type=["HEARTBEAT", "GLOBAL_POSITION_INT", "STATUSTEXT"], blocking=True, timeout=2)
+    msg = m.recv_match(type=["HEARTBEAT", "GLOBAL_POSITION_INT", "STATUSTEXT", "ATTITUDE"], blocking=True, timeout=2)
     if msg is None:
         continue
     kind = msg.get_type()
@@ -111,13 +120,24 @@ while time.time() - start < 620:
         if new != mode:
             mode = new
             modes.append(mode)
-    elif kind == "STATUSTEXT" and any(word in msg.text for word in ("VICTIM", "RESUMING", "PEOPLE", "BLOCKED", "Mission", "Reached")):
+    elif kind == "ATTITUDE":
+        yaw = math.degrees(msg.yaw) % 360.0
+    elif kind == "STATUSTEXT" and any(word in msg.text for word in ("VICTIM", "RESUMING", "PEOPLE", "BLOCKED", "Mission", "Reached", "SAME")):
         texts.append(msg.text)
+        words = msg.text.split()
+        if ("REACHED" in msg.text or "UNREACHABLE" in msg.text) and len(words) >= 5:
+            held_at = ((float(words[-2]) - HOME[1]) * K, (float(words[-3]) - HOME[0]) * 111320)
+        elif "RESUMING" in msg.text:
+            held_at = None
         returning = returning or "RTL" in msg.text or "BLOCKED, HOLD" in msg.text
         print(f"  [{time.time() - start:5.1f} s] {msg.text}")
     elif kind == "GLOBAL_POSITION_INT":
         n, e = (msg.lat / 1e7 - HOME[0]) * 111320, (msg.lon / 1e7 - HOME[1]) * K
         far_east = max(far_east, e)
+        if held_at is not None and yaw is not None:
+            to_them = math.degrees(math.atan2(held_at[0] - e, held_at[1] - n)) % 360.0
+            bow_off.append(abs((to_them - yaw + 180.0) % 360.0 - 180.0))
+            held_range.append(math.hypot(held_at[0] - e, held_at[1] - n))
         if returning and math.hypot(e, n) < 3.0:
             home_at = time.time() - start
             break
@@ -140,6 +160,11 @@ close = sum(1 for i in range(len(stops)) for j in range(i) if math.hypot(stops[i
 counts = [t for t in texts if t.startswith("PEOPLE")]
 print(f"groups attended {len(set(g for g in named if not g.startswith('nobody')))} of {len(GROUPS)}; stopped again for: {', '.join(repeats) or 'nobody'}; "
       f"last count: {counts[-1] if counts else 'none'}")
+if bow_off:
+    ordered = sorted(bow_off)
+    print(f"bow off the people while holding: mean {sum(bow_off) / len(bow_off):.0f} deg, median {ordered[len(ordered) // 2]:.0f} deg, "
+          f"largest {ordered[-1]:.0f} deg, within 15 deg {100 * len([b for b in bow_off if b <= 15.0]) // len(bow_off)} % of the time; "
+          f"range to the place reported {min(held_range):.1f} to {max(held_range):.1f} m")
 print(f"furthest east {far_east:.1f} m; home " + (f"after {home_at:.0f} s" if home_at else "NOT reached"))
 failures = []
 if repeats or close:
