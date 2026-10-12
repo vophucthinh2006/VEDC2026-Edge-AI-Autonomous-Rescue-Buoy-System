@@ -3,7 +3,7 @@ from time import monotonic
 
 from modules.navigation import BapfNavigator, PaperBapfNavigator, VoNavigator, cpa
 from modules.perception import Obstacle
-from modules.state_store import GpsState, ImuState, Snapshot, SysState
+from modules.state_store import GpsState, HumanTarget, ImuState, Snapshot, SysState
 
 
 class NavigationTest(unittest.TestCase):
@@ -30,6 +30,38 @@ class NavigationTest(unittest.TestCase):
         command = BapfNavigator(self.vehicle, {**self.planner, "bias_gain": 0.0}).plan(self._snap(ring))
         self.assertEqual(command.mode, "STOP")
         self.assertEqual(command.reason, "obstacle_too_close")
+
+    def _person(self, bearing, distance):
+        now = monotonic()
+        return Snapshot(ImuState(yaw_deg=30.0, imu_ok=True, timestamp=now), GpsState(lat_deg=10, lon_deg=106, fix=3, timestamp=now),
+                        SysState(timestamp=now), (), now, None, HumanTarget(bearing, distance, 0.8, now))
+
+    def test_the_bow_turns_to_the_person_before_the_boat_goes_to_them(self) -> None:
+        navigator = BapfNavigator(self.vehicle, self.planner)
+        # 50 deg to starboard, 6 m away: heading for them (30 + 50), at a creep.
+        command = navigator.plan(self._person(50.0, 6.0))
+        self.assertEqual((command.mode, command.reason), ("AUTO", "face_human"))
+        self.assertAlmostEqual(command.heading_deg, 80.0)
+        self.assertLess(command.speed_mps, 0.15 + 1e-9)
+        self.assertGreater(command.speed_mps, 0.0)
+        # Bow on them: the approach speed.
+        command = navigator.plan(self._person(4.0, 6.0))
+        self.assertEqual(command.reason, "approach_human")
+        self.assertAlmostEqual(command.speed_mps, 0.2 * (1.0 - 4.0 / 120.0))
+
+    def test_the_bow_stays_on_the_person_at_the_standoff_but_never_closer(self) -> None:
+        navigator = BapfNavigator(self.vehicle, self.planner)
+        # At the stand-off (1.5 m), bow on them: stopped.
+        command = navigator.plan(self._person(3.0, 1.5))
+        self.assertEqual((command.reason, command.speed_mps), ("human_standoff", 0.0))
+        # At the stand-off with the bow 40 deg off: a creep, so the STM32 keeps steering to them.
+        command = navigator.plan(self._person(-40.0, 1.5))
+        self.assertEqual(command.reason, "face_human")
+        self.assertGreater(command.speed_mps, 0.0)
+        self.assertAlmostEqual(command.heading_deg, 350.0)
+        # Well inside the stand-off: no creeping towards them, whatever the bow does.
+        command = navigator.plan(self._person(-40.0, 1.0))
+        self.assertEqual((command.reason, command.speed_mps), ("human_standoff", 0.0))
 
     def test_far_obstacle_changes_nothing(self) -> None:
         command = BapfNavigator(self.vehicle, self.planner).plan(self._snap([Obstacle(0, 6.0, 0.2)]))
