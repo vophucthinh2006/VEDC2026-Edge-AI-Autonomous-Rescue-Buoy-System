@@ -2,7 +2,7 @@
 # Start the 3D boat simulator: Gazebo (waves + buoy) and ArduPilot Rover SITL.
 # Mission Planner on Windows then connects with UDP, port 14550.
 #
-#   bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh [--headless] [--wipe] [--pi[=simulated]] [--hw] [--oneway] [--world=flood|village|two]
+#   bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh [--headless] [--wipe] [--pi[=simulated]] [--hw] [--oneway] [--world=flood|village|two|central]
 #
 #   --headless  Gazebo without its window (physics and sensors only)
 #   --wipe      reset ArduPilot's stored parameters to the defaults + params/vedc_buoy.parm
@@ -23,6 +23,9 @@
 #               water and one on a roof (worlds/vedc_flood.sdf).
 #               village: the flood scene with every case in it: one person in the water, one on a
 #               roof, three in the water together, three on a roof together (worlds/vedc_village.sdf).
+#               central: central Vietnam, November 2025, from press reports: a village by the lagoon
+#               after Typhoon Kalmaegi (roofs gone, wrecked boats, 1.2 m of water), then a hamlet
+#               flooded to the eaves with people on the roofs (worlds/vedc_central.sdf).
 #               two: the lake with two people 3 m apart, 32 m east and 6.5 / 9.5 m north of the
 #               start (worlds/vedc_two.sdf).
 #
@@ -52,6 +55,7 @@ for arg in "$@"; do
         --world=lake)  ;;
         --world=flood) WORLD="vedc_flood.sdf"; PI_OVERLAYS+=(--overlay config/sim_flood.yaml) ;;
         --world=two)   WORLD="vedc_two.sdf";   PI_OVERLAYS+=(--overlay config/sim_two.yaml) ;;
+        --world=central) WORLD="vedc_central.sdf"; PI_OVERLAYS+=(--overlay config/sim_central.yaml) ;;
         --world=village) WORLD="vedc_village.sdf"; PI_OVERLAYS+=(--overlay config/sim_village.yaml) ;;
         *) echo "unknown option $arg" >&2; exit 2 ;;
     esac
