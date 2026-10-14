@@ -1,0 +1,5 @@
+opencv-python>=4.8.0
+numpy>=1.23.0
+onnxruntime>=1.15.0
+tflite-runtime>=2.13.0; platform_system=="Linux"
+tensorflow>=2.13.0; platform_system=="Windows"
