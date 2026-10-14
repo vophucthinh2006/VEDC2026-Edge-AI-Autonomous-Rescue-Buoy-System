@@ -10,8 +10,17 @@ pip install -r requirements.txt
 python3 main.py --no-camera
 ```
 
-Model nhận diện là **SSD MobileNet v1 COCO (quantized)** của TensorFlow, đã có sẵn trong git ở
-`models/detect.tflite` và `models/labelmap.txt` (lớp `person` là lớp số 0). Nguồn gốc, nếu cần tải lại:
+Model nhận diện là **model edge của đội** (`../YOLO_Movenet/weights`, chọn bằng `camera.model: yolo_movenet`),
+nối vào `modules/edge_model.py`:
+
+- **YOLOv8n int8**, đầu vào 320 × 320, hai lớp `person` / `boat`. Người có khung nằm phần lớn trong khung thuyền
+  (`camera.on_boat_overlap`) là người **trên thuyền**, không tính là nạn nhân.
+- **MoveNet Lightning** đọc tư thế từng người còn lại (tối đa `camera.max_poses`). Hông, gối, cổ chân có điểm trung
+  bình dưới `camera.water_lower_body_score` thì người đó **dưới nước** (`IN WATER` trên viewer, khung xương đỏ).
+- Hướng, khoảng cách, xác nhận và quét camera giữ nguyên như trước: chỉ phần "thấy người ở đâu trong khung hình" đổi.
+
+Model cũ **SSD MobileNet v1 COCO (quantized)** vẫn dùng được với `camera.model: ssd` và
+`camera.model_path: models/detect.tflite` (lớp `person` là lớp số 0). Nguồn gốc, nếu cần tải lại:
 
 ```bash
 mkdir -p models && cd models
@@ -19,7 +28,7 @@ curl -LO https://storage.googleapis.com/download.tensorflow.org/models/tflite/co
 unzip coco_ssd_mobilenet_v1_1.0_quant_2018_06_29.zip && cd ..
 ```
 
-`camera.model_path` trong `config/settings.yaml` đã trỏ sẵn tới `models/detect.tflite`. Trên Pi dùng `tflite-runtime`; trên
+Cả hai model chạy bằng TFLite. Trên Pi dùng `tflite-runtime`; trên
 Python 3.12 (giả lập trong WSL) thư viện này không có bản cài, `ai_vision.py` tự chuyển sang
 `ai-edge-litert` (`pip install ai-edge-litert`).
 

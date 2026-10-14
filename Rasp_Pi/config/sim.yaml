@@ -9,7 +9,6 @@ camera:
   source: gazebo
   gazebo_topic: /vedc_buoy/camera
   pan_topic: /model/vedc_buoy/joint/camera_pan_joint/cmd_pos
-  model_path: models/detect.tflite
   # Calibrated on the simulated person: the water is translucent there, so the box also
   # covers part of the submerged body (0.65 to 0.75 m from 3 to 6 m away).
   person_height_m: 0.7

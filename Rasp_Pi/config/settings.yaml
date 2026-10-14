@@ -45,8 +45,16 @@ camera:
   source: device              # device: the USB camera below. gazebo: the simulator's camera topic
   device: 0
   horizontal_fov_deg: 60.0    # OV9726 with the 60 deg lens
-  model_path: models/detect.tflite   # in the repository; relative to this directory, where run.sh starts the program
-  confidence_threshold: 0.60
+  # yolo_movenet: the team's YOLOv8n (person, boat) + MoveNet pose, from ../YOLO_Movenet/weights.
+  # ssd: the earlier COCO SSD MobileNet v1, model_path: models/detect.tflite.
+  model: yolo_movenet
+  model_path: ../YOLO_Movenet/weights/yolov8n_int8.tflite
+  pose_model_path: ../YOLO_Movenet/weights/movenet_lighting_int8.tflite
+  confidence_threshold: 0.50
+  nms_threshold: 0.45
+  on_boat_overlap: 0.4          # a person box this much inside a boat box is on the boat: not a victim
+  water_lower_body_score: 0.25  # hips, knees, ankles scored below this on average: in the water
+  max_poses: 3                  # MoveNet runs on at most this many people a frame (the nearest)
   detection_hold_s: 0.40
   report_cooldown_s: 10.0
   lidar_association_half_angle_deg: 8.0
