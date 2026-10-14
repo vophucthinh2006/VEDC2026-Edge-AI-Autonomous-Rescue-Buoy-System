@@ -1,6 +1,6 @@
 import unittest
 
-from modules.obstacle_feed import objects_from, sectors
+from modules.obstacle_feed import objects_from, position_known, sectors
 from modules.perception import Obstacle, ScanPattern, SweepPattern, box_bottom_elevation_deg, make_scan, ray_obstacles, standing_score
 from modules.state_store import GpsState, ImuState, Snapshot, SysState
 from utils.geometry import offset_latlon
@@ -32,6 +32,17 @@ class SectorsTest(unittest.TestCase):
     def test_nearest_object_wins_a_shared_sector(self):
         out = sectors([(0.0, 6.0, 0.2), (2.0, 3.0, 0.2)], 0.15, 8.0)
         self.assertEqual(out[0], 280)
+
+
+class PositionKnownTest(unittest.TestCase):
+    def _snap(self, fix, lat, lon):
+        return Snapshot(ImuState(), GpsState(lat_deg=lat, lon_deg=lon, fix=fix), SysState(), (), 0.0, None, None)
+
+    def test_nothing_is_sent_before_the_autopilot_has_a_position(self):
+        self.assertFalse(position_known(self._snap(0, 0.0, 0.0)))
+        self.assertFalse(position_known(self._snap(6, 0.0, 0.0)))      # GPS fix, EKF origin not set yet
+        self.assertFalse(position_known(self._snap(2, 10.88, 106.79)))
+        self.assertTrue(position_known(self._snap(3, 10.88, 106.79)))
 
 
 class ObjectsFromTest(unittest.TestCase):

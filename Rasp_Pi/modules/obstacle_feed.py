@@ -69,6 +69,14 @@ def lidar_fresh(scan_timestamp: float, now: float, stale_s: float | None) -> boo
     return stale_s is None or now - scan_timestamp <= stale_s
 
 
+def position_known(snap: Snapshot) -> bool:
+    """Whether the autopilot knows where it is: a 3-D fix and a position from its EKF
+    (GLOBAL_POSITION_INT reads 0, 0 until the EKF has an origin). Before that, ArduPilot's
+    path planner has no location to plan from: SITL panics on an obstacle reported then
+    ("Location cannot be (0, 0, 0)"), with the boat left sitting still in AUTO."""
+    return snap.gps.fix >= 3 and (snap.gps.lat_deg != 0.0 or snap.gps.lon_deg != 0.0)
+
+
 class ObstacleFeed(threading.Thread):
     def __init__(self, avoidance: dict, state: StateStore, stop_event: threading.Event,
                  keep_outs: Callable[[], list[tuple[float, float]]], attending: Callable[[], tuple[float, float] | None],
@@ -85,6 +93,9 @@ class ObstacleFeed(threading.Thread):
         silent = False
         while not self.stop.is_set():
             snap = self.state.snapshot()
+            if not position_known(snap):
+                sleep(period)
+                continue
             # A LiDAR that has stopped must not read as open water: say nothing, and the autopilot
             # reports its proximity sensor as failed (and refuses to arm) instead.
             stale = not lidar_fresh(snap.scan_timestamp, monotonic(), self.lidar_stale_s)
