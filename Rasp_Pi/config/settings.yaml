@@ -48,7 +48,7 @@ camera:
   # yolo_movenet: the team's YOLOv8n (person, boat) + MoveNet pose, from ../YOLO_Movenet/weights.
   # ssd: the earlier COCO SSD MobileNet v1, model_path: models/detect.tflite.
   model: yolo_movenet
-  model_path: ../YOLO_Movenet/weights/yolov8n_320_drq.tflite   # YOLO_Movenet/tools/export_tflite.py
+  model_path: ../YOLO_Movenet/weights/yolov8n_320_ft_drq.tflite   # YOLO_Movenet/tools/export_tflite.py
   pose_model_path: ../YOLO_Movenet/weights/movenet_lighting_int8.tflite
   # yolov8n_320_drq: int8 weights, float activations, scores within 0.01 of the float model.
   # (The full-int8 yolov8n_int8.tflite saturated at 0.50 to 0.61.) Measured on the simulated camera:

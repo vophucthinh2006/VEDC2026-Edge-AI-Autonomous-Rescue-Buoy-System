@@ -13,7 +13,7 @@ camera:
   # the box also covers part of the submerged body, 0.45 to 0.65 m from 3 to 12 m away, 0.57 typical
   # (0.65 to 0.75 m with the earlier SSD boxes). Somebody standing measures 1.9 to 2.1 m, the box
   # running a little past head and feet.
-  person_height_m: 0.57
+  person_height_m: 0.62
   standing_height_m: 1.95
   # YOLOv8n boxes are taller and narrower than the SSD's: a swimmer scores up to 2.1 (10 m away),
   # somebody standing in a doorway down to 2.3, and on the waves the doorway flickers to 2.2
