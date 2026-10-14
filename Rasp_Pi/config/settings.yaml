@@ -50,7 +50,10 @@ camera:
   model: yolo_movenet
   model_path: ../YOLO_Movenet/weights/yolov8n_int8.tflite
   pose_model_path: ../YOLO_Movenet/weights/movenet_lighting_int8.tflite
-  confidence_threshold: 0.50
+  # The int8 YOLOv8n's scores saturate at 0.502 (its output quantization cuts logits above 0) and
+  # come in steps: 0.25, 0.29, 0.34, 0.50. 0.30 takes the top two, as the 0.25 of YOLO_Movenet/
+  # src/config.py would take three. Re-export the model with its scores in range to get a real margin.
+  confidence_threshold: 0.30
   nms_threshold: 0.45
   on_boat_overlap: 0.4          # a person box this much inside a boat box is on the boat: not a victim
   water_lower_body_score: 0.25  # hips, knees, ankles scored below this on average: in the water
