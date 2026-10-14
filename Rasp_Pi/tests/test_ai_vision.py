@@ -8,7 +8,7 @@ except ImportError:          # OpenCV or numpy missing
 
 from modules.state_store import StateStore
 
-CAMERA = {"vertical_fov_deg": 46.8, "standing_score_min": 2.25, "distance_source": "bbox", "person_height_m": 0.57,
+CAMERA = {"vertical_fov_deg": 46.8, "standing_score_min": 2.45, "water_score_max": 2.1, "distance_source": "bbox", "person_height_m": 0.57,
           "standing_height_m": 1.95, "max_target_distance_m": 12.0, "horizontal_fov_deg": 60.0}
 
 
@@ -30,6 +30,11 @@ class CroppedBoxTest(unittest.TestCase):
     def test_a_whole_box_is_ranged_by_its_height(self):
         swimmer = PersonDetection(0.0, 0.5, 0.11, False, (0.45, 0.47, 0.56, 0.53))
         self.assertAlmostEqual(self.worker._distance(swimmer, 0.0), 0.57 / (0.865 * 0.11), delta=0.1)
+
+    def test_a_box_that_could_be_either_gets_no_range(self):
+        # 0.3 of the frame high, 0.102 wide at 4:3: h/w 2.2, bottom 0.47 deg above the horizon: scores 2.39.
+        either = PersonDetection(0.0, 0.5, 0.3, False, (0.19, 0.449, 0.49, 0.551))
+        self.assertIsNone(self.worker._distance(either, 0.0))
 
 
 if __name__ == "__main__":

@@ -29,6 +29,11 @@ class PersonDetection:
     keypoints: tuple[tuple[float, float, float], ...] = ()   # yolo_movenet: x, y (0..1 of the frame), score
 
 
+def source_needs_box(camera: dict) -> bool:
+    """Whether the range can come from the box height (everything but distance_source: lidar)."""
+    return camera["distance_source"] != "lidar"
+
+
 class VisionWorker(threading.Thread):
     def __init__(self, camera: dict, state: StateStore, stop_event: threading.Event, on_confirmed: Callable[[HumanTarget], None], send_pan: Callable[[float], None], standoff_m: float) -> None:
         super().__init__(name="vision", daemon=True)
@@ -146,7 +151,14 @@ class VisionWorker(threading.Thread):
         # Somebody standing clear of the water (on a roof) or a swimmer: by the shape of the box and
         # where its bottom edge falls (perception.standing_score).
         score = standing_score(detection.box, self._frame_aspect, self.c["vertical_fov_deg"], snap.imu.pitch_deg)
-        elevated = score >= float(self.c.get("standing_score_min", 2.5))
+        standing_min = float(self.c.get("standing_score_min", 2.5))
+        elevated = score >= standing_min
+        # Between water_score_max and standing_score_min the box could be either, and the two
+        # readings of its range differ by standing_height_m / person_height_m (over three times).
+        # Rolling on the waves, somebody in a doorway flickered across a single threshold and became
+        # a second person next to the boat. Such a frame gives no range; a clearer one will.
+        if float(self.c.get("water_score_max", standing_min)) < score < standing_min and source_needs_box(self.c):
+            return None
         if followed and elevated != self._ranged_standing:
             self._ranged_standing = elevated
             self.log.info("person ranged as %s (score %.1f)", "standing" if elevated else "in the water", score)

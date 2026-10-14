@@ -16,8 +16,10 @@ camera:
   person_height_m: 0.57
   standing_height_m: 1.95
   # YOLOv8n boxes are taller and narrower than the SSD's: a swimmer scores up to 2.1 (10 m away),
-  # somebody standing in a doorway down to 2.3 (perception.standing_score, sim/README.md).
-  standing_score_min: 2.25
+  # somebody standing in a doorway down to 2.3, and on the waves the doorway flickers to 2.2
+  # (perception.standing_score). In between the box gives no range (ai_vision._distance).
+  water_score_max: 2.1
+  standing_score_min: 2.45
   # A person on a roof fills far more of the frame than the swimmer person_height_m is set for;
   # the wall below them gives the LiDAR a range. The swimmer's head is at the scan plane: seen
   # on some scans, else the box height is used.
