@@ -1,0 +1,12 @@
+# On top of sim.yaml for the central-Vietnam scene (sim/worlds/vedc_central.sdf), for rescue.detector: simulated.
+# [lat, lon] or [lat, lon, range_m]: people standing clear of the water are seen from further.
+sim:
+  victims:
+    - [10.8834290, 106.7961471]   # in the water, part one
+    - [10.8834968, 106.7961928, 9.0]   # in a doorway
+    - [10.8833796, 106.7964947, 9.0]   # on a roof
+    - [10.8834272, 106.7965633]   # in the water, part two
+    - [10.8834964, 106.7965953, 9.0]   # three on a roof
+    - [10.8834964, 106.7966063, 9.0]   # three on a roof
+    - [10.8834964, 106.7966173, 9.0]   # three on a roof
+    - [10.8834425, 106.7966776, 9.0]   # on the end house

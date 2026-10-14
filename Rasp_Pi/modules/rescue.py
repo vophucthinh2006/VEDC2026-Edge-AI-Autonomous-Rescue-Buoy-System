@@ -7,6 +7,19 @@ once a person has been seen for long enough, and gives the boat back afterwards.
 The operator always wins: any mode change the Pi did not ask for (RC switch, ground station)
 ends the takeover at once.
 
+Two ways of keeping the bow on the person exist and are both off by default, because in the
+simulator neither did better than leaving it to the autopilot: turn_first (a person seen off to
+one side is turned to at a creep, then gone to) and hold_mode FACE (the Pi holds next to them
+itself, steering the bow to them, instead of the autopilot's LOITER). A boat only turns while it
+moves; next to a person there is no room to move. They are steered with heading-and-speed
+commands, which the autopilot's avoidance does not bend: the LiDAR check of the approach
+(hold_min_m) guards them, and the boat is never driven closer than the stand-off.
+
+Nobody is gone to twice. Where an attended person is was fixed from 2 m away and is not moved
+again; a later sighting is them if its line of sight passes them, with the slack in range that a
+box seen from afar needs. People standing together are one stop: reaching one attends everybody
+within group_radius_m of them, and whoever turns up there afterwards belongs to that group.
+
 A search waypoint can land on something the operator could not see on the map: a tree, a car, a
 roof. The autopilot's avoidance then keeps the boat nosing around in front of it for ever. Three
 rules move the mission on to the next item, with a report to the shore: the LiDAR shows something
@@ -38,13 +51,15 @@ class Phase(Enum):
 
 @dataclass(frozen=True)
 class Action:
-    kind: str                # "mode" | "goto" | "report" | "skip"
+    kind: str                # "mode" | "goto" | "face" | "report" | "skip"
     mode: str = ""
     seq: int = 0             # skip: the mission item to continue from
     lat: float = 0.0
     lon: float = 0.0
     confidence: float = 0.0
     text: str = ""
+    heading: float = 0.0     # face: true heading to steer, degrees
+    speed: float = 0.0       # face: m/s, 0 to stand still
 
 
 @dataclass
@@ -80,6 +95,14 @@ class RescueMission:
         self.arrive_m = float(rescue["arrive_m"])
         self.same_person_m = float(rescue["revisit_radius_m"])
         self.same_person_range_m = float(rescue.get("same_person_range_m", 3.0))
+        self.face_tolerance_deg = float(rescue.get("face_tolerance_deg", 10.0))
+        self.face_speed_mps = float(rescue.get("face_speed_mps", 0.3))
+        self.face_timeout_s = float(rescue.get("face_timeout_s", 8.0))
+        self.turn_first = bool(rescue.get("turn_first", False))
+        self.hold_facing = self.hold_mode == "FACE"               # the Pi holds, bow on the person; else the autopilot's hold_mode
+        self._turning = False                                     # approach: still turning the bow to the person
+        self.group_radius_m = float(rescue.get("group_radius_m", 2.5))
+        self.range_sigma = float(rescue.get("range_sigma", 0.35))
         self.goto_period_s = float(rescue["goto_period_s"])
         self.stall_s = float(rescue.get("stall_s", 10.0))
         self.hold_clear_m = float(rescue.get("hold_clear_m", 1.5))
@@ -121,6 +144,11 @@ class RescueMission:
         """People already attended, in the order the boat got to them."""
         return [p.position for p in sorted((p for p in self.people if p.attended), key=lambda p: p.attended_at)]
 
+    @property
+    def found(self) -> int:
+        """How many people have been confirmed so far, attended or not."""
+        return sum(p.confirmed or p.attended for p in self.people)
+
     # A detection gives bearing from the bow and range; the boat's fix and heading place it on the map.
     @staticmethod
     def _locate(snap: Snapshot, target: HumanTarget) -> tuple[float, float]:
@@ -141,7 +169,12 @@ class RescueMission:
                 self.people.append(person)
             if target.timestamp == person.last_stamp:
                 continue                                    # the frame this step has already counted
-            person.position, person.last_stamp, person.last_seen = position, target.timestamp, now
+            person.last_stamp, person.last_seen = target.timestamp, now
+            if not person.attended:
+                # Where an attended person is was fixed from the stand-off, the best view there will
+                # be. Sightings from further off, their range read off a small box, used to drag
+                # that position metres away, and the next sighting was then "somebody new".
+                person.position = position
             person.sightings += 1
             person.confidence = max(person.confidence, target.confidence)
             # One frame is not a person: they have to persist, over confirm_s and in confirm_frames frames.
@@ -159,6 +192,7 @@ class RescueMission:
         alone, a person whose range read 2 m differently became a second person, and the boat
         going to the first "lost" them while looking straight at them."""
         best, best_off = None, float("inf")
+        group, group_across = None, float("inf")
         for person in self.people:
             distance = haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *person.position)
             bearing = signed_angle_deg(bearing_deg(snap.gps.lat_deg, snap.gps.lon_deg, *person.position) - snap.imu.yaw_deg)
@@ -167,7 +201,20 @@ class RescueMission:
             if (off_deg <= 6.0 or across <= self.same_person_m / 2.0) and abs(target.distance_m - distance) <= self.same_person_range_m \
                     and off_deg < best_off:
                 best, best_off = person, off_deg
-        return best
+            if person.attended:
+                # Somebody already attended, or one of their group: how far the line of sight
+                # passes from them, and how far along it the detection reads from them. The first
+                # is as good as the bearing; the second gets the slack the range needs, which
+                # grows with the distance.
+                passes = distance * math.sin(math.radians(off_deg)) if off_deg < 90.0 else distance
+                along = abs(target.distance_m - distance * math.cos(math.radians(off_deg)))
+                if passes <= self.group_radius_m and along <= self.group_radius_m + self.range_sigma * target.distance_m \
+                        and passes < group_across:
+                    group, group_across = person, passes
+        # Somebody known by the narrow rule keeps their identity (a second person seen beside an
+        # attended one stays a second person). Only a detection that would otherwise be somebody
+        # new is taken for the attended person it falls on: in doubt, nobody is gone to twice.
+        return best if best is not None else group
 
     def keep_outs(self) -> list[tuple[float, float]]:
         """People the boat must steer clear of: those already attended, and those seen but not yet
@@ -181,13 +228,48 @@ class RescueMission:
         detector keeps the camera on them (rescue_main passes this to the state as the focus)."""
         return self.target.position if self.target and self.phase in (Phase.APPROACH, Phase.HOLD) else None
 
+    def _to_person(self, snap: Snapshot) -> tuple[float, float, float]:
+        """Range to the person being attended, their true bearing, and how far off the bow that is
+        (positive: to starboard)."""
+        boat = (snap.gps.lat_deg, snap.gps.lon_deg)
+        bearing = bearing_deg(boat[0], boat[1], *self.victim)
+        return haversine_m(boat[0], boat[1], *self.victim), bearing, signed_angle_deg(bearing - snap.imu.yaw_deg)
+
+    def _hold_start(self, snap: Snapshot, now: float) -> Action:
+        """What begins the hold: the autopilot's hold mode, or, holding with the bow on the person,
+        a stop where the boat is (the Pi keeps GUIDED and steers from the next step on)."""
+        if not self.hold_facing:
+            return self._ask_mode(self.hold_mode, now)
+        self._last_goto = now
+        return Action("face", heading=self._to_person(snap)[1], speed=0.0)
+
+    def _hold_facing(self, snap: Snapshot) -> Action:
+        """Holding next to the person, bow on them. Forward only, and never closer than the
+        stand-off: drifted away, creep back; bow off them, creep round; too close or something
+        within hold_min_m of the LiDAR, stand still, whatever the bow does."""
+        range_m, bearing, off = self._to_person(snap)
+        around = min((o.distance_m for o in snap.obstacles), default=float("inf"))
+        speed = 0.0
+        if around >= self.hold_min_m and range_m >= self.standoff_m \
+                and (range_m > self.standoff_m + self.arrive_m or abs(off) > self.face_tolerance_deg):
+            speed = self.face_speed_mps
+        return Action("face", heading=bearing, speed=speed)
+
     def _attend(self, now: float) -> None:
         self.phase, self._hold_since = Phase.HOLD, now
         self.target.attended_at = now
+        # People standing together are one stop: everybody on the map around the one reached.
+        for person in self._group_of(self.target):
+            person.attended_at = now
+
+    def _group_of(self, attended: Person) -> list[Person]:
+        """Everybody else, not yet attended, within group_radius_m of an attended person."""
+        return [p for p in self.people if p is not attended and not p.attended
+                and haversine_m(*p.position, *attended.position) <= self.group_radius_m]
 
     def _count_report(self) -> list[Action]:
         """With more than one person about, tell the shore how many there are and how many are done."""
-        counts = (sum(p.confirmed or p.attended for p in self.people), sum(p.attended for p in self.people))
+        counts = (self.found, sum(p.attended for p in self.people))
         if counts == self._counts or counts[0] < 2:
             return []
         self._counts = counts
@@ -229,6 +311,44 @@ class RescueMission:
             return [Action("mode", mode=self.blocked_last_mode), Action("report", text=f"WP {seq} BLOCKED, {self.blocked_last_mode}")]
         return [Action("skip", seq=seq + 1), Action("report", text=f"WP {seq} BLOCKED, SKIPPED")]
 
+    def describe(self, snap: Snapshot, now: float) -> dict:
+        """For the viewer's map: everybody on the Pi's map with what they are to it, and in a few
+        lines what the Pi is doing and why. Called from the thread that calls step()."""
+        vehicle = snap.vehicle
+
+        def status(person: Person) -> str:
+            if person is self.target:
+                return "target"
+            if person.attended:
+                return "attended"
+            if person.confirmed:
+                return "lost" if person.lost_at is not None and person.last_seen <= person.lost_at else "waiting"
+            return "seen"
+
+        if self.phase is Phase.SEARCH:
+            if not (vehicle.armed and vehicle.mode == self.search_mode):
+                lines = [f"IDLE: the Pi acts only in {self.search_mode}, armed", "the camera looks ahead, nobody is gone to"]
+            else:
+                lines = [f"SEARCH: the autopilot runs the mission", "the camera sweeps; a person seen in"
+                         f" {self.confirm_frames} frames", f"over {self.confirm_s:.0f} s takes the boat to them"]
+        elif self.phase is Phase.APPROACH and self.target is not None:
+            range_m, bearing, off = self._to_person(snap)
+            unseen = now - max(self.target.last_seen, self._approach_since)
+            lines = [f"APPROACH: person {range_m:.1f} m away at {bearing:03.0f} deg",
+                     f"aim {self.standoff_m:.1f} m short of them ({off:+.0f} deg off the bow)",
+                     ("turning the bow to them first" if self._turning and abs(off) > self.face_tolerance_deg else
+                      f"not seen for {unseen:.0f} s (gives up at {self.lost_s:.0f} s)" if unseen > 1.0 else "in view")]
+        elif self.phase is Phase.HOLD and self.target is not None:
+            left = max(0.0, self.hold_s - (now - self._hold_since))
+            lines = [f"HOLD next to the person: {left:.0f} s left", f"then back to {self.after_hold}",
+                     "they and everybody near are attended"]
+        else:
+            lines = [f"HANDBACK: asked for {self._expected_mode}, waiting for it"]
+        attended = sum(p.attended for p in self.people)
+        lines.append(f"people: {self.found} found, {attended} attended, {len(self.people) - self.found} unconfirmed")
+        return {"phase": self.phase.value, "lines": lines, "people": [(*p.position, status(p)) for p in self.people],
+                "standoff_m": self.standoff_m, "group_radius_m": self.group_radius_m}
+
     def step(self, snap: Snapshot, now: float) -> list[Action]:
         self._track(snap, now)
         return self._decide(snap, now) + self._count_report()
@@ -243,12 +363,17 @@ class RescueMission:
         if self.phase is Phase.SEARCH:
             searching = vehicle.armed and vehicle.mode == self.search_mode
             # Somebody an approach was given up on is only gone to again once seen again.
+            # Somebody whose place has come out next to a person already attended is of that group.
+            for done in [p for p in self.people if p.attended]:
+                for person in self._group_of(done):
+                    person.attended_at = now
             waiting = [p for p in self.people if p.confirmed and not p.attended and (p.lost_at is None or p.last_seen > p.lost_at)]
             if not searching or not waiting:
                 return self._blocked_waypoint(snap, now) if searching else []
             # Somebody confirmed and not yet gone to: the nearest of them first.
             self.target = min(waiting, key=lambda p: haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *p.position))
             self.phase, self._last_goto, self._approach_since = Phase.APPROACH, 0.0, now
+            self._turning = self.turn_first
             self._best_range, self._progress_at = float("inf"), now
             return [self._ask_mode("GUIDED", now),
                     Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM SEEN")]
@@ -277,11 +402,17 @@ class RescueMission:
                 self.target.lost_at = now
                 self.phase, self.target = Phase.HANDBACK, None
                 return [self._ask_mode(self.search_mode, now), Action("report", text="VICTIM LOST")]
+            # Seen from afar they stood apart; closer up, their place has come out next to
+            # somebody already attended: one of that group, not another stop.
+            if any(p.attended and haversine_m(*p.position, *self.target.position) <= self.group_radius_m for p in self.people):
+                self.target.attended_at = now
+                self.phase, self.target = Phase.HANDBACK, None
+                return [self._ask_mode(self.search_mode, now), Action("report", text="SAME GROUP, RESUMING " + self.search_mode)]
             boat = (snap.gps.lat_deg, snap.gps.lon_deg)
             range_m = haversine_m(boat[0], boat[1], self.victim[0], self.victim[1])
             if range_m <= self.standoff_m + self.arrive_m:
                 self._attend(now)
-                return [self._ask_mode(self.hold_mode, now),
+                return [self._hold_start(snap, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM REACHED")]
             # The stand-off is measured from the person, not from what they stand on: coming in at
             # an angle, the stand-off point of somebody on a roof can lie against the wall. On the
@@ -294,7 +425,7 @@ class RescueMission:
             if around < self.hold_min_m or (ahead < self.hold_clear_m and range_m <= self.standoff_m + self.hold_clear_within_m):
                 self._attend(now)
                 near = range_m <= self.standoff_m + self.hold_clear_within_m
-                return [self._ask_mode(self.hold_mode, now),
+                return [self._hold_start(snap, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence,
                                text="VICTIM REACHED" if near else "VICTIM UNREACHABLE")]
             if range_m < self._best_range - STALL_PROGRESS_M:
@@ -303,11 +434,17 @@ class RescueMission:
                 # No closer for a while: something is in the way (a person on a roof, behind debris).
                 # Stay here and tell the shore where they are.
                 self._attend(now)
-                return [self._ask_mode(self.hold_mode, now),
+                return [self._hold_start(snap, now),
                         Action("report", lat=self.victim[0], lon=self.victim[1], confidence=self.confidence, text="VICTIM UNREACHABLE")]
             if now - self._last_goto < self.goto_period_s:
                 return []
             self._last_goto = now
+            # First the bow to the person, then the boat to them: off to one side, turn at a creep
+            # until the bow is on them (or for face_timeout_s at most).
+            _range, bearing, off = self._to_person(snap)
+            if self._turning and abs(off) > self.face_tolerance_deg and now - self._approach_since <= self.face_timeout_s:
+                return [Action("face", heading=bearing, speed=self.face_speed_mps)]
+            self._turning = False
             # Stop short of the person: aim standoff_m before them on the line from the boat.
             fraction = (range_m - self.standoff_m) / range_m
             return [Action("goto", lat=boat[0] + (self.victim[0] - boat[0]) * fraction,
@@ -315,6 +452,9 @@ class RescueMission:
 
         # HOLD
         if now - self._hold_since < self.hold_s:
-            return []
+            if not self.hold_facing or now - self._last_goto < self.goto_period_s:
+                return []
+            self._last_goto = now               # repeated: the autopilot drops a heading and speed after 3 s
+            return [self._hold_facing(snap)]
         self.phase, self.target = Phase.HANDBACK, None      # from now on they are an obstacle like any other
         return [self._ask_mode(self.after_hold, now), Action("report", text="RESUMING " + self.after_hold)]

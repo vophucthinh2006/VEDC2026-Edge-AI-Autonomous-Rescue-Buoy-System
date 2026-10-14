@@ -85,7 +85,22 @@ Arm, AUTO. Log của Pi: `~/vedc_sim/sitl_run/pi.log`. `--pi=simulated` dùng b�
 - bên phải là LiDAR nhìn từ trên xuống, mũi phao hướng lên: chấm trắng là điểm LiDAR quét được, vạch đỏ là
   72 ô 5° đúng như Pi gửi cho bộ lái, vòng cam là vùng cấm quanh nạn nhân đã tiếp cận, hình quạt là góc nhìn
   60° của camera (vàng khi quét, xanh khi bám), dấu × là người đang được bám;
+- phía dưới là **bản đồ quyết định**, Bắc ở trên, phao là mũi tên trắng: vệt phao đã đi, lộ trình và waypoint
+  hiện tại (xanh dương), những gì LiDAR đã thấy được nhớ lại đúng chỗ (chấm trắng, cũ thì xám), các ô Pi đang
+  báo là bị chắn (cung đỏ), và người trên bản đồ của Pi: xám là mới thấy, vàng là đã xác nhận đang chờ, xanh lá
+  là người đang tới (kèm vòng khoảng cách dừng và điểm đang nhắm), xanh dương là đã xử lý (kèm vòng mà ai nằm
+  trong đó sẽ không được tới lần nữa);
+- trên bản đồ có hai mũi tên từ phao: **mũi tên xanh mảnh** là hướng thẳng tới waypoint, **mũi tên vàng đậm** là
+  hướng bộ lái đang thật sự lái. Hai mũi tên lệch nhau nghĩa là bộ né vật cản đang bẻ đường đi; cột chữ bên
+  phải nói ra điều đó bằng lời, ví dụ `autopilot steers 109 deg = 14 deg RIGHT of the waypoint (095), going
+  round: 3.7 m on the way there`, cùng với việc Pi đang làm (SEARCH, APPROACH, HOLD…) và vì sao;
 - dòng dưới cùng: chế độ bay, pha cứu hộ, waypoint hiện tại, vật cản gần nhất.
+
+![Trang xem trực tiếp với bản đồ quyết định](docs/viewer_decision_map.jpg)
+
+Bản đồ này cho thấy **kết quả** quyết định của bộ né vật cản (BendyRuler chạy bên trong ArduPilot), không phải
+các phương án nó đã cân nhắc: Pi chỉ nhận được hướng đang lái, không nhận được lý do. Chữ trên trang là tiếng
+Anh vì bộ vẽ chữ của OpenCV không có dấu tiếng Việt.
 
 Trang này do chính `rescue_main.py --viewer [cổng]` phát ra (`Rasp_Pi/modules/viewer.py`), khoảng 5 hình/giây,
 chỉ đọc dữ liệu chứ không tác động tới phao. Trên Pi thật dùng được y như vậy qua wifi:
@@ -100,6 +115,43 @@ Kiểm thử tự động, chạy song song được với phiên đang mở:
 bash sim/tools/rescue_test.sh camera      # model thật trên camera Gazebo
 bash sim/tools/rescue_test.sh simulated   # bộ phát hiện hình học
 ```
+
+### Đi qua đúng đường phần cứng của phao (`--hw`)
+
+Mặc định code Pi lấy LiDAR thẳng từ topic Gazebo và tự quay camera. Trên phao thật thì khác: LiDAR
+LDS-008 vào Pi qua cổng nối tiếp, còn servo camera, relay báo động, nút dừng và LoRa nằm trên bo
+STM32F103. `--hw` đặt hai thứ thế chỗ vào giữa, mỗi thứ sau một cổng nối tiếp ảo:
+
+```bash
+wsl -d Ubuntu-24.04 -- bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh --pi --hw
+```
+
+| Trên phao | Thế chỗ trong giả lập | Code Pi được chạy thật |
+|---|---|---|
+| LDS-008 | `tools/lds008_emulator.py`: LiDAR Gazebo → dòng byte 22 byte/gói, chờ `startlds$` | `SerialLidar` → `LDS008Decoder` → `ray_obstacles` → `ObstacleFeed` |
+| Bo STM32F103 | `tools/helper_board_sim.py` chạy `STM32F103/Tests/helper_sim.c`, tức **chính** `pi_link.c`, `helper_logic.c`, `lora_frame.c` của firmware biên dịch cho máy tính | `HelperBoard`: `$CAM`, `$HBT`, `$VIC`, `$POS`, đọc `$AUX` |
+
+Bo ảo đưa xung servo vào khớp camera của Gazebo (camera chỉ quay nếu lệnh đi trọn qua bo), ghi mọi việc
+nó làm vào `~/vedc_sim/sitl_run/helper_events.log`, và coi file `estop` trong thư mục đó là nút dừng đang
+nhấn (`touch ~/vedc_sim/sitl_run/estop`). Đặt `VEDC_INGEST_TOKEN` thì dòng LoRa của nó được gửi lên Worker
+như trạm bờ ESP32 gửi, hiện thành phao `PHAO-01` trên dashboard.
+
+```bash
+bash sim/tools/hw_path_test.sh                           # model thật, 6 điểm kiểm
+VEDC_INGEST_TOKEN=... bash sim/tools/dashboard_test.sh   # cả hai đường lên dashboard, cần Worker đang chạy
+```
+
+`hw_path_test.sh` đạt khi: cứu hộ trọn vẹn qua LiDAR nối tiếp; khớp camera quét ±60°; bo bật relay và
+phát beacon có `v=1` đúng vị trí phao; nhấn nút dừng thì autopilot vào HOLD; LiDAR im thì Pi ngừng cấp
+dữ liệu và autopilot từ chối arm (`PRX1: No Data`); rút bo thì Pi chạy tiếp và báo `board off`.
+
+Lần chạy đầu của bài test này đã bắt được một lỗi không thể thấy bằng đường Gazebo trực tiếp: trên mặt nước
+trống LiDAR không trả điểm nào, Pi coi đó là LiDAR chết và autopilot không cho arm. Bộ giải mã giờ chuyển
+cả những góc "không thấy gì" để một vòng quét rỗng vẫn là một vòng quét.
+
+Giới hạn: trình thế chỗ LDS-008 phát đúng định dạng mà bộ giải mã **giả định** (theo LDS-006). Nó chứng
+minh đường nối tiếp của Pi, không chứng minh module thật nói đúng định dạng đó; việc ấy vẫn phải kiểm bằng
+`Rasp_Pi/tools/lidar_capture.py`. Cảm biến iBus, INA226, SPI của LoRa không có trong giả lập.
 
 **Camera trong giả lập**: 640 × 480, 15 khung/giây, góc nhìn ngang 60° (dọc 46.8°), cao 0.295 m trên mặt
 nước. Bộ phát hiện bị giữ ở 8 khung hình/giây (`camera.max_fps` trong `sim.yaml`), tốc độ đội báo cho Pi 4.
@@ -149,6 +201,27 @@ bash sim/tools/scan_test.sh camera 6.5 scan        # dừng–nhảy
 bash sim/tools/scan_test.sh camera 6.5 noscan      # camera cố định
 bash sim/tools/scan_test.sh camera 6.5 sweep 12    # dừng 12 s ở waypoint ngang nạn nhân
 ```
+
+**Quét hẹp lại, ±30° thay vì ±60°** (tổng vùng nhìn 120° thay vì 180°; `SCAN_LIMIT=30` trước lệnh test, hoặc
+`rescue_main.py --scan-limit 30`, hoặc `camera.scan.sweep_limit_deg`). Model thật, mỗi ô một lần chạy:
+
+| Hồ, lộ trình cách nạn nhân | ±60° | ±30° |
+|---|---|---|
+| 5 m | thấy, từ 6.9 m | thấy, từ 6.9 m |
+| 5.5 m | — | thấy, từ 7.1 m |
+| 6.5 m | thấy, từ 7.2 m | thấy, từ 6.7 m |
+
+| Cảnh miền Trung | ±60° (ba lần chạy) | ±30° (hai lần chạy) |
+|---|---|---|
+| Người/nhóm được tới, trên 6 | 5, 4, 6 | 5, 4 |
+| Người đứng ở cửa nhà (lệch 6.5 m sang bên) được tới | 2 trên 3 lần | 0 trên 2 lần |
+| Số lần mất dấu giữa chừng | 0, 4, 0 | 4, 4 |
+| Lần chạy không đạt | 1 (dừng chỗ không người) | 1 (dừng hai lần cho nhóm trên mái) |
+
+Trên hồ không thấy khác biệt tới 6.5 m: cả hai kiểu đều bắt được người khi họ còn ở phía trước, cách khoảng
+7 m. Ở cảnh miền Trung hai kiểu ngang nhau trong mức dao động giữa các lần chạy; dấu hiệu duy nhất nghiêng về
+một phía là người đứng ở cửa nhà, bị sót cả hai lần với ±30°. Số lần chạy quá ít để kết luận, nhưng không có
+số nào ủng hộ việc thu hẹp góc quét. Mặc định giữ ±60°.
 
 Khi nạn nhân lệch hẳn sang bên, lúc phao quay mũi để tiến lại camera có khi mất dấu vài giây
 (`VICTIM LOST`) rồi bắt lại; phao vẫn tới nơi nhưng chậm hơn.
@@ -260,6 +333,69 @@ Giới hạn đã biết của cảnh này:
 - Nước vẫn màu xanh: lớp sóng của asv_wave_sim tự tô màu, chưa đổi được sang màu nước lũ.
 - Mọi thứ trừ phao đều đứng yên (không có vật trôi).
 
+## Cảnh miền Trung, tháng 11/2025 (`--world=central`)
+
+```bash
+wsl -d Ubuntu-24.04 -- bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh --pi --world=central
+```
+
+![Cảnh nhìn từ trên xuống: tây bên trái, bắc phía trên](docs/central_overview.jpg)
+
+Một luồng nước dài 77 m, rộng 12 m, đi qua **hai cảnh có thật của cùng một vùng, cách nhau hai tuần**. Đây là
+cảnh ghép: đợt lũ thứ hai là một đợt mưa khác, không phải do bão gây ra. Khi trình bày đừng gọi cả cảnh là
+"sau bão Kalmaegi".
+
+| | Phần một, x 0–36 m | Phần hai, x 40–77 m |
+|---|---|---|
+| Sự kiện | sau bão số 13 Kalmaegi, đổ bộ Đắk Lắk – Gia Lai tối 6/11/2025 | lũ ngày 19–20/11/2025 ở xã Hòa Thịnh, Đắk Lắk |
+| Nơi báo chí mô tả | làng ven đầm ở Tuy Phước Đông, An Lương (Gia Lai) | thôn Phú Hữu |
+| Nước | nước dâng ngập nhà hơn 1 m → dựng 1.2 m | nước tới mái nhà trong chưa đầy một giờ → dựng tới mép mái |
+| Nhà | tốc mái hàng loạt → 6 nhà chỉ còn tường, đòn nóc, vài cây kèo, một tấm tôn | nhà cấp bốn ngập tới mái → 7 nhà ngói và tôn |
+| Vật cản | tàu cá và thuyền thúng bị đắm, dạt bờ; cột điện đổ → 1 tàu cá nghiêng, 2 thuyền thúng, 1 cột điện gãy | thuyền cứu hộ phải lách qua bụi tre, gốc cây, cột điện gãy → 2 bụi tre, 1 cột điện gãy giữa luồng |
+| Người | dân dùng thuyền thúng ra cứu hàng xóm; có gia đình ngồi trong nhà tốc mái chờ → 1 người đứng trong nước, 1 người đứng ở cửa nhà | cả làng dỡ ngói leo lên mái kêu cứu → 1 người trên mái, 3 người cùng một mái, 1 người trên mái nhà cuối luồng, 1 người dưới nước |
+
+![Phần một, nhìn từ chỗ phao xuất phát](docs/central_part_one.jpg)
+![Phần hai](docs/central_part_two.jpg)
+
+Tọa độ từng vật ghi ở đầu `worlds/vedc_central.sdf`. Mô hình mới: `storm_house`, `wrecked_boat`,
+`basket_boat`, `bamboo_clump`, `broken_pole`.
+
+Những chỗ **không** lấy từ thực tế:
+
+- **Mặt bằng.** Dựng theo mô tả của báo chí, không theo bản đồ hay đo đạc: không con đường thật nào được tái hiện.
+  Bề rộng luồng 12 m là số của cảnh phố lũ cũ, chọn vì phao đi được, không phải bề rộng ngõ thôn thật (báo viết
+  ngõ ở Lệ Thủy hẹp tới mức chỉ thuyền nhôm nhỏ luồn được).
+- **Ban ngày, trời u ám.** Ngoài đời người dân kêu cứu trong đêm; model nhận diện mới chỉ được đo ban ngày.
+- **Nước đứng yên**, màu xanh (lớp sóng của asv_wave_sim tự tô màu), không có dòng chảy, không có vật trôi.
+- **Vị trí GPS** vẫn là Hồ Đá (điểm xuất phát mặc định), không phải Gia Lai hay Đắk Lắk.
+- Mọi vật cản nhô ít nhất 0.47 m khỏi mặt nước để LiDAR (0.37 m) thấy được; ngoài đời nhiều thứ nằm thấp hơn.
+
+```bash
+bash sim/tools/central_test.sh simulated      # hoặc camera: model thật
+python3 sim/tools/world_snapshot.py /vedc_central/overview anh.png    # chụp lại ảnh nhìn từ trên xuống
+```
+
+Kết quả với motor sau đảo chiều (mặc định của giả lập), lộ trình một waypoint ở x 66.5 m rồi RTL, model thật,
+hai lần chạy:
+
+| | Lần 1 | Lần 2 |
+|---|---|---|
+| Người/nhóm được tới (trên 6) | 5 | 4 |
+| Dừng lặp cho cùng người | không | không |
+| Số lần mất dấu người giữa chừng | 0 | 4 |
+| Về tới điểm xuất phát sau | 506 s | 484 s |
+| Sát vật cản nhất | (cách đo lần này chưa đúng) | xác tàu 1.06 m |
+
+Người hay bị sót là người đứng ở cửa nhà và người dưới nước của phần hai. Với ESC sau một chiều (`--oneway`) cảnh
+này **chưa được chạy**; theo kết quả ở cảnh phố lũ thì nhiều khả năng phao sẽ va vật cản.
+
+Nguồn: [Bão Kalmaegi giật sập nhiều nhà, nguy cơ ngập diện rộng (VnExpress)](https://vnexpress.net/bao-kalmaegi-do-bo-dak-lak-gia-lai-4960961-tong-thuat.html),
+[Bão số 13 Kalmaegi gây thiệt hại nặng nề tại Đắk Lắk và Gia Lai, người dân cầu cứu (Soha)](https://soha.vn/bao-so-13-kalmaegi-quan-thao-dak-lak-gia-lai-nha-sap-ngap-khap-noi-nhieu-nguoi-cau-cuu-198251107064939468.htm),
+[Bão Kalmaegi gây thiệt hại nặng nề tại nhiều nơi (Tuổi Trẻ)](https://tuoitre.vn/bao-kalmaegi-gay-thiet-hai-nang-ne-tai-nhieu-noi-20251106232940411.htm),
+[36 giờ sinh tử ở rốn lũ Hòa Thịnh (Báo Xây Dựng)](https://baomoi.com/36-gio-sinh-tu-o-ron-lu-hoa-thinh-ca-lang-leo-mai-nha-keu-cuu-trong-dem-c53829410.epi),
+[Tang thương ở rốn lũ Hòa Thịnh (Tiền Phong)](https://tienphong.vn/tang-thuong-o-ron-lu-hoa-thinh-canh-bao-xa-lu-co-kip-thoi-post1799204.tpo),
+[Lao vào biển nước cứu người ở tâm lũ Đắk Lắk (Eva/Dân Việt)](https://eva.vn/tin-tuc/vuot-nuoc-xoay-cuu-nguoi-giua-tam-lu-dak-lak-c73a654527.html).
+
 ## Nhiều người trong khung hình
 
 Camera giữ lại **mọi** người model phát hiện trong một khung hình, và Pi ghi từng người lên bản đồ
@@ -291,6 +427,72 @@ Còn vụng ở cảnh `side`: cả hai lần phao mất dấu người thứ ha
 thay vì 2), và có lần báo cùng một người hai lần. Người thứ hai đứng cách người vừa xử lý 3 m, mà người vừa
 xử lý lại là vùng cấm. Chưa thử: ba người trở lên, hai người sát nhau dưới 1 m, một người dưới nước cạnh một
 người trên mái.
+
+### Không dừng hai lần cho cùng một người, một nhóm là một lần dừng
+
+Trước đây phao hay quay lại người vừa xử lý. Hai nguyên nhân, đều ở `rescue.py`: vị trí của người đã xử lý
+bị ghi đè bởi mỗi lần thấy lại từ xa (khoảng cách đọc từ chiều cao khung lệch vài mét), và mỗi người
+trong một nhóm là một lần tiếp cận riêng. Giờ:
+
+- vị trí người đã xử lý được chốt lúc phao đứng cạnh họ và không dời nữa;
+- một phát hiện mà tia nhìn đi qua trong `rescue.group_radius_m` (2.5 m) của người đã xử lý, khoảng cách
+  đọc được lệch không quá `group_radius_m + range_sigma × khoảng cách`, là người đó (hoặc nhóm của họ);
+- tới một người thì mọi người trên bản đồ trong 2.5 m quanh họ được tính là đã xử lý; người mà lại gần
+  mới lộ ra là đứng cạnh người đã xử lý thì phao bỏ lần tiếp cận, báo `SAME GROUP, RESUMING AUTO`.
+
+Cảnh làng (`--world=village`: 8 người trong 4 cụm), model thật, lộ trình dọc phố rồi về, mỗi dòng **một**
+lần chạy:
+
+| | Lấy quyền lái | Lần dừng | Dừng lặp cho cùng cụm | Pi đếm được | Về sau |
+|---|---|---|---|---|---|
+| Trước | 18 | 11 | 3 cụm | 13 "người" | 564 s |
+| Sau | 2 | 2 | không | 5 | 233 s |
+| Sau, `group_radius_m: 2.0` | 7 | 4 | 1 cụm (hai điểm dừng cách 2.3 m) | 8 | 280 s |
+
+```bash
+bash sim/tools/village_test.sh camera     # đạt khi không cụm nào bị dừng hai lần
+bash sim/tools/revisit_test.sh camera     # hồ: đi ngang người rồi quay lại đi ngang lần nữa, chỉ được 1 lần dừng
+```
+
+Đánh đổi, cần biết khi đọc số liệu:
+
+- **Đếm thiếu.** Người chỉ lộ ra sau khi cụm của họ đã xử lý thì được coi là người cũ, không đếm thêm:
+  cảnh làng có 8 người, Pi đếm 5. Trước đây thì đếm thừa (13).
+- **Hai người cách nhau 3 m có thể thành một lần dừng.** Vị trí đọc từ xa lệch cỡ nửa mét, nên 3 m dễ ra
+  dưới 2.5 m. `two_person_test.sh side` chấp nhận cả hai kết quả, miễn Pi tính đủ hai người đã xử lý. Đặt
+  `group_radius_m: 2.0` thì họ lại là hai lần dừng, nhưng cụm ba người dưới nước của cảnh làng (cách nhau
+  tới 2.4 m) bị tách làm hai.
+- **Người mới đứng đúng sau lưng người cũ** trên cùng tia nhìn bị bỏ qua cho tới khi được nhìn từ góc khác.
+- Mỗi lượt cảnh làng model chỉ bắt được 2–3 trong 4 cụm (người bơi đơn lẻ ở tim đường hay bị sót): đó là
+  tầm của model, không liên quan thay đổi này.
+
+### Mũi phao và người: đã thử hai cách, cả hai đang tắt
+
+Mong muốn: camera thấy người ở 50° thì thân phao quay theo cho mũi hướng vào người, servo về 0°. Số đo là
+góc giữa mũi phao và hướng tới người **trong lúc giữ vị trí** (`rescue_test.sh` và `village_test.sh` in ra
+dòng `bow off the person while holding`), model thật, mỗi dòng một lần chạy:
+
+| Cảnh | Cách | Mũi lệch người, trung bình | Kết quả |
+|---|---|---|---|
+| Hồ | mặc định: tới thẳng điểm cách người 2 m, autopilot giữ (LOITER) | 12° và 31° (hai lần chạy) | đạt |
+| Hồ | quay mũi trước rồi mới tiến (`rescue.turn_first`) | 32° | đạt |
+| Hồ | Pi tự giữ và lái mũi về người (`rescue.hold_mode: FACE`) | 51° | đạt |
+| Hồ, ESC sau một chiều | `hold_mode: FACE` | 67° | **không đạt**: trôi xa người 5.5 m |
+| Làng | LOITER | 55° | đạt |
+| Làng | `hold_mode: FACE` | 69° | đạt, một lần mất dấu người |
+
+Mặc định tự nó đã dao động từ 12° tới 31° giữa hai lần chạy, nên bảng này không phân biệt được "quay mũi
+trước" với mặc định; nó chỉ cho thấy không cách nào **hơn** mặc định, và `FACE` với ESC một chiều thì hỏng hẳn.
+Vì vậy cả hai để tắt (`turn_first: false`, `hold_mode: LOITER`); code và test của chúng vẫn còn để thử lại. Lý do là vật lý chứ không phải tham số: phao chỉ quay mũi được khi đang tiến, mà
+đứng cạnh người thì không còn chỗ để tiến. Khoảng giữa "đã tới" (2.5 m) và "không được gần hơn" (2 m) là nửa
+mét, phao dùng hết trước khi quay xong rồi phải đứng yên với mũi còn lệch.
+
+Trên mặt nước trống, mặc định cho mũi lệch người 12–31°. Chỗ lệch nhiều là cảnh có vật cản (55°): phao
+phải đi vòng nên tới nơi theo hướng xiên. Muốn sửa tận gốc thì cần phao **xoay tại chỗ** được, tức hai ESC
+sau đảo chiều; khi đó giữ vị trí bằng lệnh hướng với tốc độ 0 mới có nghĩa. Chưa làm.
+
+Bản STM32 (`main.py`) thì khác: firmware lái theo hướng Pi gửi, nên ở đó Pi đã được đổi để quay mũi về
+người trước và giữ mũi ở khoảng cách dừng (`vehicle.face_*`); phần này mới có unit test, chưa chạy trên bo.
 
 **Cắt ảnh theo dải chân trời** (đưa vào model hai ô cắt quanh đường chân trời thay cho cả khung hình, để mỗi
 người chiếm nhiều điểm ảnh hơn) đã được đo và **không được đưa vào code**. Điểm tin cậy của model, camera đứng
@@ -364,6 +566,45 @@ giữa nhà, nên số sát 0 có thể là phao chui vào hẻm chứ chưa ch�
   thế chính của nó là dùng vận tốc của vật cản.
 - Ba lần chạy mỗi ô là ít, và kết quả dao động mạnh giữa các lần (VO trên phố: 97 s lần này, không tới đích
   lần sau).
+
+## ESC sau một chiều
+
+Hai ESC sau của phao thật chỉ quay một chiều; giả lập mặc định cho chúng đảo chiều.
+`params/oneway_esc.parm` chặn chiều lùi của hai motor sau (motor trước vẫn hai chiều):
+
+```bash
+bash sim/run_boat.sh --pi --oneway                                         # phiên tương tác
+EXTRA_PARM=$PWD/sim/params/oneway_esc.parm bash sim/tools/flood_test.sh    # bài test nào cũng nhận EXTRA_PARM
+```
+
+Mỗi dòng là **một** lần chạy với bộ phát hiện hình học (`simulated`). "Sát nhất" là khoảng cách nhỏ nhất
+từ tâm phao tới vật cản; bài test đòi 0.8 m (thân phao vươn 0.55 m từ tâm).
+
+| Cảnh | Motor sau | Tham số thêm | Kết quả | Sát nhất |
+|---|---|---|---|---|
+| Phố lũ | đảo chiều | — (mặc định) | **đạt**, về sau 190 s | 1.33 m |
+| Phố lũ | một chiều | — | không đạt | xe 0.37 m, nhà cuối phố 0.03 m; lượt về lệch tim đường 25 m, bỏ 1 waypoint |
+| Phố lũ | một chiều | `WP_PIVOT_ANGLE 0` | không đạt | chạm dãy nhà nam, xe 0.11 m, người dưới nước 0.62 m |
+| Phố lũ | một chiều | `WP_SPEED 0.6` | không đạt | xe 0.29 m, cột điện 0.54 m |
+| Phố lũ | một chiều | `WP_SPEED 0.6`, `OA_MARGIN_MAX 1.5`, `OA_BR_LOOKAHEAD 7` | không đạt | nhà cuối phố 0.05 m, người trên mái 0.38 m |
+| Hồ trống | một chiều | — | **đạt** | giữ cách người 1.64–2.57 m |
+| Hồ trống | một chiều | `WP_SPEED 0.6` | **đạt** | giữ cách người 1.95–2.49 m |
+
+Đọc bảng này thế nào:
+
+- **Trên mặt nước trống, ESC một chiều không cản trở kịch bản cứu hộ.** Tìm, tiếp cận, giữ vị trí, trả
+  lại lộ trình đều như bản đảo chiều.
+- **Trong phố hẹp có vật cản thì không an toàn.** Không lùi được, phao không dừng kịp và không lách ra
+  khỏi vật cản đã áp sát: lần nào cũng có một chỗ nó vào trong 0.5 m, tức thân phao chạm hoặc gần chạm.
+  Giảm tốc xuống 0.6 m/s đỡ hơn (không còn bỏ waypoint, không đi lạc) nhưng chưa đủ; nới lề né vật cản
+  đổi chỗ va chứ không hết va.
+- Mỗi cấu hình chỉ một lần chạy và kết quả giữa các lần dao động mạnh: bảng đủ để nói "không đạt", không
+  đủ để xếp hạng các biến thể một chiều với nhau.
+- Chưa thử: cho motor trước (hai chiều) phanh chủ động khi tới gần vật cản; lộ trình chỉ rẽ một phía.
+
+Hệ quả cho phao thật (`pixhawk/params/boat.parm`): chạy 0.6 m/s, chỉ ở vùng nước trống, cho tới khi hai
+ESC sau lùi được. ESC BLHeli_S thường đặt được chế độ hai chiều bằng phần mềm cấu hình của nó; nếu làm
+được trên ESC của đội thì dùng nguyên `params/avoidance.parm`, bản đã đạt cảnh phố lũ.
 
 ## Xem trên dashboard web
 

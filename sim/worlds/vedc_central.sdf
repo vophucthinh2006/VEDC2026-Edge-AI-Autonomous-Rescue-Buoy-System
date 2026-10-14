@@ -1,0 +1,137 @@
+<?xml version="1.0" ?>
+<!--
+  Central Vietnam, November 2025 (run_boat.sh --world=central). One channel, 77 m long and 12 m
+  wide, through two scenes that happened in the same region two weeks apart. They are NOT one
+  event: the second flood was a later spell of rain, not the typhoon.
+
+  Part one, x 0 to 36: a village by the lagoon after Typhoon Kalmaegi (storm no. 13, landfall on
+  6 November 2025 in Dak Lak and Gia Lai). As the press reported it from Tuy Phuoc Dong and An
+  Luong: the surge left more than a metre of water in the houses, roofs were torn off wholesale,
+  fishing boats and basket boats were sunk or thrown ashore, power poles fell, and neighbours
+  went out in basket boats before any rescue team came.
+
+  Part two, x 40 to 77: a low-lying hamlet like Phu Huu (Hoa Thinh commune, Dak Lak) on 19 and
+  20 November 2025: the water rose to the eaves within the hour, people broke through their tiled
+  roofs and sat on them calling for help, and the rescue boats had to thread their way between
+  bamboo, tree stumps and broken power poles.
+
+  Built from those descriptions, not from a survey: no real street is reproduced. Sources and the
+  figures taken from them: sim/README.md.
+
+  Gazebo x is east, y is north; the buoy starts at the west end, bow to the east.
+
+    part one     storm_house          north x 8, 19, 30    south x 6, 16.5, 27    walls 6.75 m from the centre line
+                 basket boats         x 11, y 1.6    and    x 29.5, y 2.4
+                 wrecked boat         x 22, y -4.3   (8 m long, against the south houses)
+                 broken pole          x 34, y -1.6
+                 person in the water  x 14, y -1.0
+                 person in a doorway  x 19, y 6.55   (north house 2, standing clear of the water)
+    part two     flooded houses       north x 44, 54, 64   south x 42, 52, 62     eaves 6.2 m from the centre line
+                 end house            x 74.5 (its west eave at x 72)
+                 bamboo               x 47, y -1.6   and    x 66, y -2.0
+                 broken pole          x 56, y 1.4
+                 person on a roof     x 52, y -6.5
+                 person in the water  x 59.5, y -1.2
+                 three on a roof      x 63 to 65.4, y 6.5
+                 person on the end house   x 72, y 0.5
+
+  Everything but the buoy is static. The obstacles all stand at least 0.47 m out of the water, in
+  the plane of the buoy's LiDAR (0.37 m). sim/tools/central_test.sh and
+  Rasp_Pi/config/sim_central.yaml have the same coordinates: change all three.
+-->
+<sdf version="1.9">
+  <world name="vedc_central">
+    <physics name="2ms" type="ignore">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+
+    <!-- The sky after the storm: overcast, a flat grey light. -->
+    <scene>
+      <ambient>0.85 0.85 0.88</ambient>
+      <background>0.55 0.58 0.62</background>
+      <sky></sky>
+    </scene>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.75 0.75 0.78 1</diffuse>
+      <specular>0.4 0.4 0.4 1</specular>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+
+    <include>
+      <pose>0 0 0 0 0 0</pose>
+      <uri>model://vedc_flood_waves</uri>
+    </include>
+
+    <include>
+      <name>vedc_buoy</name>
+      <pose>0 0 0 0 0 0</pose>
+      <uri>model://vedc_buoy</uri>
+    </include>
+
+    <!-- A camera high above, looking straight down, for a picture of the whole scene
+         (sim/tools/world_snapshot.py). One frame every two seconds: it costs next to nothing. -->
+    <model name="overview">
+      <static>true</static>
+      <pose>38 0 58 0 1.5708 0</pose>
+      <link name="link">
+        <sensor name="overview" type="camera">
+          <always_on>1</always_on>
+          <update_rate>0.5</update_rate>
+          <topic>vedc_central/overview</topic>
+          <camera>
+            <horizontal_fov>0.62</horizontal_fov>
+            <image><width>640</width><height>1600</height></image>
+            <clip><near>1</near><far>200</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+
+    <!-- Part one, x 0 to 36: a village by the lagoon after the typhoon. 1.2 m of water, the roofs gone. -->
+    <include><name>storm_house_north_1</name><pose>8 9.0 0.0 0 0 0.0</pose><uri>model://storm_house</uri></include>
+    <include><name>storm_house_north_2</name><pose>19 9.0 0.0 0 0 0.0</pose><uri>model://storm_house</uri></include>
+    <include><name>storm_house_north_3</name><pose>30 9.0 0.0 0 0 0.0</pose><uri>model://storm_house</uri></include>
+    <include><name>storm_house_south_1</name><pose>6 -9.0 0.0 0 0 3.1416</pose><uri>model://storm_house</uri></include>
+    <include><name>storm_house_south_2</name><pose>16.5 -9.0 0.0 0 0 3.1416</pose><uri>model://storm_house</uri></include>
+    <include><name>storm_house_south_3</name><pose>27 -9.0 0.0 0 0 3.1416</pose><uri>model://storm_house</uri></include>
+    <include><name>basket_boat_1</name><pose>11.0 1.6 0.0 0 0 0.0</pose><uri>model://basket_boat</uri></include>
+    <include><name>wrecked_boat</name><pose>22.0 -4.3 0.0 0 0 0.22</pose><uri>model://wrecked_boat</uri></include>
+    <include><name>basket_boat_2</name><pose>29.5 2.4 0.0 0 0 1.0</pose><uri>model://basket_boat</uri></include>
+    <include><name>broken_pole_1</name><pose>34.0 -1.6 0.0 0 0 2.4</pose><uri>model://broken_pole</uri></include>
+    <!-- People of part one: one in the water in the open, one standing on a table in a doorway. -->
+    <include><name>victim_water_1</name><pose>14.0 -1.0 0.0 0 0 -1.5708</pose><uri>model://victim_person</uri></include>
+    <include><name>victim_doorway</name><pose>19.0 6.55 0.25 0 0 3.1416</pose><uri>model://victim_standing</uri></include>
+
+    <!-- Part two, x 40 to 77: a low-lying hamlet two weeks later, the water at the eaves, people on the roofs. -->
+    <include><name>house_north_1</name><pose>44 9.0 0.0 0 0 0.0</pose><uri>model://flooded_house</uri></include>
+    <include><name>house_north_2</name><pose>54 9.0 0.0 0 0 0.0</pose><uri>model://flooded_house_tin</uri></include>
+    <include><name>house_north_3</name><pose>64 9.0 0.0 0 0 0.0</pose><uri>model://flooded_house</uri></include>
+    <include><name>house_south_1</name><pose>42 -9.0 0.0 0 0 0.0</pose><uri>model://flooded_house_tin</uri></include>
+    <include><name>house_south_2</name><pose>52 -9.0 0.0 0 0 0.0</pose><uri>model://flooded_house</uri></include>
+    <include><name>house_south_3</name><pose>62 -9.0 0.0 0 0 0.0</pose><uri>model://flooded_house_tin</uri></include>
+    <include><name>house_end</name><pose>74.5 0.0 0.0 0 0 1.5708</pose><uri>model://flooded_house</uri></include>
+    <include><name>bamboo_1</name><pose>47.0 -1.6 0.0 0 0 0.0</pose><uri>model://bamboo_clump</uri></include>
+    <include><name>broken_pole_2</name><pose>56.0 1.4 0.0 0 0 -0.7</pose><uri>model://broken_pole</uri></include>
+    <include><name>bamboo_2</name><pose>66.0 -2.0 0.0 0 0 1.0</pose><uri>model://bamboo_clump</uri></include>
+    <include><name>bamboo_3</name><pose>59.0 13.0 0.0 0 0 2.0</pose><uri>model://bamboo_clump</uri></include>
+    <include><name>bamboo_4</name><pose>48.0 -13.5 0.0 0 0 0.5</pose><uri>model://bamboo_clump</uri></include>
+    <!-- People of part two: one on a roof, one in the water, three together on a roof, one on the end house. -->
+    <include><name>victim_roof_1</name><pose>52.0 -6.5 0.54 0 0 3.1416</pose><uri>model://victim_standing</uri></include>
+    <include><name>victim_water_2</name><pose>59.5 -1.2 0.0 0 0 -1.5708</pose><uri>model://victim_person</uri></include>
+    <include><name>victim_roof_group_1</name><pose>63.0 6.5 0.54 0 0 0.0</pose><uri>model://victim_standing</uri></include>
+    <include><name>victim_roof_group_2</name><pose>64.2 6.5 0.54 0 0 0.0</pose><uri>model://victim_standing</uri></include>
+    <include><name>victim_roof_group_3</name><pose>65.4 6.5 0.54 0 0 0.0</pose><uri>model://victim_standing</uri></include>
+    <include><name>victim_roof_end</name><pose>72.0 0.5 0.54 0 0 -1.5708</pose><uri>model://victim_standing</uri></include>
+  </world>
+</sdf>

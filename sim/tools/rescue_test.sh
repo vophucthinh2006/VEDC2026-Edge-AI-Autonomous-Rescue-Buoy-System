@@ -7,6 +7,8 @@
 #     simulated  geometric detector (default): tests the rescue logic and the MAVLink layer
 #     camera     the real TFLite model on the Gazebo camera: tests the whole perception chain
 set -o pipefail
+# EXTRA_PARM=<file>: one more parameter file on top, e.g. sim/params/oneway_esc.parm
+# HOLD_MODE=LOITER|FACE: overrides rescue.hold_mode, to compare the two ways of holding next to the person
 DETECTOR="${1:-simulated}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$REPO/sim/env.sh"
@@ -24,7 +26,7 @@ sleep 10
 cd "$T/run"
 setsid sim_vehicle.py -v Rover -f rover-skid --model JSON -I1 \
     --add-param-file="$REPO/sim/params/vedc_buoy.parm" \
-    --add-param-file="$REPO/sim/params/avoidance.parm" \
+    --add-param-file="$REPO/sim/params/avoidance.parm" ${EXTRA_PARM:+--add-param-file="$EXTRA_PARM"} \
     --custom-location=10.883438,106.796019,10,90 \
     --no-wsl2-network --no-rebuild --wipe-eeprom \
     --out=udp:127.0.0.1:14561 --mavproxy-args="--daemon" \
@@ -32,8 +34,15 @@ setsid sim_vehicle.py -v Rover -f rover-skid --model JSON -I1 \
 SITL=$!
 sleep 28
 cd "$REPO/Rasp_Pi"
+HOLD_OVERLAY=()
+if [ -n "$HOLD_MODE" ]; then
+    printf 'rescue:
+  hold_mode: %s
+' "$HOLD_MODE" > "$T/hold_mode.yaml"
+    HOLD_OVERLAY=(--overlay "$T/hold_mode.yaml")
+fi
 # Instance 1 shifts SITL's ports by 10: its SERIAL2 (TELEM2) is TCP 5773.
-setsid python3 -u rescue_main.py --overlay config/sim.yaml --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773 \
+setsid python3 -u rescue_main.py --overlay config/sim.yaml "${HOLD_OVERLAY[@]}" --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773 \
     > "$T/pi.log" 2>&1 < /dev/null &
 PI=$!
 cleanup() {
@@ -96,9 +105,10 @@ print("armed, AUTO")
 
 modes, texts = [], []
 closest, hold_range, mode, seq = 1e9, [], "", 0
+holding, yaw, bow_off = False, None, []      # between VICTIM REACHED and RESUMING; how far the bow is off the person then
 start = time.time()
 while time.time() - start < 240:
-    msg = m.recv_match(type=["HEARTBEAT", "GLOBAL_POSITION_INT", "STATUSTEXT", "MISSION_CURRENT"], blocking=True, timeout=2)
+    msg = m.recv_match(type=["HEARTBEAT", "GLOBAL_POSITION_INT", "STATUSTEXT", "MISSION_CURRENT", "ATTITUDE"], blocking=True, timeout=2)
     if msg is None:
         continue
     kind = msg.get_type()
@@ -110,7 +120,10 @@ while time.time() - start < 240:
             print(f"  [{time.time() - start:5.1f} s] mode {mode}")
     elif kind == "STATUSTEXT" and ("VICTIM" in msg.text or "RESUMING" in msg.text):
         texts.append(msg.text)
+        holding = "REACHED" in msg.text or "UNREACHABLE" in msg.text or (holding and "RESUMING" not in msg.text)
         print(f"  [{time.time() - start:5.1f} s] report: {msg.text}")
+    elif kind == "ATTITUDE":
+        yaw = math.degrees(msg.yaw) % 360.0
     elif kind == "MISSION_CURRENT":
         seq = msg.seq
     elif kind == "GLOBAL_POSITION_INT":
@@ -118,18 +131,28 @@ while time.time() - start < 240:
         e = (msg.lon / 1e7 - HOME[1]) * K
         d = math.hypot(n - VICTIM_NE[0], e - VICTIM_NE[1])
         closest = min(closest, d)
-        if mode == "LOITER":
+        if holding:
             hold_range.append(d)
+            if yaw is not None:
+                to_victim = math.degrees(math.atan2(VICTIM_NE[1] - e, VICTIM_NE[0] - n)) % 360.0
+                bow_off.append(abs((to_victim - yaw + 180.0) % 360.0 - 180.0))
     if "RTL" in modes and len(modes) > 3:
         break
 
 print(f"modes: {' > '.join(modes)}")
 print(f"closest approach to the victim: {closest:.2f} m; range while holding: "
       + (f"{min(hold_range):.2f} to {max(hold_range):.2f} m" if hold_range else "never held"))
+if bow_off:
+    ordered = sorted(bow_off)
+    print(f"bow off the person while holding: mean {sum(bow_off) / len(bow_off):.0f} deg, median {ordered[len(ordered) // 2]:.0f} deg, "
+          f"largest {ordered[-1]:.0f} deg, within 15 deg {100 * len([b for b in bow_off if b <= 15.0]) // len(bow_off)} % of the time")
 failures = []
 order = [x for x in modes if x in ("AUTO", "GUIDED", "LOITER")]
-if order[:4] != ["AUTO", "GUIDED", "LOITER", "AUTO"]:
-    failures.append("mode sequence is not AUTO > GUIDED > LOITER > AUTO")
+# The autopilot holds (LOITER), or the Pi does, bow on the person, staying in GUIDED (hold_mode FACE).
+if order[:4] != ["AUTO", "GUIDED", "LOITER", "AUTO"] and order[:3] != ["AUTO", "GUIDED", "AUTO"]:
+    failures.append("mode sequence is neither AUTO > GUIDED > LOITER > AUTO nor AUTO > GUIDED > AUTO")
+if not any("RESUMING" in t for t in texts):
+    failures.append("the boat was never given back to the mission")
 if not any("VICTIM SEEN" in t for t in texts):
     failures.append("no VICTIM SEEN report")
 if not any("VICTIM REACHED" in t for t in texts):

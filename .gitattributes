@@ -1,0 +1,9 @@
+# cmd.exe needs CRLF for reliable goto/labels
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# What is copied to the Raspberry Pi (boat.bat deploy) must have LF, whatever core.autocrlf says:
+# bash does not start a script whose first line ends in CR.
+Rasp_Pi/**/*.sh   text eol=lf
+Rasp_Pi/**/*.py   text eol=lf
+Rasp_Pi/**/*.yaml text eol=lf
+Rasp_Pi/**/*.txt  text eol=lf

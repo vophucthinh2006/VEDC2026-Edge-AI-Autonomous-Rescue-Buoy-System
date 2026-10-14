@@ -1,0 +1,13 @@
+# The Pixhawk boat (Raspberry Pi + Pixhawk + STM32F103), on top of settings.yaml.
+# run.sh pixhawk adds this file by itself; the simulator uses sim.yaml instead.
+lidar:
+  source: serial              # the LDS-008 on serial.lidar_port
+helper:
+  port: /dev/ttyUSB0          # the STM32F103 on its USB-to-TTL adapter; it drives the camera servo
+camera:
+  # Only without the helper board (helper.port: none): camera servo on one of the autopilot's
+  # outputs instead, driven with DO_SET_SERVO. 0: no servo, the camera stays ahead.
+  pan_output: 0
+  pan_center_us: 1500
+  pan_us_per_deg: 5.5         # 1000..2000 us over about 180 deg (SG90)
+  pan_dir: -1                 # flip if the camera turns away from the person

@@ -66,7 +66,10 @@ def main() -> int:
     global _jpeg
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     c = cfg["camera"]
-    from tflite_runtime.interpreter import Interpreter
+    try:
+        from tflite_runtime.interpreter import Interpreter
+    except ImportError:   # Python 3.12 and later: its successor
+        from ai_edge_litert.interpreter import Interpreter
     interpreter = Interpreter(model_path=c["model_path"])
     interpreter.allocate_tensors()
     details = interpreter.get_input_details() + interpreter.get_output_details()
@@ -90,7 +93,8 @@ def main() -> int:
         if not ok:
             continue
         h, w = frame.shape[:2]
-        det = detector._detect(interpreter, details, frame)
+        found = detector._detect(interpreter, details, frame)   # everybody in the frame, nearest first
+        det = found[0] if found else None
         now = monotonic()
         text = "no person"
         if det:
@@ -99,6 +103,9 @@ def main() -> int:
             dist = estimate_distance_bbox(det.box_height_frac, c["vertical_fov_deg"], c["person_height_m"])
             body = pan + det.bearing_cam_deg
             pan = track_pan(pan, det.bearing_cam_deg, c["pan_gain"], c["pan_deadband_deg"], c["pan_limit_deg"])
+            for other in found[1:]:
+                oy0, ox0, oy1, ox1 = other.box
+                cv2.rectangle(frame, (int(ox0 * w), int(oy0 * h)), (int(ox1 * w), int(oy1 * h)), (0, 160, 255), 1)
             cv2.rectangle(frame, (int(xmin * w), int(ymin * h)), (int(xmax * w), int(ymax * h)), (0, 255, 0), 2)
             text = f"person {det.confidence:.0%}  cam {det.bearing_cam_deg:+.1f}  body {body:+.1f}  ~{dist:.1f} m{' (cropped)' if det.cropped else ''}"
         elif now - last_seen > c["recenter_after_s"]:

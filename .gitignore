@@ -4,3 +4,11 @@
 # Python bytecode
 __pycache__/
 
+
+# Address of the Raspberry Pi for boat.bat, per machine
+boat.local.cmd
+# Written on the Pi by boat.bat deploy
+Rasp_Pi/.boat_profile
+
+# Local state of wrangler dev when it is started from here (.claude/launch.json)
+.wrangler/

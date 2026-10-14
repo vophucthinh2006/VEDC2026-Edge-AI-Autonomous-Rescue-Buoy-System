@@ -22,7 +22,8 @@ M = mavutil.mavlink
 ONBOARD_COMPONENT = M.MAV_COMP_ID_ONBOARD_COMPUTER
 # (message id, Hz) asked from the autopilot once it is heard. TELEM ports send nothing by default.
 STREAMS = ((M.MAVLINK_MSG_ID_ATTITUDE, 10), (M.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 5), (M.MAVLINK_MSG_ID_GPS_RAW_INT, 2),
-           (M.MAVLINK_MSG_ID_SYS_STATUS, 1), (M.MAVLINK_MSG_ID_MISSION_CURRENT, 1))
+           (M.MAVLINK_MSG_ID_SYS_STATUS, 1), (M.MAVLINK_MSG_ID_MISSION_CURRENT, 1),
+           (M.MAVLINK_MSG_ID_NAV_CONTROLLER_OUTPUT, 2))
 WAYPOINT_REFRESH_S = 5.0   # the current mission item is read again this often: the operator may have changed the mission
 
 
@@ -41,6 +42,8 @@ class MavlinkLink(threading.Thread):
         self._wp_dist_m = -1.0
         self._wp_bearing_deg = 0.0
         self._last_refusal: tuple[int, int] | None = None
+        self._route: dict[int, tuple[float, float] | None] = {}     # every mission item read so far, for the viewer's map
+        self._route_total = -1
         self.log = logging.getLogger(__name__)
         self.ready = threading.Event()       # set once the autopilot's heartbeat is heard
 
@@ -92,6 +95,17 @@ class MavlinkLink(threading.Thread):
                 self._waypoint_asked = now
                 with self._tx:
                     self._master.mav.mission_request_int_send(self._master.target_system, self._master.target_component, self._mission_seq)
+            # The rest of the mission, one item a second, for the map: it only shows where the
+            # route goes, the rescue logic needs the current waypoint alone.
+            if self._mission_total != self._route_total:
+                self._route, self._route_total = {}, self._mission_total
+                self._state.update_route(())
+            missing = next((seq for seq in range(1, self._mission_total + 1) if seq not in self._route), None)
+            if missing is not None and missing != self._mission_seq:
+                with self._tx:
+                    self._master.mav.mission_request_int_send(self._master.target_system, self._master.target_component, missing)
+        elif kind == "NAV_CONTROLLER_OUTPUT":
+            self._state.update_steering(float(msg.nav_bearing), float(msg.target_bearing))
         elif kind == "COMMAND_ACK":
             # A refused command is otherwise silent: say so, once per command and result.
             if msg.result != M.MAV_RESULT_ACCEPTED and (msg.command, msg.result) != self._last_refusal:
@@ -101,6 +115,9 @@ class MavlinkLink(threading.Thread):
             is_waypoint = msg.command == M.MAV_CMD_NAV_WAYPOINT and (msg.x or msg.y)
             if msg.seq == self._mission_seq:
                 self._waypoint = (int(msg.seq), msg.x / 1e7, msg.y / 1e7) if is_waypoint else None
+            if 1 <= msg.seq <= self._route_total:
+                self._route[int(msg.seq)] = (msg.x / 1e7, msg.y / 1e7) if is_waypoint else None
+                self._state.update_route(tuple((seq, *place) for seq, place in sorted(self._route.items()) if place is not None))
 
     def _request_streams(self) -> None:
         for message_id, hz in STREAMS:
@@ -166,6 +183,12 @@ class MavlinkLink(threading.Thread):
         """Shown on every ground station that hears this link."""
         with self._tx:
             self._master.mav.statustext_send(severity, text[:50].encode("ascii", "replace"))
+
+    def named_int(self, name: str, value: int) -> None:
+        """A named number for whoever listens on the autopilot's other ports: it forwards
+        broadcasts like this one to all of them."""
+        with self._tx:
+            self._master.mav.named_value_int_send(0, name[:10].encode("ascii"), int(value))
 
     def obstacle_distance(self, distances_cm: list[int], min_cm: int, max_cm: int) -> None:
         """72 sectors of 5 deg, clockwise from the bow, for the autopilot's avoidance (PRX1_TYPE = 2)."""

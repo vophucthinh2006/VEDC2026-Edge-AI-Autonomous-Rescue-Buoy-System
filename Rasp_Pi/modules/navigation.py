@@ -30,6 +30,7 @@ class NavCommand:
 
 
 CREEP = 0.3   # share of max_speed_mps kept near an obstacle the commanded course leads away from
+FACE_INSIDE_M = 0.3   # this far inside the stand-off the boat no longer creeps to turn its bow to the person
 
 
 class BapfNavigator:
@@ -84,6 +85,12 @@ class BapfNavigator:
             desired_heading = (imu.yaw_deg + desired_body) % 360.0
             desired_speed = float(self.v["approach_speed_mps"]) if remaining > 0.15 else 0.0
             reason = "human_standoff" if desired_speed == 0 else "approach_human"
+            # The bow follows the camera: turn to the person first, then go to them, and keep the
+            # bow on them at the stand-off. The STM32 only steers while it is given a speed, so the
+            # turn is made at a creep; never once the boat is inside the stand-off.
+            if abs(desired_body) > float(self.v.get("face_tolerance_deg", 10.0)) and remaining > -FACE_INSIDE_M:
+                desired_speed = min(float(self.v["approach_speed_mps"]), float(self.v.get("face_speed_mps", 0.15)))
+                reason = "face_human"
         elif goal is not None:
             desired_heading = bearing_deg(gps.lat_deg, gps.lon_deg, goal[0], goal[1])
             remaining = haversine_m(gps.lat_deg, gps.lon_deg, goal[0], goal[1])

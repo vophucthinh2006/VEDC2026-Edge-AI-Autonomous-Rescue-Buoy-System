@@ -32,6 +32,7 @@ AHRS_BIT = mavutil.mavlink.MAV_SYS_STATUS_AHRS
 EKF_ATTITUDE = mavutil.mavlink.EKF_ATTITUDE
 EKF_POS_ABS = mavutil.mavlink.EKF_POS_HORIZ_ABS
 STALE_S = 3.0
+VICTIMS_NAME = "VICTIMS"   # NAMED_VALUE_INT sent every second by the Pi (Rasp_Pi/rescue_main.py)
 
 
 class Vehicle:
@@ -40,6 +41,7 @@ class Vehicle:
     def __init__(self) -> None:
         self.msgs: dict[str, tuple[float, object]] = {}
         self.system: int | None = None
+        self.victims: int | None = None      # people the Pi has found; None until it says
 
     def update(self, msg) -> None:
         kind = msg.get_type()
@@ -51,6 +53,13 @@ class Vehicle:
                 self.system = msg.get_srcSystem()
             elif msg.get_srcSystem() != self.system:
                 return
+        elif kind == "NAMED_VALUE_INT":
+            name = msg.name if isinstance(msg.name, str) else bytes(msg.name).decode("ascii", "replace")
+            if name.strip(chr(0)) == VICTIMS_NAME and 0 <= msg.value <= 255:
+                # Kept past STALE_S, like the count in the STM32 boat's LoRa frame: a Pi that
+                # restarts counts from zero again, and the dashboard only alerts when it rises.
+                self.victims = int(msg.value)
+            return
         self.msgs[kind] = (time.monotonic(), msg)
 
     def get(self, kind: str):
@@ -127,6 +136,8 @@ def build_frame(v: Vehicle, buoy_id: str, seq: int) -> dict | None:
         "sats": sats,
         "hdop": round(hdop, 2),
     }
+    if v.victims is not None:
+        frame["victims"] = v.victims
     frame["raw"] = (f"MAV {mode_name} {'ARMED' if armed else 'DISARMED'} "
                     f"gs={frame['nav']['gs']:.1f} hdg={frame['yaw']:.0f}")[:100]
     return frame

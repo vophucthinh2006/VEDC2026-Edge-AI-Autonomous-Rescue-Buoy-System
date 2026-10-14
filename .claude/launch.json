@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8766", "--bind", "127.0.0.1", "--directory", "esp32-lora-station/web"],
       "port": 8766
+    },
+    {
+      "name": "cloud-worker",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["esp32-lora-station/cloud/node_modules/wrangler/bin/wrangler.js", "dev", "--config", "esp32-lora-station/cloud/wrangler.jsonc", "--port", "8787"],
+      "port": 8787
     }
   ]
 }

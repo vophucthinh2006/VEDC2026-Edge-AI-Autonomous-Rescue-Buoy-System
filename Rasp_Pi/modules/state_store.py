@@ -51,6 +51,17 @@ class VehicleState:
 
 
 @dataclass(frozen=True)
+class NavState:
+    """What the autopilot says about its own steering (MAVLink link only): the bearing it steers
+    right now, which its avoidance may have bent away from the waypoint, and the mission's
+    waypoints as (item, lat, lon), for the viewer's map."""
+    steer_bearing_deg: float | None = None
+    target_bearing_deg: float | None = None
+    route: tuple[tuple[int, float, float], ...] = ()
+    timestamp: float = 0.0
+
+
+@dataclass(frozen=True)
 class HumanTarget:
     bearing_body_deg: float
     distance_m: float
@@ -70,6 +81,7 @@ class Snapshot:
     vehicle: VehicleState = VehicleState()
     human_targets: tuple[HumanTarget, ...] = ()  # everybody in the last frame, the followed one included
     focus: tuple[float, float] | None = None     # lat, lon of the person the rescue logic wants watched
+    nav: NavState = NavState()
 
 
 class StateStore:
@@ -85,11 +97,20 @@ class StateStore:
         self._human_targets: tuple[HumanTarget, ...] = ()
         self._focus: tuple[float, float] | None = None
         self._vehicle = VehicleState()
+        self._nav = NavState()
 
     def update_vehicle(self, mode: str, armed: bool, mission_seq: int, mission_total: int = 0, wp_dist_m: float = -1.0,
                        wp_bearing_deg: float = 0.0) -> None:
         with self._lock:
             self._vehicle = VehicleState(mode, armed, mission_seq, monotonic(), mission_total, wp_dist_m, wp_bearing_deg)
+
+    def update_steering(self, steer_bearing_deg: float, target_bearing_deg: float) -> None:
+        with self._lock:
+            self._nav = NavState(steer_bearing_deg % 360.0, target_bearing_deg % 360.0, self._nav.route, monotonic())
+
+    def update_route(self, route: tuple[tuple[int, float, float], ...]) -> None:
+        with self._lock:
+            self._nav = NavState(self._nav.steer_bearing_deg, self._nav.target_bearing_deg, route, self._nav.timestamp)
 
     def update_imu(self, pitch: float, roll: float, yaw: float, imu_ok: bool, overturned: bool) -> None:
         with self._lock:
@@ -130,4 +151,4 @@ class StateStore:
     def snapshot(self) -> Snapshot:
         with self._lock:
             return Snapshot(self._imu, self._gps, self._system, self._obstacles, self._scan_timestamp, self._waypoint, self._human_target, self._vehicle,
-                            self._human_targets, self._focus)
+                            self._human_targets, self._focus, self._nav)

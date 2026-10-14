@@ -1,0 +1,118 @@
+<?xml version="1.0" ?>
+<!--
+  A single-storey house after the typhoon: the roof is gone but for the ridge, three rafters and
+  one sheet of tin; the walls stand in 1.2 m of water, 1.9 m of them above it. Built from boxes,
+  static. Origin at the water level in the middle of the 6 x 4.5 m footprint, the door in the
+  south wall (-y). The buoy's LiDAR, 0.37 m above the water, sees the walls.
+-->
+<sdf version="1.9">
+  <model name="storm_house">
+    <static>true</static>
+    <link name="link">
+      <visual name="wall_north">
+        <pose>0 2.15 0.35 0 0 0</pose>
+        <geometry><box><size>6.0 0.2 3.1</size></box></geometry>
+        <material><ambient>0.86 0.78 0.52 1</ambient><diffuse>0.86 0.78 0.52 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wall_north">
+        <pose>0 2.15 0.35 0 0 0</pose>
+        <geometry><box><size>6.0 0.2 3.1</size></box></geometry>
+      </collision>
+      <visual name="wall_west">
+        <pose>-2.9 0 0.35 0 0 0</pose>
+        <geometry><box><size>0.2 4.5 3.1</size></box></geometry>
+        <material><ambient>0.86 0.78 0.52 1</ambient><diffuse>0.86 0.78 0.52 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wall_west">
+        <pose>-2.9 0 0.35 0 0 0</pose>
+        <geometry><box><size>0.2 4.5 3.1</size></box></geometry>
+      </collision>
+      <visual name="wall_east">
+        <pose>2.9 0 0.35 0 0 0</pose>
+        <geometry><box><size>0.2 4.5 3.1</size></box></geometry>
+        <material><ambient>0.86 0.78 0.52 1</ambient><diffuse>0.86 0.78 0.52 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wall_east">
+        <pose>2.9 0 0.35 0 0 0</pose>
+        <geometry><box><size>0.2 4.5 3.1</size></box></geometry>
+      </collision>
+      <visual name="wall_south_west">
+        <pose>-1.75 -2.15 0.35 0 0 0</pose>
+        <geometry><box><size>2.5 0.2 3.1</size></box></geometry>
+        <material><ambient>0.86 0.78 0.52 1</ambient><diffuse>0.86 0.78 0.52 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wall_south_west">
+        <pose>-1.75 -2.15 0.35 0 0 0</pose>
+        <geometry><box><size>2.5 0.2 3.1</size></box></geometry>
+      </collision>
+      <visual name="wall_south_east">
+        <pose>1.75 -2.15 0.35 0 0 0</pose>
+        <geometry><box><size>2.5 0.2 3.1</size></box></geometry>
+        <material><ambient>0.86 0.78 0.52 1</ambient><diffuse>0.86 0.78 0.52 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wall_south_east">
+        <pose>1.75 -2.15 0.35 0 0 0</pose>
+        <geometry><box><size>2.5 0.2 3.1</size></box></geometry>
+      </collision>
+      <visual name="lintel">
+        <pose>0 -2.15 1.6 0 0 0</pose>
+        <geometry><box><size>1.0 0.2 0.6</size></box></geometry>
+        <material><ambient>0.86 0.78 0.52 1</ambient><diffuse>0.86 0.78 0.52 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="lintel">
+        <pose>0 -2.15 1.6 0 0 0</pose>
+        <geometry><box><size>1.0 0.2 0.6</size></box></geometry>
+      </collision>
+      <visual name="stain_south">
+        <pose>0 -2.26 0.25 0 0 0</pose>
+        <geometry><box><size>6.0 0.02 0.5</size></box></geometry>
+        <material><ambient>0.5 0.4 0.26 1</ambient><diffuse>0.5 0.4 0.26 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="stain_north">
+        <pose>0 2.26 0.25 0 0 0</pose>
+        <geometry><box><size>6.0 0.02 0.5</size></box></geometry>
+        <material><ambient>0.5 0.4 0.26 1</ambient><diffuse>0.5 0.4 0.26 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="gable_west">
+        <pose>-2.9 0 2.2 0 0 0</pose>
+        <geometry><box><size>0.2 2.6 0.6</size></box></geometry>
+        <material><ambient>0.86 0.78 0.52 1</ambient><diffuse>0.86 0.78 0.52 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="gable_east">
+        <pose>2.9 0 2.2 0 0 0</pose>
+        <geometry><box><size>0.2 2.6 0.6</size></box></geometry>
+        <material><ambient>0.86 0.78 0.52 1</ambient><diffuse>0.86 0.78 0.52 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="ridge">
+        <pose>0 0 2.55 0 0 0</pose>
+        <geometry><box><size>6.0 0.1 0.1</size></box></geometry>
+        <material><ambient>0.36 0.25 0.16 1</ambient><diffuse>0.36 0.25 0.16 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="rafter_0">
+        <pose>-2.0 -1.1 2.2 0.33 0 0</pose>
+        <geometry><box><size>0.08 2.4 0.08</size></box></geometry>
+        <material><ambient>0.36 0.25 0.16 1</ambient><diffuse>0.36 0.25 0.16 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="rafter_1">
+        <pose>0.0 -1.1 2.2 0.33 0 0</pose>
+        <geometry><box><size>0.08 2.4 0.08</size></box></geometry>
+        <material><ambient>0.36 0.25 0.16 1</ambient><diffuse>0.36 0.25 0.16 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="rafter_2">
+        <pose>2.0 -1.1 2.2 0.33 0 0</pose>
+        <geometry><box><size>0.08 2.4 0.08</size></box></geometry>
+        <material><ambient>0.36 0.25 0.16 1</ambient><diffuse>0.36 0.25 0.16 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="tin_left">
+        <pose>-1.9 1.15 2.2 -0.33 0 0.05</pose>
+        <geometry><box><size>1.9 2.4 0.03</size></box></geometry>
+        <material><ambient>0.55 0.6 0.62 1</ambient><diffuse>0.55 0.6 0.62 1</diffuse><specular>0.4 0.4 0.4 1</specular></material>
+      </visual>
+      <visual name="room">
+        <pose>0 -1.9 0.6 0 0 0</pose>
+        <geometry><box><size>0.98 0.3 1.4</size></box></geometry>
+        <material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+    </link>
+  </model>
+</sdf>

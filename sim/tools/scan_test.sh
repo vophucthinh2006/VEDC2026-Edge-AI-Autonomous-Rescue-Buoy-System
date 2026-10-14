@@ -14,6 +14,7 @@
 # With the sweep the person must be found and reported within 3 m of where they are. With noscan
 # the script only reports what happened.
 set -o pipefail
+# SCAN_LIMIT=<deg>: the camera sweeps between -deg and +deg instead of the configured 60
 DETECTOR="${1:-simulated}"
 OFFSET="${2:-3.5}"
 SCAN="${3:-sweep}"
@@ -49,7 +50,7 @@ case "$SCAN" in
     sweep)   PI_ARGS+=(--scan-mode sweep) ;;
     sweep=*) PI_ARGS+=(--scan-mode sweep --scan-rate "${SCAN#sweep=}") ;;
 esac
-setsid python3 -u rescue_main.py "${PI_ARGS[@]}" > "$T/pi.log" 2>&1 < /dev/null &
+setsid python3 -u rescue_main.py "${PI_ARGS[@]}" ${SCAN_LIMIT:+--scan-limit "$SCAN_LIMIT"} > "$T/pi.log" 2>&1 < /dev/null &
 PI=$!
 cleanup() {
     kill -- -$PI -$SITL -$GZ 2>/dev/null

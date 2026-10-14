@@ -3,8 +3,8 @@ serial:
   stm32_baud: 115200
   lidar_port: /dev/ttyAMA3
   lidar_baud: 115200
-  # main.py (STM32 boat) only. lds008: the fitted module, decoded as its sibling LDS-006 (check
-  # with tools/lidar_capture.py). ld14: LDROBOT LD14. none: no LiDAR, same as --no-lidar.
+  # lds008: the fitted module, decoded as its sibling LDS-006 (check with tools/lidar_capture.py).
+  # ld14: LDROBOT LD14. none (main.py only): no LiDAR, same as --no-lidar.
   lidar_model: lds008
 vehicle:
   lidar_yaw_offset_deg: 0.0  # calibrate: LiDAR angle zero -> bow; positive clockwise
@@ -19,6 +19,11 @@ vehicle:
   arrive_radius_m: 4.0
   target_standoff_m: 2.0     # from the boat's GPS position; the bow is 0.55 m ahead of it
   target_timeout_s: 2.0
+  # main.py (STM32 boat): the bow follows the camera. With the person more than face_tolerance_deg
+  # off the bow the boat turns to them at face_speed_mps before going to them, and keeps the bow on
+  # them at the stand-off (the STM32 only steers while it is given a speed).
+  face_tolerance_deg: 10.0
+  face_speed_mps: 0.15
   max_turn_rate_deg_s: 35.0
   max_pitch_deg: 35.0
   max_roll_deg: 35.0
@@ -40,7 +45,7 @@ camera:
   source: device              # device: the USB camera below. gazebo: the simulator's camera topic
   device: 0
   horizontal_fov_deg: 60.0    # OV9726 with the 60 deg lens
-  model_path: /home/khanh/human_detect_project/detect.tflite
+  model_path: models/detect.tflite   # in the repository; relative to this directory, where run.sh starts the program
   confidence_threshold: 0.60
   detection_hold_s: 0.40
   report_cooldown_s: 10.0
@@ -83,6 +88,17 @@ camera:
     sweep_limit_deg: 60
     sweep_rate_deg_s: 30
     modes: [AUTO]
+# LiDAR of the Pixhawk boat (rescue_main.py). none: no LiDAR, only the keep-outs reach the autopilot.
+# serial: the module of serial.lidar_model on serial.lidar_port (config/boat_pixhawk.yaml).
+# gazebo: the simulator's (config/sim.yaml).
+lidar:
+  source: none
+# STM32F103 helper board of the Pixhawk boat (modules/helper_board.py): camera servo, alarm relays,
+# E-stop button, battery, LoRa beacon. none: not fitted (the simulator). config/boat_pixhawk.yaml
+# sets the port.
+helper:
+  port: none
+  baud: 115200
 # Pixhawk link (rescue_main.py). TELEM2 on the boat; config/sim.yaml points it at the simulator.
 mavlink:
   url: /dev/serial0
@@ -90,7 +106,24 @@ mavlink:
 # Rescue logic on top of the autopilot (modules/rescue.py).
 rescue:
   search_mode: AUTO           # the Pi only takes over while the autopilot runs the search pattern
-  hold_mode: LOITER           # keeps station next to the person
+  # How the boat stays next to the person. LOITER: the autopilot's own station keeping. It holds
+  # the position; the bow stays roughly where the approach left it (12 and 31 deg off the person in
+  # two runs on open water, 55 deg in the village scene, where the approach bends round obstacles).
+  # FACE: the Pi holds in GUIDED and steers the bow to the person. Measured in the simulator and
+  # NOT better: a boat only turns while it moves, the turn uses up the half metre between
+  # stand-off and stand-off + arrive_m before the bow is round, and the boat is then left standing
+  # with the bow no nearer the person than under LOITER (51 deg on open water; with one-way rear
+  # motors it drifted 5 m off and never reported the person reached). Kept for a boat that can turn on the spot; see sim/README.md.
+  hold_mode: LOITER
+  # turn_first: somebody seen more than face_tolerance_deg off the bow is turned to first, at
+  # face_speed_mps, for face_timeout_s at most, and only then gone to. Off: in the simulator the
+  # boat arrived with the bow no nearer the person than when it simply goes to them (32 deg off,
+  # against 12 and 31 in two runs without it). The same speed and tolerance steer a FACE hold. These commands are
+  # not bent by the autopilot's avoidance: only hold_min_m guards them.
+  turn_first: false
+  face_tolerance_deg: 10.0
+  face_speed_mps: 0.3
+  face_timeout_s: 8.0
   after_hold: AUTO            # AUTO resumes the pattern where it stopped; RTL brings the boat home
   confirm_s: 1.0              # a detection must persist this long before the takeover,
   confirm_frames: 3           # in at least this many frames,
@@ -104,6 +137,14 @@ rescue:
   # somebody new. One 8 m circle was used before, and of two people 3 m apart only one was attended.
   revisit_radius_m: 2.0
   same_person_range_m: 3.0
+  # Nobody is gone to twice, and people standing together are one stop. Reaching one person attends
+  # everybody on the map within group_radius_m of them; later, a detection whose line of sight
+  # passes within group_radius_m of an attended person, and whose range reads within
+  # group_radius_m + range_sigma * range of them, is that person (or one of their group) again.
+  # In doubt it is: somebody new standing right behind an attended person is not gone to until
+  # seen from another side. 2.5 keeps two people 3 m apart two stops.
+  group_radius_m: 2.5
+  range_sigma: 0.35           # how far off a range read from a box height can be, as a share of it
   goto_period_s: 1.0
   stall_s: 10.0               # no closer for this long on the approach: report the person as unreachable and hold
   # Within stand-off + hold_clear_within_m of the person, a LiDAR return closer than hold_clear_m
@@ -126,12 +167,14 @@ rescue:
   blocked_arrived_m: 2.5      # a little over WP_RADIUS: closer than this the boat has arrived and may be waiting (Delay)
   # The blocked waypoint is the last mission item: nothing to move on to, switch to this mode.
   blocked_last_mode: HOLD
+  estop_mode: HOLD            # the E-stop button of the helper board asks the autopilot for this mode
   detector: camera            # camera: the TFLite model. simulated: known positions (sim section)
 # Obstacles sent to the autopilot's avoidance (modules/obstacle_feed.py): MAVLink OBSTACLE_DISTANCE.
 avoidance:
   rate_hz: 5.0
   min_range_m: 0.15
   max_range_m: 8.0
+  lidar_stale_s: 1.0          # with a LiDAR: no scan for this long stops the feed, the autopilot then reports the sensor failed
   # Circle around a person already attended. The autopilot adds OA_MARGIN_MAX (1 m) to it; the
   # two together must stay below the stand-off, or the boat cannot leave the person it holds next to.
   keep_out_radius_m: 0.4

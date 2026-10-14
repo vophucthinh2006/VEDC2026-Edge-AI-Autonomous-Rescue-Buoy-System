@@ -1,0 +1,82 @@
+<?xml version="1.0" ?>
+<!--
+  A clump of bamboo standing in the flood: six culms 4.5 to 6.5 m tall over a dense foot.
+  Static, origin at the water level. The foot, 1 m in radius, is what the buoy's LiDAR sees and
+  what it collides with.
+-->
+<sdf version="1.9">
+  <model name="bamboo_clump">
+    <static>true</static>
+    <link name="link">
+      <visual name="foot">
+        <pose>0 0 0.35 0 0 0</pose>
+        <geometry><ellipsoid><radii>1.0 1.0 0.8</radii></ellipsoid></geometry>
+        <material><ambient>0.2 0.42 0.15 1</ambient><diffuse>0.2 0.42 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="foot">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry><cylinder><radius>1.0</radius><length>2.0</length></cylinder></geometry>
+      </collision>
+      <visual name="culm_0">
+        <pose>0.2 0.1 2.85 0.1 0.12 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>6.5</length></cylinder></geometry>
+        <material><ambient>0.45 0.55 0.2 1</ambient><diffuse>0.45 0.55 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="leaves_0">
+        <pose>0.59 -0.22 5.60 0 0 0</pose>
+        <geometry><ellipsoid><radii>0.7 0.7 0.45</radii></ellipsoid></geometry>
+        <material><ambient>0.2 0.42 0.15 1</ambient><diffuse>0.2 0.42 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="culm_1">
+        <pose>-0.3 0.2 2.35 -0.16 0.05 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>5.5</length></cylinder></geometry>
+        <material><ambient>0.45 0.55 0.2 1</ambient><diffuse>0.45 0.55 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="leaves_1">
+        <pose>-0.16 0.64 4.60 0 0 0</pose>
+        <geometry><ellipsoid><radii>0.7 0.7 0.45</radii></ellipsoid></geometry>
+        <material><ambient>0.28 0.5 0.18 1</ambient><diffuse>0.28 0.5 0.18 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="culm_2">
+        <pose>0.1 -0.3 2.6 0.2 -0.14 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>6.0</length></cylinder></geometry>
+        <material><ambient>0.45 0.55 0.2 1</ambient><diffuse>0.45 0.55 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="leaves_2">
+        <pose>-0.32 -0.90 5.10 0 0 0</pose>
+        <geometry><ellipsoid><radii>0.7 0.7 0.45</radii></ellipsoid></geometry>
+        <material><ambient>0.2 0.42 0.15 1</ambient><diffuse>0.2 0.42 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="culm_3">
+        <pose>-0.2 -0.2 2.1 -0.08 -0.2 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>5.0</length></cylinder></geometry>
+        <material><ambient>0.45 0.55 0.2 1</ambient><diffuse>0.45 0.55 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="leaves_3">
+        <pose>-0.70 -0.00 4.10 0 0 0</pose>
+        <geometry><ellipsoid><radii>0.7 0.7 0.45</radii></ellipsoid></geometry>
+        <material><ambient>0.28 0.5 0.18 1</ambient><diffuse>0.28 0.5 0.18 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="culm_4">
+        <pose>0.4 -0.1 1.85 0.05 0.25 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>4.5</length></cylinder></geometry>
+        <material><ambient>0.45 0.55 0.2 1</ambient><diffuse>0.45 0.55 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="leaves_4">
+        <pose>0.96 -0.21 3.60 0 0 0</pose>
+        <geometry><ellipsoid><radii>0.7 0.7 0.45</radii></ellipsoid></geometry>
+        <material><ambient>0.2 0.42 0.15 1</ambient><diffuse>0.2 0.42 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="culm_5">
+        <pose>0.0 0.4 2.5 -0.25 0.0 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>5.8</length></cylinder></geometry>
+        <material><ambient>0.45 0.55 0.2 1</ambient><diffuse>0.45 0.55 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="leaves_5">
+        <pose>0.00 1.12 4.90 0 0 0</pose>
+        <geometry><ellipsoid><radii>0.7 0.7 0.45</radii></ellipsoid></geometry>
+        <material><ambient>0.28 0.5 0.18 1</ambient><diffuse>0.28 0.5 0.18 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+    </link>
+  </model>
+</sdf>

@@ -1,0 +1,86 @@
+# ArduPilot Rover parameters for the real boat (Pixhawk + Raspberry Pi + STM32F103).
+# A STARTING POINT, written from the simulator and the pinout sheet, never yet run on the boat.
+# Load it in Mission Planner (Config > Full Parameter List > Load from file), then go through
+# docs/porting-checklist.md. Lines marked CONFIRM depend on wiring nobody has checked yet.
+#
+# Deliberately NOT here: the steering and speed controller gains (ATC_*), CRUISE_SPEED and
+# CRUISE_THROTTLE. sim/params/vedc_buoy.parm has the simulator's values; they come from a guessed
+# hull and guessed thrust and must be tuned on the water, starting from ArduPilot's defaults.
+
+# Boat: drifts when stopped, Loiter holds position.
+FRAME_CLASS     2
+
+# ---- Outputs, from the pinout sheet ("Pix I/O PWM n" = MAIN OUT n) ----------------------------
+# Three steering pods, the front one turning opposite to the two rear ones.
+SERVO3_FUNCTION 26      # GroundSteering -> front pod
+SERVO3_REVERSED 1
+SERVO4_FUNCTION 26      # GroundSteering -> right rear pod
+SERVO5_FUNCTION 26      # GroundSteering -> left rear pod
+# Pod centres and swing: the values the STM32F4 firmware was trimmed to on the bench
+# (STM32F4/App/app_config.h: centres 1280 / 1460 / 1280 us, 250 us each side). CONFIRM on this
+# boat: with the stick centred the pods must point straight, and stick right must pull the bow right.
+SERVO3_TRIM     1280
+SERVO3_MIN      1030
+SERVO3_MAX      1530
+SERVO4_TRIM     1460
+SERVO4_MIN      1210
+SERVO4_MAX      1710
+SERVO5_TRIM     1280
+SERVO5_MIN      1030
+SERVO5_MAX      1530
+# Rear motors, skid steering. Their ESCs turn ONE WAY only: with the trim at the low end a demand
+# for reverse comes out as stop. (If the ESCs are ever set to bidirectional, put TRIM back to 1500
+# and use sim/params/avoidance.parm as it is.)
+SERVO6_FUNCTION 73      # ThrottleLeft  -> left rear motor
+SERVO6_MIN      1000
+SERVO6_TRIM     1000
+SERVO6_MAX      2000
+SERVO7_FUNCTION 74      # ThrottleRight -> right rear motor
+SERVO7_MIN      1000
+SERVO7_TRIM     1000
+SERVO7_MAX      2000
+# Front motor, bidirectional, 1500 us = stop: the only reverse and the only brake the boat has.
+SERVO8_FUNCTION 70      # Throttle
+SERVO8_MIN      1000
+SERVO8_TRIM     1500
+SERVO8_MAX      2000
+
+# ---- Raspberry Pi on a telemetry port -----------------------------------------------------------
+# CONFIRM the port: TELEM2 is SERIAL2. The baud must equal mavlink.baud in
+# Rasp_Pi/config/settings.yaml (921600).
+SERIAL2_PROTOCOL 2      # MAVLink 2
+SERIAL2_BAUD    921
+
+# ---- Obstacles from the Pi (Rasp_Pi/modules/obstacle_feed.py) ------------------------------------
+# With these set and the Pi not sending (LiDAR unplugged, Pi off), the autopilot refuses to arm:
+# "PreArm: PRX1: No Data". That is intended. To run without the LiDAR, set PRX1_TYPE 0 and
+# OA_TYPE 0 here and lidar.source: none in Rasp_Pi/config/boat_pixhawk.yaml.
+PRX1_TYPE       2       # MAVLink
+OA_TYPE         1       # BendyRuler
+OA_BR_LOOKAHEAD 5       # the LiDAR sees 8 m
+OA_MARGIN_MAX   1.0
+AVOID_ENABLE    1       # fence only: the "stop short" avoidance keeps a boat from turning away
+# Large heading errors: turn before going. With one-way rear motors this is not a turn on the
+# spot but a tight arc on one motor.
+WP_PIVOT_ANGLE  60
+WP_PIVOT_RATE   40
+
+# ---- Speed ------------------------------------------------------------------------------------
+# Slow on purpose. In the simulator, with rear motors that cannot reverse, the boat came within
+# 0.3-0.5 m of obstacles in a 12 m wide street at 0.6 m/s and touched them at 1.0 m/s
+# (sim/README.md, "ESC sau một chiều"). Until that is solved: open water only, and this speed.
+WP_SPEED        0.6
+WP_RADIUS       2.0
+LOIT_RADIUS     0.5     # station keeping next to a person
+
+# ---- Failsafes ----------------------------------------------------------------------------------
+# Radio lost or throttle failsafe: Hold (motors stop, the boat drifts). RTL would drive back
+# through whatever lies in between, with nobody able to take over.
+FS_THR_ENABLE   1
+FS_ACTION       2       # Hold
+FS_TIMEOUT      5
+# Ground station heartbeat lost: off until a telemetry link to the shore is part of the setup;
+# with it on and no ground station connected the boat would not leave Hold.
+FS_GCS_ENABLE   0
+# Battery: the INA226 is on the STM32F103, the autopilot does not see it. Fit a power module and
+# set BATT_MONITOR, BATT_LOW_VOLT and BATT_FS_LOW_ACT before trusting any battery failsafe.
