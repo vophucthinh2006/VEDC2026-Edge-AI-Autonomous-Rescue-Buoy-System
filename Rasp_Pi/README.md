@@ -13,7 +13,9 @@ python3 main.py --no-camera
 Model nhận diện là **model edge của đội** (`../YOLO_Movenet/weights`, chọn bằng `camera.model: yolo_movenet`),
 nối vào `modules/edge_model.py`:
 
-- **YOLOv8n int8**, đầu vào 320 × 320, hai lớp `person` / `boat`. Người có khung nằm phần lớn trong khung thuyền
+- **YOLOv8n** (`yolov8n_320_drq.tflite`: trọng số int8, tính toán float), đầu vào 320 × 320, hai lớp `person` / `boat`.
+  Xuất lại từ `yolov8n_320.onnx` bằng `YOLO_Movenet/tools/export_tflite.py`: bản int8 cũ (`yolov8n_int8.tflite`) gộp
+  toạ độ khung (0–320) và điểm số (0–1) vào chung một tensor int8 nên điểm số bị bão hoà ở 0.50–0.61. Người có khung nằm phần lớn trong khung thuyền
   (`camera.on_boat_overlap`) là người **trên thuyền**, không tính là nạn nhân.
 - **MoveNet Lightning** đọc tư thế từng người còn lại (tối đa `camera.max_poses`). Hông, gối, cổ chân có điểm trung
   bình dưới `camera.water_lower_body_score` thì người đó **dưới nước** (`IN WATER` trên viewer, khung xương đỏ).
