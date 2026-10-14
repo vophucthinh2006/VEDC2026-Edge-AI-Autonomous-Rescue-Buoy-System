@@ -22,6 +22,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
+from modules.edge_model import EDGES
 from modules.obstacle_feed import SECTOR_DEG, SECTORS, objects_from, sectors
 from modules.state_store import Snapshot, StateStore
 from modules.world_map import WorldMemory, draw_world
@@ -54,7 +55,8 @@ def _text(image: np.ndarray, text: str, origin: tuple[int, int], colour=WHITE, s
 
 def draw_camera(view: dict | None) -> np.ndarray:
     """view: frame (BGR) or None, box (ymin, xmin, ymax, xmax in 0..1) or None, confidence,
-    distance_m, pan_deg, scanning, age_s."""
+    distance_m, pan_deg, scanning, age_s; with the YOLO + MoveNet model also keypoints and in_water
+    of the person followed, boats and on_boat (boxes), model (its name)."""
     panel = np.full((CAMERA_H, CAMERA_W, 3), 40, np.uint8)
     if not view or view.get("frame") is None:
         _text(panel, "no camera frame" if view is None else view.get("note", "no camera frame"), (20, 40), GREY, 0.6)
@@ -68,12 +70,31 @@ def draw_camera(view: dict | None) -> np.ndarray:
             distance = view.get("distance_m")
             label = f"person {view.get('confidence', 0.0):.2f}" + (f"  {distance:.1f} m" if distance else "  range ?")
             _text(panel, label, (p1[0], max(18, p1[1] - 6)), GREEN, 0.55)
+            keypoints = view.get("keypoints") or ()
+            bone = RED if view.get("in_water") else YELLOW
+            for a, b in EDGES if keypoints else ():
+                if keypoints[a][2] > 0.25 and keypoints[b][2] > 0.25:
+                    cv2.line(panel, (int(keypoints[a][0] * CAMERA_W), int(keypoints[a][1] * CAMERA_H)),
+                             (int(keypoints[b][0] * CAMERA_W), int(keypoints[b][1] * CAMERA_H)), bone, 2, cv2.LINE_AA)
+            for x, y, score in keypoints:
+                if score > 0.25:
+                    cv2.circle(panel, (int(x * CAMERA_W), int(y * CAMERA_H)), 3, YELLOW, -1, cv2.LINE_AA)
+            if view.get("in_water") is not None:
+                _text(panel, "IN WATER" if view["in_water"] else "BODY VISIBLE", (p1[0], min(CAMERA_H - 40, p2[1] + 18)),
+                      RED if view["in_water"] else YELLOW, 0.5)
         if view.get("age_s", 0.0) < 1.0:
             for other_box, confidence, distance in view.get("others", []):      # people in view the camera is not following
                 ymin, xmin, ymax, xmax = other_box
                 p1 = (int(xmin * CAMERA_W), int(ymin * CAMERA_H))
                 cv2.rectangle(panel, p1, (int(xmax * CAMERA_W), int(ymax * CAMERA_H)), ORANGE, 1)
                 _text(panel, f"person {confidence:.2f}" + (f"  {distance:.1f} m" if distance else ""), (p1[0], max(18, p1[1] - 6)), ORANGE, 0.45)
+            for kind, boxes in (("boat", view.get("boats", [])), ("on boat", view.get("on_boat", []))):
+                for ymin, xmin, ymax, xmax in boxes:
+                    p1 = (int(xmin * CAMERA_W), int(ymin * CAMERA_H))
+                    cv2.rectangle(panel, p1, (int(xmax * CAMERA_W), int(ymax * CAMERA_H)), BLUE, 1)
+                    _text(panel, kind, (p1[0], max(18, p1[1] - 6)), BLUE, 0.45)
+        if view.get("model"):
+            _text(panel, view["model"], (10, 22), GREY, 0.45)
         cv2.line(panel, (CAMERA_W // 2, CAMERA_H // 2 - 8), (CAMERA_W // 2, CAMERA_H // 2 + 8), DIM, 1)
         cv2.line(panel, (0, CAMERA_H // 2), (CAMERA_W, CAMERA_H // 2), DIM, 1)       # horizon of a level boat
     if view:

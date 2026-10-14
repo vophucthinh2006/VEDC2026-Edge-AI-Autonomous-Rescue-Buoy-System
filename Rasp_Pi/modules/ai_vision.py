@@ -1,4 +1,7 @@
-"""TFLite person detection and safe camera-to-LiDAR target lock."""
+"""TFLite person detection and safe camera-to-LiDAR target lock.
+
+camera.model picks the detector: yolo_movenet (the team's YOLOv8n + MoveNet, modules/edge_model.py)
+or ssd (the earlier COCO SSD MobileNet v1, models/detect.tflite)."""
 from __future__ import annotations
 
 import logging
@@ -22,6 +25,8 @@ class PersonDetection:
     box_height_frac: float   # bigger box = nearer person
     cropped: bool            # box touches the frame top or bottom: height understates the person
     box: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)  # ymin, xmin, ymax, xmax, 0..1; for drawing
+    in_water: bool | None = None   # yolo_movenet: lower body hidden (pose); None without a pose
+    keypoints: tuple[tuple[float, float, float], ...] = ()   # yolo_movenet: x, y (0..1 of the frame), score
 
 
 class VisionWorker(threading.Thread):
@@ -49,14 +54,33 @@ class VisionWorker(threading.Thread):
         self._view_result: tuple[PersonDetection | None, float, float | None, float] = (None, 0.0, None, 0.0)
         self._view_others: list[tuple[PersonDetection, float | None]] = []
         self._followed_bearing: float | None = None      # from the bow, of the person followed in the last frame
+        self._model = None                                # edge_model.EdgeModel for camera.model yolo_movenet
+        self._view_ignored: list[tuple[float, float, float, float]] = []   # boxes of people on a boat
+        self._view_boats: list[tuple[float, float, float, float]] = []
 
     @staticmethod
     def _dequantize(value: np.ndarray, detail: dict) -> np.ndarray:
         scale, zero = detail.get("quantization", (0.0, 0))
         return (value.astype(np.float32) - zero) * scale if scale else value.astype(np.float32)
 
+    def _person(self, box: tuple[float, float, float, float], confidence: float, in_water: bool | None = None,
+                keypoints: tuple = ()) -> PersonDetection:
+        ymin, xmin, ymax, xmax = box
+        bearing = ((xmin + xmax) / 2.0 - 0.5) * float(self.c["horizontal_fov_deg"])
+        return PersonDetection(bearing, confidence, max(0.0, ymax - ymin), ymin < 0.02 or ymax > 0.98, box, in_water, keypoints)
+
+    def _detect_edge(self, frame: np.ndarray) -> list[PersonDetection]:
+        """YOLOv8n + MoveNet. People on a boat are left out: they are not the ones to rescue."""
+        people, boats = self._model.detect(frame)
+        self._view_boats = [b.box for b in boats]
+        self._view_ignored = [p.box for p in people if p.on_boat]
+        found = [self._person(p.box, p.confidence, p.in_water, p.keypoints) for p in people if not p.on_boat]
+        return sorted(found, key=lambda d: -d.box_height_frac)
+
     def _detect(self, interpreter: object, details: list[dict], frame: np.ndarray) -> list[PersonDetection]:
         """Every person in the frame over the confidence threshold, tallest box (nearest) first."""
+        if self._model is not None:
+            return self._detect_edge(frame)
         input_detail = details[0]
         height, width = int(input_detail["shape"][1]), int(input_detail["shape"][2])
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -94,10 +118,7 @@ class VisionWorker(threading.Thread):
             if score < self.c["confidence_threshold"] or index >= len(classes) or int(round(float(classes[index]))) != 0:
                 continue
             ymin, xmin, ymax, xmax = (float(v) for v in boxes[index][:4])
-            center_x = (xmin + xmax) / 2.0
-            bearing = (center_x - 0.5) * float(self.c["horizontal_fov_deg"])
-            height = max(0.0, ymax - ymin)
-            found.append(PersonDetection(bearing, float(score), height, ymin < 0.02 or ymax > 0.98, (ymin, xmin, ymax, xmax)))
+            found.append(self._person((ymin, xmin, ymax, xmax), float(score)))
         return sorted(found, key=lambda d: -d.box_height_frac)
 
     def _focus_bearing(self) -> float | None:
@@ -156,7 +177,10 @@ class VisionWorker(threading.Thread):
         detection, pan_deg, distance_m, at = self._view_result
         return {"frame": self._view_frame, "box": detection.box if detection else None,
                 "confidence": detection.confidence if detection else 0.0, "distance_m": distance_m,
+                "in_water": detection.in_water if detection else None, "keypoints": detection.keypoints if detection else (),
                 "others": [(d.box, d.confidence, range_m) for d, range_m in self._view_others],
+                "boats": self._view_boats, "on_boat": self._view_ignored,
+                "model": "YOLOv8n + MoveNet" if self._model is not None else "SSD MobileNet",
                 "pan_deg": self._pan if detection is None else pan_deg, "scanning": self._scanning, "age_s": monotonic() - at}
 
     def _searching(self) -> bool:
@@ -179,9 +203,15 @@ class VisionWorker(threading.Thread):
             except ImportError:
                 self.log.error("neither tflite-runtime nor ai-edge-litert is installed; camera worker disabled")
                 return
-        interpreter = Interpreter(model_path=self.c["model_path"])
-        interpreter.allocate_tensors()
-        details = interpreter.get_input_details() + interpreter.get_output_details()
+        interpreter, details = None, []
+        if self.c.get("model", "ssd") == "yolo_movenet":
+            from modules.edge_model import EdgeModel
+            self._model = EdgeModel(Interpreter, self.c)
+            self.log.info("detector: YOLOv8n %d px + %s", self._model.size, "MoveNet" if self.c.get("pose_model_path") else "no pose")
+        else:
+            interpreter = Interpreter(model_path=self.c["model_path"])
+            interpreter.allocate_tensors()
+            details = interpreter.get_input_details() + interpreter.get_output_details()
         if self.c.get("source", "device") == "gazebo":
             from modules.gazebo_io import GazeboCapture   # simulator only: needs the Gazebo bindings
             cap = GazeboCapture(self.c["gazebo_topic"])
