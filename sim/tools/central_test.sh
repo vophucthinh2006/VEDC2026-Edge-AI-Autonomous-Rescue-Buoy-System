@@ -27,7 +27,14 @@ export GZ_SIM_RESOURCE_PATH="$T/models:$GZ_SIM_RESOURCE_PATH"
 cd "$T"
 setsid gz sim -s -r -v 1 vedc_central.sdf > "$T/gz.log" 2>&1 < /dev/null &
 GZ=$!
-sleep 15
+# SITL started before the world has loaded panics in BendyRuler (see run_boat.sh) and the boat sits
+# still in AUTO. Wait for the LiDAR topic rather than a fixed time: on a CPU-only machine this scene
+# takes longer than 15 s.
+for _ in $(seq 120); do
+    gz topic -l 2>/dev/null | grep -q "vedc_buoy/lidar" && break
+    sleep 1
+done
+sleep 5
 cd "$T/run"
 setsid sim_vehicle.py -v Rover -f rover-skid --model JSON -I1 \
     --add-param-file="$REPO/sim/params/vedc_buoy.parm" \
