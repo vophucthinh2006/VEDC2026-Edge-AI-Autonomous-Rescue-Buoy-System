@@ -166,9 +166,14 @@ class VisionWorker(threading.Thread):
         # fused: the LiDAR ranges only people standing on something, whose wall it hits. A swimmer is
         # below the scan plane: the return at their bearing is whatever stands behind them, and with
         # the camera looking sideways down a flooded street that is always a house.
+        height_m = float(self.c.get("standing_height_m", self.c["person_height_m"])) if elevated else self.c["person_height_m"]
+        box_range = estimate_distance_bbox(detection.box_height_frac, self.c["vertical_fov_deg"], height_m)
         if source == "lidar" or (source == "fused" and elevated):
             obstacle = associate_person(bearing_body_deg, snap.obstacles, self.c["lidar_association_half_angle_deg"], self.c["min_target_distance_m"], self.c["max_target_distance_m"])
-            if obstacle:
+            # fused: the return must be the wall under the person, at about the range their box gives.
+            # Bamboo standing 2 m in front of somebody on a roof 8 m away put them next to the boat.
+            low, high = self.c.get("lidar_box_agreement", (0.6, 1.6))
+            if obstacle and (source == "lidar" or detection.cropped or low * box_range <= obstacle.distance_m <= high * box_range):
                 return obstacle.distance_m
             if source == "lidar":
                 return None   # never navigate from a 2-D box alone
@@ -179,9 +184,7 @@ class VisionWorker(threading.Thread):
             return self.standoff_m if followed and snap.focus is not None else None
         # person_height_m is what a box covers of somebody in the water. Somebody standing clear of
         # it shows their whole height; with the swimmer's figure their range would read 2.5 times too short.
-        height_m = float(self.c.get("standing_height_m", self.c["person_height_m"])) if elevated else self.c["person_height_m"]
-        distance = estimate_distance_bbox(detection.box_height_frac, self.c["vertical_fov_deg"], height_m)
-        return distance if distance <= self.c["max_target_distance_m"] else None
+        return box_range if box_range <= self.c["max_target_distance_m"] else None
 
     def _recenter(self) -> None:
         step = float(self.c["recenter_step_deg"])
