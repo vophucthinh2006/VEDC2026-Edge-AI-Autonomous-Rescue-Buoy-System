@@ -66,7 +66,7 @@ wsl -d Ubuntu-24.04 -- bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/
 
 `--pi` chạy thêm `Rasp_Pi/rescue_main.py` (đúng code sẽ chạy trên Pi thật) và nạp `params/avoidance.parm`:
 
-- ảnh camera Gazebo đi vào model TFLite của đội (`Rasp_Pi/models/detect.tflite`);
+- ảnh camera Gazebo đi vào model edge của đội: YOLOv8n + MoveNet (`YOLO_Movenet/weights`, `Rasp_Pi/modules/edge_model.py`);
 - Pi nối vào **TELEM2 giả lập** của ArduPilot (TCP 5763), như trên phao thật;
 - LiDAR Gazebo đi vào Pi, Pi gửi cho ArduPilot (`OBSTACLE_DISTANCE`, 72 ô 5°); BendyRuler bẻ lộ trình
   vòng qua vật cản rồi quay lại tuyến;

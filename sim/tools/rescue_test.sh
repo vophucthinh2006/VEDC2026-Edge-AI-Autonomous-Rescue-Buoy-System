@@ -42,8 +42,9 @@ if [ -n "$HOLD_MODE" ]; then
     HOLD_OVERLAY=(--overlay "$T/hold_mode.yaml")
 fi
 # Instance 1 shifts SITL's ports by 10: its SERIAL2 (TELEM2) is TCP 5773.
+# PI_VIEWER=8091 also serves what the Pi sees on that port (sim/tools/capture_view.py records it).
 setsid python3 -u rescue_main.py --overlay config/sim.yaml "${HOLD_OVERLAY[@]}" --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773 \
-    > "$T/pi.log" 2>&1 < /dev/null &
+    ${PI_VIEWER:+--viewer "$PI_VIEWER"} > "$T/pi.log" 2>&1 < /dev/null &
 PI=$!
 cleanup() {
     kill -- -$PI -$SITL -$GZ 2>/dev/null
