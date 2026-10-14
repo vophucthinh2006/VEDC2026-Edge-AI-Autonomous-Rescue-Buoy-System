@@ -161,7 +161,10 @@ class VisionWorker(threading.Thread):
             if source == "lidar":
                 return None   # never navigate from a 2-D box alone
         if detection.cropped:
-            return self.standoff_m   # too close to size up: hold at the stand-off instead of guessing
+            # Too close to size up. The person the boat is going to: hold at the stand-off instead of
+            # guessing. Anybody else, often somebody on a roof whose head is out of the frame: no
+            # range. Placed at the stand-off they became a phantom right at the boat, "reached" at once.
+            return self.standoff_m if followed and snap.focus is not None else None
         # person_height_m is what a box covers of somebody in the water. Somebody standing clear of
         # it shows their whole height; with the swimmer's figure their range would read 2.5 times too short.
         height_m = float(self.c.get("standing_height_m", self.c["person_height_m"])) if elevated else self.c["person_height_m"]
