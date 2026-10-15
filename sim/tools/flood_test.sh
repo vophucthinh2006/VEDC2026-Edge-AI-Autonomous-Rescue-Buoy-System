@@ -39,7 +39,7 @@ cd "$REPO/Rasp_Pi"
 NO_SCAN=()
 [ "$2" = noscan ] && NO_SCAN=(--no-scan)       # camera fixed ahead, for comparison
 setsid python3 -u rescue_main.py --overlay config/sim.yaml --overlay config/sim_flood.yaml \
-    --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773 "${NO_SCAN[@]}" > "$T/pi.log" 2>&1 < /dev/null &
+    --detector "$DETECTOR" --mavlink tcp:127.0.0.1:5773 "${NO_SCAN[@]}" ${PI_VIEWER:+--viewer "$PI_VIEWER"} > "$T/pi.log" 2>&1 < /dev/null &
 PI=$!
 cleanup() {
     kill -- -$PI -$SITL -$GZ 2>/dev/null

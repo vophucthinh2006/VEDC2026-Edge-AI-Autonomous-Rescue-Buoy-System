@@ -12,7 +12,7 @@ export GZ_IP=127.0.0.1
 
 # WSLg renders on the CPU (llvmpipe) by default, far too slow for waves.
 # d3d12 hands OpenGL to the Windows GPU driver.
-export GALLIUM_DRIVER=d3d12
+export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"   # llvmpipe on a machine without a GPU
 export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
 
 # ArduPilot SITL tools (sim_vehicle.py, MAVProxy) from install-prereqs.
