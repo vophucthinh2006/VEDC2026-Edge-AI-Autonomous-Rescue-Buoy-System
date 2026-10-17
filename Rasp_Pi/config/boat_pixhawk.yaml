@@ -2,9 +2,24 @@
 # run.sh pixhawk adds this file by itself; the simulator uses sim.yaml instead.
 lidar:
   source: serial              # the LDS-008 on serial.lidar_port
+serial:
+  # The LDS-008 on its own USB-to-TTL adapter (socket usb-0:1.3), same reasoning as helper.port.
+  # Not decoded yet on the bench: the motor does not spin on startlds$ and no packet passes its
+  # checksum (docs/porting-checklist.md, step 4). Until it does, the Pi sends no obstacles.
+  lidar_port: /dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-port0
 helper:
-  port: /dev/ttyUSB0          # the STM32F103 on its USB-to-TTL adapter; it drives the camera servo
+  # The STM32F103 on its USB-to-TTL adapter; it drives the camera servo. By USB socket, not
+  # /dev/ttyUSBn: the boat's CP2102 adapters have no serial number and ttyUSBn swaps between boots.
+  # Keep the adapter in the same socket (usb-0:1.1); after re-plugging, tools/port_probe.py names the new one.
+  port: /dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-port0
+mavlink:
+  # TELEM2 on its own USB-to-TTL adapter (socket usb-0:1.4), same reasoning as helper.port.
+  # The baud stays settings.yaml's 921600, which pixhawk/params/boat.parm sets (SERIAL2_BAUD 921);
+  # an autopilot still at the default 115 is only heard with mavlink.baud: 115200.
+  url: /dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0
 camera:
+  # The Suyin USB camera by its serial number: /dev/video0, 1, ... change with the plugging order.
+  device: /dev/v4l/by-id/usb-Suyin_HD_Camera_200910120001-video-index0
   # Only without the helper board (helper.port: none): camera servo on one of the autopilot's
   # outputs instead, driven with DO_SET_SERVO. 0: no servo, the camera stays ahead.
   pan_output: 0
