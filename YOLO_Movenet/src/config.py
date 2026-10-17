@@ -5,11 +5,11 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEIGHTS_DIR = os.path.join(BASE_DIR, "weights")
 
 # Đường dẫn mô hình
-YOLO_MODEL_PATH = os.path.join(WEIGHTS_DIR, "yolov8n_int8.tflite")
+YOLO_MODEL_PATH = os.path.join(WEIGHTS_DIR, "yolov8n_640_int8.tflite")
 MOVENET_MODEL_PATH = os.path.join(WEIGHTS_DIR, "movenet_lighting_int8.tflite")
 
 # ==================== KÍCH THƯỚC ĐẦU VÀO (INPUT SIZES) ====================
-YOLO_INPUT_SIZE = (320, 320)
+YOLO_INPUT_SIZE = (640, 640)
 MOVENET_INPUT_SIZE = (192, 192)
 
 # ==================== NGƯỠNG LỌC (THRESHOLDS) ====================
