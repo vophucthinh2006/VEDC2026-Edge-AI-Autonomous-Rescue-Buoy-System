@@ -16,9 +16,23 @@ boat pixhawk build
 copy boat.local.example.cmd boat.local.cmd     # rồi sửa PI_HOST, PI_DIR
 ```
 
+### Chuẩn bị Raspberry Pi (một lần)
+
+Pi 4, Raspberry Pi OS Bookworm 64-bit. `boat pixhawk deploy` chép `Rasp_Pi/` và các model `.tflite` của
+`YOLO_Movenet/weights` sang thư mục cạnh nó (`camera.model_path` trỏ tới `../YOLO_Movenet/weights`).
+
+| Việc | Lệnh / giá trị | Ghi chú |
+|---|---|---|
+| UART | thêm vào `[all]` của `/boot/firmware/config.txt`: `enable_uart=1`, `dtoverlay=disable-bt`, `dtoverlay=uart3`; khởi động lại | `disable-bt` đưa `/dev/serial0` về PL011 (`ttyAMA0`), cần cho TELEM2 921600 baud; `uart3` tạo `/dev/ttyAMA3` cho LiDAR. Tắt serial console |
+| Thư viện | `cd vedc/Rasp_Pi && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` | `requirements.txt` ghim `numpy<2`: `tflite-runtime` 2.14 gặp numpy 2 báo `_ARRAY_API not found` |
+| Nguồn | `vcgencmd get_throttled` phải ra `0x0` | `0x50005`: đang thiếu áp. Camera USB rớt khỏi bus (`error -71`), CPU bị hạ xung. Buck 5 V **≥ 5 A**, chỉnh 5.15–5.2 V đo tại header Pi, dây ≥ 0.5 mm²; servo không chung buck với Pi. Đồng hồ vạn năng không bắt được sụt áp ngắn: tin `get_throttled` |
+
 ## 1. Bo phụ STM32F103, chưa nối gì ngoài ST-LINK
 
-Cấp nguồn bằng 3.3 V của ST-LINK (4 dây), **không** cắm đồng thời 5 V ngoài.
+Cấp nguồn bằng 3.3 V của ST-LINK (4 dây), **không** cắm đồng thời 5 V ngoài. Bo còn nguồn khác (5 V,
+mạch USB-to-TTL của Pi, ngoại vi) thì OpenOCD nhận chip nhưng nạp hỏng giữa chừng: `Unable to reset
+target`, `Failed to write memory`, `STLINK status code 0x18`, địa chỉ đọc sai bit (`0x80062010` thay vì
+`0x40022010`). Rút hết nguồn khác rồi nạp lại; lỗi này đã xoá flash nên bo trống firmware tới khi nạp xong.
 
 ```
 boat pixhawk flash
@@ -51,10 +65,28 @@ Sau mỗi món, bật nguồn lại và xem `helper_monitor.py`.
 
 Mạch USB-to-TTL 3.3 V: TXD → PA10, RXD → PA9, GND chung. Trên Pi phải có `/dev/ttyUSB0`.
 
+Bo phụ gửi `$AUX` mỗi 0.5 giây kể cả khi Pi chưa nói gì, nên chỉ cần nó chạy là biết dây đúng chưa:
+
 ```
 boat pixhawk deploy
+ssh <pi> "cd vedc/Rasp_Pi && .venv/bin/python tools/port_probe.py"
 boat pixhawk run --no-scan
 ```
+
+`tools/port_probe.py` dò mọi cổng nối tiếp của Pi (`/dev/serial/by-path/*`, `/dev/serial0`,
+`/dev/ttyAMA3`), gọi tên thứ trả lời (`helper`, `mavlink`, `lds008`, `ld14`) và in sẵn các dòng cho
+`config/boat_pixhawk.yaml`. Dừng `rescue_main.py` trước khi chạy.
+
+| `port_probe.py` báo | Nghĩa là |
+|---|---|
+| `echo: TX and RX of this adapter are joined` | TXD và RXD của mạch đó chạm nhau (cùng hàng breadboard, cùng chân) |
+| `nothing recognised` ở mọi baud | thiết bị chưa có nguồn, TX/RX không bắt chéo (TXD của mạch → RX của thiết bị), hoặc thiếu GND chung |
+
+**Nối cả ba qua USB-to-TTL** (bo phụ, LiDAR, Pixhawk TELEM2), thay cho UART trên GPIO của Pi: được, đặt
+`helper.port`, `serial.lidar_port` và `mavlink.url` theo `port_probe.py`. Dùng tên
+`/dev/serial/by-path/...`, không dùng `/dev/ttyUSBn`: các mạch CP2102 giống nhau, không có số serial,
+nên `ttyUSBn` đổi chỗ sau mỗi lần khởi động; `by-path` đi theo lỗ USB, đừng cắm đổi lỗ. Pi 4 cấp chung
+khoảng 1.2 A cho cả bốn lỗ USB: ba mạch và camera cùng lúc dễ làm camera rớt khi nguồn yếu.
 
 Chưa có Pixhawk nên chương trình dừng ở `waiting for the autopilot`; vẫn đủ để thử đường này:
 
@@ -62,6 +94,7 @@ Chưa có Pixhawk nên chương trình dừng ở `waiting for the autopilot`; v
 |---|---|
 | Pi log: `helper board UART open: /dev/ttyUSB0` | `helper board unavailable`: sai cổng, sửa `helper.port` trong `Rasp_Pi/config/boat_pixhawk.yaml` |
 | `helper_monitor.py`: vẫn `Pi SILENT` (Pi chỉ gửi khi đã thấy autopilot) | `bad` tăng: đảo TXD/RXD hoặc sai baud |
+| `port_probe.py`: `helper` ở cổng của bo phụ | LED nháy 5 lần/giây mà không thấy: dây PA9 → RXD hoặc GND |
 
 ## 4. LiDAR LDS-008 vào Pi ⚠
 
