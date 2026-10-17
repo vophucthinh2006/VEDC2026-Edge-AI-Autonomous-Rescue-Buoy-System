@@ -58,6 +58,11 @@ echo [DEPLOY] Rasp_Pi -^> %PI_HOST%:%PI_DIR%  (boat: %BOAT%)
 rem tar over ssh: one connection, and the Pi's .venv, logs and caches stay out of it.
 tar -C "%ROOT%Rasp_Pi" --exclude=.venv --exclude=__pycache__ --exclude=.pytest_cache --exclude=logs --exclude=lidar_capture.bin -cf - . | ssh %PI_HOST% "mkdir -p %PI_DIR% && tar -C %PI_DIR% -xf - && echo %BOAT% > %PI_DIR%/.boat_profile && chmod +x %PI_DIR%/run.sh"
 if errorlevel 1 goto :fail
+rem The detector's models: camera.model_path points at ../YOLO_Movenet/weights, next to PI_DIR.
+rem Only the TFLite files; the .onnx and .pt are for the PC.
+echo [DEPLOY] YOLO_Movenet\weights\*.tflite -^> %PI_HOST%:%PI_DIR%/../YOLO_Movenet/weights
+tar -C "%ROOT%YOLO_Movenet" --exclude=*.onnx --exclude=*.pt -cf - weights | ssh %PI_HOST% "mkdir -p %PI_DIR%/../YOLO_Movenet && tar -C %PI_DIR%/../YOLO_Movenet -xf -"
+if errorlevel 1 goto :fail
 echo [DEPLOY] OK: on the Pi, ./run.sh now starts the %BOAT% boat
 exit /b 0
 
