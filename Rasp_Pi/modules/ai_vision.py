@@ -234,7 +234,9 @@ class VisionWorker(threading.Thread):
             from modules.gazebo_io import GazeboCapture   # simulator only: needs the Gazebo bindings
             cap = GazeboCapture(self.c["gazebo_topic"])
         else:
-            cap = cv2.VideoCapture(int(self.c["device"]))
+            device = self.c["device"]
+            # An index (0) or a path (/dev/v4l/by-id/...): the index follows the plugging order.
+            cap = cv2.VideoCapture(device, cv2.CAP_V4L2) if isinstance(device, str) else cv2.VideoCapture(int(device))
         if not cap.isOpened():
             self.log.error("cannot open camera %s", self.c.get("gazebo_topic") if self.c.get("source") == "gazebo" else self.c["device"])
             return
