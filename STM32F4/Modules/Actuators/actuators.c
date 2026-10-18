@@ -1,6 +1,5 @@
 #include "actuators.h"
 #include "app_config.h"
-#include "dshot.h"
 #include "tim.h"
 #include <math.h>
 
@@ -14,11 +13,11 @@ static const uint32_t servo_channel[SERVO_COUNT] = {
 const uint16_t actuator_servo_center[SERVO_COUNT] = {
     SERVO_CENTER_US, SERVO_CENTER_FRONT_US, SERVO_CENTER_RIGHT_US, SERVO_CENTER_LEFT_US,
 };
-/* Rear ESCs are a CCR slot of the TIM2 DShot burst (0 = CCR1). */
-static const uint32_t esc_dshot_ccr[ESC_COUNT] = {
-    0xFFU,  /* PA1 front motor: PWM on TIM5_CH2 */
-    3U,     /* PA3 right motor, TIM2_CH4 */
-    0U,     /* PA5 left motor, TIM2_CH1 */
+/* Order matches esc_id_t. TIM2 counts microseconds, like TIM3. */
+static const uint32_t esc_channel[ESC_COUNT] = {
+    TIM_CHANNEL_2,  /* PA1 front motor */
+    TIM_CHANNEL_4,  /* PA3 right motor */
+    TIM_CHANNEL_1,  /* PA5 left motor */
 };
 static const uint16_t esc_stop[ESC_COUNT] = { ESC_FRONT_NEUTRAL_US, ESC_STOP_US, ESC_STOP_US };
 
@@ -35,23 +34,15 @@ static uint32_t clamp_u32(uint32_t value, uint32_t low, uint32_t high) { return 
 static float clamp_f(float value, float low, float high) { return value < low ? low : (value > high ? high : value); }
 static int8_t sign(float value) { return value > 0.0f ? 1 : (value < 0.0f ? -1 : 0); }
 
-/* 1000 us or less is DShot stop, 1000..2000 us spans DShot 48..2047. */
-static uint16_t dshot_from_us(uint32_t us) {
-    if (us <= ESC_STOP_US) return DSHOT_STOP;
-    if (us > ESC_MAX_US) us = ESC_MAX_US;
-    return (uint16_t)(DSHOT_MIN + (us - ESC_STOP_US) * (DSHOT_MAX - DSHOT_MIN) / (ESC_MAX_US - ESC_STOP_US));
-}
-
 void Actuators_WriteServo(servo_id_t id, uint32_t us) {
-    us = clamp_u32(us, SERVO_MIN_US, SERVO_MAX_US);
+    us = id == SERVO_CAMERA ? clamp_u32(us, CAM_SERVO_MIN_US, CAM_SERVO_MAX_US) : clamp_u32(us, SERVO_MIN_US, SERVO_MAX_US);
     __HAL_TIM_SET_COMPARE(&htim3, servo_channel[id], us);
     actuator_debug.servo_us[id] = (uint16_t)us;
 }
 
 void Actuators_WriteEsc(esc_id_t id, uint32_t us) {
     if (!escs_started) return;
-    if (esc_dshot_ccr[id] <= 3U) DShot_Set(esc_dshot_ccr[id], dshot_from_us(us));
-    else __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, clamp_u32(us, ESC_STOP_US, ESC_MAX_US));
+    __HAL_TIM_SET_COMPARE(&htim2, esc_channel[id], clamp_u32(us, ESC_STOP_US, ESC_MAX_US));
 }
 
 void Actuators_Init(void) {
@@ -64,12 +55,11 @@ void Actuators_Init(void) {
 
 void Actuators_StartEscs(void) {
     if (escs_started) return;
-    DShot_Init(&htim2);
     escs_started = true;
-    for (int i = 0; i < ESC_COUNT; i++) Actuators_WriteEsc((esc_id_t)i, esc_stop[i]);
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
-    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);
+    for (int i = 0; i < ESC_COUNT; i++) {
+        Actuators_WriteEsc((esc_id_t)i, esc_stop[i]);
+        HAL_TIM_PWM_Start(&htim2, esc_channel[i]);
+    }
 }
 
 bool Actuators_EscsStarted(void) { return escs_started; }
@@ -101,11 +91,18 @@ static void write_rudder(servo_id_t id, float steer, int dir, float gain) {
     Actuators_WriteServo(id, (uint32_t)((float)actuator_servo_center[id] + offset));
 }
 
+/* Rear demand 0..1 to a pulse: 0 stops, anything above starts where the ESC turns (ESC_REAR_START_US)
+   and full demand stays below where it loses sync (ESC_REAR_MAX_US). */
+static uint16_t rear_us(float out) {
+    if (out <= 0.0f) return (uint16_t)ESC_STOP_US;
+    return (uint16_t)((float)ESC_REAR_START_US + clamp_f(out, 0.0f, 1.0f) * (float)(ESC_REAR_MAX_US - ESC_REAR_START_US));
+}
+
 static void write_escs(void) {
     uint16_t us[ESC_COUNT];
-    us[ESC_FRONT] = (uint16_t)((float)ESC_FRONT_NEUTRAL_US + front_out * (float)(ESC_MAX_US - ESC_FRONT_NEUTRAL_US));
-    us[ESC_LEFT] = (uint16_t)((float)ESC_STOP_US + rear_out[0] * (float)(ESC_MAX_US - ESC_STOP_US));
-    us[ESC_RIGHT] = (uint16_t)((float)ESC_STOP_US + rear_out[1] * (float)(ESC_MAX_US - ESC_STOP_US));
+    us[ESC_FRONT] = (uint16_t)((float)ESC_FRONT_NEUTRAL_US + (float)ESC_FRONT_DIR * front_out * (float)(ESC_MAX_US - ESC_FRONT_NEUTRAL_US));
+    us[ESC_LEFT] = rear_us(rear_out[0]);
+    us[ESC_RIGHT] = rear_us(rear_out[1]);
     for (int i = 0; i < ESC_COUNT; i++) {
         actuator_debug.esc_us[i] = us[i];
 #if ACTUATORS_ENABLED

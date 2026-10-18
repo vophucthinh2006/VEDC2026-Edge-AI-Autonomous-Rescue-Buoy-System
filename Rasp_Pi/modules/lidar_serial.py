@@ -22,6 +22,26 @@ MODELS = ("ld14", "lds008")
 REOPEN_S = 3.0
 
 
+def in_sector(angle_deg: float, from_deg: float, to_deg: float) -> bool:
+    """From from_deg clockwise to to_deg, both included; a sector may run across 0 (350 to 10)."""
+    angle, start, end = angle_deg % 360.0, from_deg % 360.0, to_deg % 360.0
+    return start <= angle <= end if start <= end else (angle >= start or angle <= end)
+
+
+def drop_self_returns(scan: tuple[LidarPoint, ...], min_range_m: float, mask: list) -> tuple[LidarPoint, ...]:
+    """The boat's own mast, cables and fittings, in the sensor's own angles (so a later yaw
+    calibration does not move them): any return nearer than min_range_m, and in each mask sector
+    [from_deg, to_deg, max_m] any return no further than max_m. A dropped return becomes "nothing
+    seen" (distance 0, intensity 0), like the decoders report one, so the scan keeps its rays."""
+    def own(point: LidarPoint) -> bool:
+        if point.distance_m <= 0.0:
+            return False
+        if point.distance_m < min_range_m:
+            return True
+        return any(in_sector(point.angle_deg, float(a), float(b)) and point.distance_m <= float(m) for a, b, m in mask)
+    return tuple(LidarPoint(p.angle_deg, 0.0, 0) if own(p) else p for p in scan)
+
+
 def to_boat_frame(scan: tuple[LidarPoint, ...], yaw_offset_deg: float, anticlockwise: bool) -> tuple[LidarPoint, ...]:
     """The sensor's own angle may run anticlockwise seen from above, and its zero need not point
     at the bow; the boat's bearings run clockwise from the bow."""
@@ -41,6 +61,7 @@ class SerialLidar(threading.Thread):
         decoder, assembler = (LDS008Decoder() if self.model == "lds008" else LD14Decoder()), ScanAssembler()
         offset = float(self.vehicle["lidar_yaw_offset_deg"])
         anticlockwise = bool(self.vehicle.get("lidar_anticlockwise", False))
+        min_range_m, mask = float(self.vehicle.get("lidar_min_range_m", 0.0)), list(self.vehicle.get("lidar_mask") or [])
         told = False
         while not self.stop.is_set():
             try:
@@ -52,6 +73,7 @@ class SerialLidar(threading.Thread):
                     while not self.stop.is_set():
                         scan = assembler.add(decoder.feed(ser.read(256)))
                         if scan is not None:
+                            scan = drop_self_returns(scan, min_range_m, mask)
                             self.state.update_obstacles(self.to_obstacles(to_boat_frame(scan, offset, anticlockwise)))
             except (serial.SerialException, OSError) as exc:
                 # required: the program cannot go on without it. Otherwise the scans simply stop,

@@ -1,6 +1,7 @@
 #include "control.h"
 #include "app_config.h"
 #include "buzzer.h"
+#include "camera_pan.h"
 #include "manual.h"
 #include <math.h>
 #include <string.h>
@@ -22,6 +23,7 @@ static bool fresh(uint32_t now_ms, uint32_t stamp_ms, uint32_t timeout_ms) {
 void Control_Init(controller_t *control) {
     memset(control, 0, sizeof(*control));
     HeadingController_Init(&control->heading);
+    ConfirmButton_Init(&control->confirm, HAL_GetTick());
     control->operating_mode = 'S';
 }
 
@@ -103,11 +105,22 @@ static void publish_debug(const controller_t *control, const ibus_state_t *rc, c
     heading_debug.imu_ok = imu_fresh ? 1U : 0U;
 }
 
-/* Follows the Pi's CAM angle. Independent of arming: the camera only looks, and Actuators_Stop leaves it alone. */
-void Camera_Tick(const pi_command_t *pi) {
-    if (pi->last_cam_ms == 0U) return;
-    float pan = clamp(pi->cam_pan_deg, -CAM_PAN_LIMIT_DEG, CAM_PAN_LIMIT_DEG);
-    float us = (float)actuator_servo_center[SERVO_CAMERA] + (float)CAM_PAN_DIR * CAM_PAN_US_PER_DEG * pan;
+/* Follows the Pi's CAM angle, gliding there (App/camera_pan.c). Independent of arming: the camera
+   only looks, and Actuators_Stop leaves it alone. */
+void Camera_Tick(const pi_command_t *pi, uint32_t now_ms) {
+    static camera_pan_t pan;
+    static uint32_t last_ms;
+    if (pi->last_cam_ms == 0U) {
+        CameraPan_Init(&pan);
+        last_ms = now_ms;
+        return;
+    }
+    float dt = (float)(uint32_t)(now_ms - last_ms) / 1000.0f;
+    last_ms = now_ms;
+    if (dt > 0.1f) dt = 0.1f;   /* a stalled loop: no leap */
+    float target = clamp(pi->cam_pan_deg, -CAM_PAN_LIMIT_DEG, CAM_PAN_LIMIT_DEG);
+    float angle = CameraPan_Step(&pan, target, dt);
+    float us = (float)actuator_servo_center[SERVO_CAMERA] + (float)CAM_PAN_DIR * CAM_PAN_US_PER_DEG * angle;
     Actuators_WriteServo(SERVO_CAMERA, (uint32_t)us);
 }
 
@@ -118,10 +131,9 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
        in imu are still the last good ones. */
     bool imu_fresh = control->last_imu_ms != 0U && fresh(now_ms, control->last_imu_ms, IMU_TIMEOUT_MS);
     if (!imu->valid && heading_debug.imu_fail < 0xFFFFU) heading_debug.imu_fail++;
-    /* Contact to GND against an internal pull-up. Normally closed: released
-       reads low, pressed and a cut wire read high. Normally open reads the
-       other way round and cannot tell released from a cut wire. */
-    control->estop = HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == (ESTOP_CONTACT_NC ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    /* PE4 is the victim's confirm button now, not an E-stop: it is counted for the Pi and stops nothing. */
+    control->estop = false;
+    ConfirmButton_Update(&control->confirm, HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == GPIO_PIN_RESET, now_ms);
     control->overturned = imu_fresh && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
     control->auto_requested = auto_requested;

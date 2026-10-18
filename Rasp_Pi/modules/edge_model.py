@@ -2,8 +2,9 @@
 of each person who is not on a boat.
 
 Two TFLite models, both from YOLO_Movenet/weights:
-  yolov8n_int8.tflite        input 1x3x320x320 float RGB 0..1, output 1x6x2100: centre x, centre y,
-                             width, height (0..1 of the 320 input), score person, score boat
+  yolov8n_640_int8.tflite    input 1x3x640x640 float RGB 0..1, output 1x6x8400 float: centre x, centre y,
+                             width, height (0..1 of the input), score person, score boat. The input
+                             size and any quantization are read from the model: the 320 px ones load too.
   movenet_lighting_int8.tflite  input 1x192x192x3 uint8 RGB, output 1x1x17x3: y, x, score (0..1 of the crop)
 
 A person whose box lies mostly inside a boat's box is on that boat: not somebody to rescue. The
@@ -33,6 +34,7 @@ class EdgeDetection:
     in_water: bool | None = None             # None: no pose read
     lower_body_score: float = 0.0
     keypoints: tuple[tuple[float, float, float], ...] = ()   # x, y (0..1 of the frame), score
+    near_camera: bool = False                # box on the frame's bottom edge: legs cut off by the frame, not by water
 
 
 def letterbox(image: np.ndarray, size: int) -> tuple[np.ndarray, float, float, float]:
@@ -103,6 +105,9 @@ class EdgeModel:
         self.nms = float(camera.get("nms_threshold", 0.45))
         self.on_boat = float(camera.get("on_boat_overlap", 0.4))
         self.water = float(camera.get("water_lower_body_score", 0.25))
+        # NEAR_CAMERA_SAFE of YOLO_Movenet/src/risk_analyzer.py: a box reaching this close to the bottom
+        # edge (fraction of the frame height; 15 px of 480 there) is somebody close to the camera.
+        self.near_camera = float(camera.get("near_camera_margin", 0.03))
         self.max_poses = int(camera.get("max_poses", 3))
         self._yolo = interpreter_class(model_path=camera["model_path"])
         self._yolo.allocate_tensors()
@@ -177,7 +182,9 @@ class EdgeModel:
             if self._pose is not None and poses < self.max_poses:
                 poses += 1
                 in_water, lower, keypoints = self._read_pose(frame, person.box)
-                out.append(EdgeDetection(person.box, person.confidence, PERSON, False, in_water, lower, keypoints))
+                # The frame, not water, hides the legs of somebody whose box runs off its bottom edge.
+                near = person.box[2] >= 1.0 - self.near_camera
+                out.append(EdgeDetection(person.box, person.confidence, PERSON, False, False if near else in_water, lower, keypoints, near))
             else:
                 out.append(person)
         return out, boats

@@ -1,4 +1,4 @@
-"""Find out what is on each serial port of the Pi: Pixhawk, STM32F103 helper board or LiDAR.
+"""Find out what is on each serial port of the Pi: Pixhawk, STM32F103 helper board, STM32F407 or LiDAR.
 
 On the Pixhawk boat the three links may all go through USB-to-TTL adapters. Those are often the
 same chip (CP2102) without a serial number, so /dev/ttyUSB0..2 can swap between boots; the
@@ -48,6 +48,8 @@ def classify(data: bytes, sent: bytes) -> str:
         return "echo: TX and RX of this adapter are joined"
     if b"$AUX" in data:
         return "helper"
+    if b"$IMU," in data and b"$SYS," in data:
+        return "stm32f407"
     beats = heartbeats(data)
     if beats > 0:
         return "mavlink"
@@ -98,16 +100,20 @@ def main() -> int:
         else:
             print("  nothing recognised: device off, TX/RX not crossed (adapter TXD -> device RX), or no common GND")
     print()
-    lines = []
+    lines, serial_lines = [], []
     for port, (what, baud) in found.items():
         if what == "helper":
             lines += ["helper:", f"  port: {port}"]
         elif what.startswith("mavlink"):
             lines += ["mavlink:", f"  url: {port}", f"  baud: {baud}"]
+        elif what == "stm32f407":
+            serial_lines += [f"  stm32_port: {port}", f"  stm32_baud: {baud}"]
         elif what in ("lds008", "ld14"):
-            lines += ["serial:", f"  lidar_model: {what}", f"  lidar_port: {port}", f"  lidar_baud: {baud}"]
+            serial_lines += [f"  lidar_model: {what}", f"  lidar_port: {port}", f"  lidar_baud: {baud}"]
+    if serial_lines:
+        lines += ["serial:"] + serial_lines
     if lines:
-        print("for config/boat_pixhawk.yaml:")
+        print("for config/boat_stm32.yaml" if any("stm32_port" in line for line in lines) else "for config/boat_pixhawk.yaml", end=":\n")
         print("\n".join(lines))
     else:
         print("nothing found on any port")

@@ -27,7 +27,7 @@
   Still guessed (see sim/README.md): hull section 0.14 x 0.20 m, thrust
   +-15 N per rear motor and +-10 N front (motor and prop unknown), pods
   +-45 deg over 1000..2000 us (the DS51150 comes in 180 and 270 deg versions),
-  lidar range (LDS-008, a robot-vacuum unit, no datasheet found).
+  and the lidar's mounting height and noise (an LDROBOT LD14).
 -->
 <sdf version="1.9">
   <model name="vedc_buoy">
@@ -224,17 +224,17 @@
         <geometry><cylinder><radius>0.035</radius><length>0.03</length></cylinder></geometry>
         <material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse><specular>0.2 0.2 0.2 1</specular></material>
       </visual>
-      <!-- LDS-008 robot-vacuum lidar: 360 points per turn, about 5 turns per second
-           (figures of its sibling LDS-006). The 8 m range is not confirmed for this unit. -->
+      <!-- LDROBOT LD14: 2300 samples a second at 6 turns a second (its default; 2 to 8 Hz),
+           so 384 points per turn, 0.15 to 8 m (Waveshare's LD14 specification). -->
       <sensor name="lidar" type="gpu_lidar">
         <pose>0 0 0.05 0 0 0</pose>
         <always_on>1</always_on>
-        <update_rate>5</update_rate>
+        <update_rate>6</update_rate>
         <topic>vedc_buoy/lidar</topic>
         <lidar>
           <scan>
             <horizontal>
-              <samples>360</samples>
+              <samples>384</samples>
               <resolution>1</resolution>
               <min_angle>-3.14159</min_angle>
               <max_angle>3.14159</max_angle>

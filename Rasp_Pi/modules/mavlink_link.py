@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 from time import monotonic
 
@@ -124,14 +125,17 @@ class MavlinkLink(threading.Thread):
             self._command(M.MAV_CMD_SET_MESSAGE_INTERVAL, message_id, 1e6 / hz)
 
     def run(self) -> None:
+        # pymavlink reads any address with a ':' as host:port, and /dev/serial/by-path names are
+        # full of them: hand it the device the link points to.
+        url = os.path.realpath(self._url) if self._url.startswith("/dev/") else self._url
         try:
-            self._master = mavutil.mavlink_connection(self._url, baud=self._baud, source_system=1,
+            self._master = mavutil.mavlink_connection(url, baud=self._baud, source_system=1,
                                                       source_component=ONBOARD_COMPONENT)
         except Exception as exc:  # noqa: BLE001 - serial and socket errors differ per transport
             self.log.error("MAVLink link unavailable (%s): %s", self._url, exc)
             self._stop_event.set()
             return
-        self.log.info("MAVLink open: %s", self._url)
+        self.log.info("MAVLink open: %s", self._url if url == self._url else f"{self._url} ({url})")
         last_heartbeat = 0.0
         while not self._stop_event.is_set():
             msg = self._master.recv_match(blocking=True, timeout=0.2)

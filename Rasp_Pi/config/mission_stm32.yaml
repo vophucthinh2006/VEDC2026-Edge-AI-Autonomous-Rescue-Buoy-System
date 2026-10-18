@@ -1,0 +1,10 @@
+# Search route of the STM32 boat (main.py, modules/waypoints.py). Write it at the pool with
+#   python3 tools/set_waypoints.py here      # appends where the boat is now (GPS fix needed)
+#   python3 tools/set_waypoints.py add LAT LON
+#   python3 tools/set_waypoints.py fence     # appends where the boat is now as a fence corner
+# or point mission.file (or main.py --mission) at a Mission Planner .waypoints file.
+# No waypoints: the boat sits still and only turns to, and follows, people it sees.
+loop: true
+waypoints: []
+# Corners of the pool, in order; fewer than 3: no fence. Outside it the boat stops.
+geofence: []

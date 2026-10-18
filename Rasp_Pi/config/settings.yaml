@@ -3,12 +3,20 @@ serial:
   stm32_baud: 115200
   lidar_port: /dev/ttyAMA3
   lidar_baud: 115200
-  # lds008: the fitted module, decoded as its sibling LDS-006 (check with tools/lidar_capture.py).
-  # ld14: LDROBOT LD14. none (main.py only): no LiDAR, same as --no-lidar.
-  lidar_model: lds008
+  # ld14: LDROBOT LD14, the fitted module (115200 baud; an LD14P runs at 230400, set lidar_baud).
+  # lds008: the earlier robot-vacuum unit, decoded as its sibling LDS-006. none (main.py only): no LiDAR.
+  lidar_model: ld14
 vehicle:
-  lidar_yaw_offset_deg: 0.0  # calibrate: LiDAR angle zero -> bow; positive clockwise
+  lidar_yaw_offset_deg: -8.0 # LiDAR angle zero -> bow; positive clockwise. An object at the bow read 8 deg on the LD14 (bench, 2026-10-18)
   lidar_anticlockwise: false # true if the LiDAR's angle grows anticlockwise seen from above
+  # The boat's own parts in the scan (modules/lidar_serial.py), in the LiDAR's own angles, before
+  # lidar_yaw_offset_deg. Any return nearer than lidar_min_range_m is dropped (the mast and cables
+  # next to the LD14 show at 0.10 m), and in each [from_deg, to_deg, max_m] of lidar_mask any return
+  # up to max_m. Find them with the boat in open space: python3 tools/lidar_near.py PORT
+  lidar_min_range_m: 0.30
+  lidar_mask:                # measured on the bench 2026-10-18, a margin added to each
+    - [226, 251, 0.95]       # boat part toward the stern: 0.59..0.87 m at 228..249 deg
+    - [175, 180, 0.80]       # boat part astern: 0.69 m at 177..178 deg
   boat_radius_m: 0.35
   safety_margin_m: 0.40
   max_speed_mps: 0.50
@@ -44,21 +52,23 @@ camera:
   enabled: true
   source: device              # device: the USB camera below. gazebo: the simulator's camera topic
   device: 0
+  camera_lost_s: 2.0          # no frame for this long: warn once, release the camera, reopen it every camera_lost_s
   horizontal_fov_deg: 60.0    # OV9726 with the 60 deg lens
   # yolo_movenet: the team's YOLOv8n (person, boat) + MoveNet pose, from ../YOLO_Movenet/weights.
   # ssd: the earlier COCO SSD MobileNet v1, model_path: models/detect.tflite.
   model: yolo_movenet
-  model_path: ../YOLO_Movenet/weights/yolov8n_320_drq.tflite   # YOLO_Movenet/tools/export_tflite.py
+  model_path: ../YOLO_Movenet/weights/yolov8n_640_int8.tflite
   pose_model_path: ../YOLO_Movenet/weights/movenet_lighting_int8.tflite
-  # yolov8n_320_drq: int8 weights, float activations, scores within 0.01 of the float model.
-  # (The full-int8 yolov8n_int8.tflite saturated at 0.50 to 0.61.) Measured on the simulated camera:
-  # a swimmer scores 0.43 to 0.52 out to 12 m, somebody in a doorway 0.33 to 0.71, somebody on a roof
-  # against the sky only 0.25 to 0.35; the one false detection in 60 frames of open water and
-  # flooded street scored 0.34.
+  # yolov8n_640_int8: int8 inside, float in and out, 640 px; the model of YOLO_Movenet (c902916). On the Pi 4 about
+  # 0.78 s a frame (the 320 px yolov8n_320_drq it replaced: 0.24 s). On 30 frames of
+  # YOLO_Movenet/videos/rescue_test1..3 it found a person in 22 (the 320 drq in 11), small and far ones
+  # included, but every score sits at 0.50: the threshold only splits found from not found.
+  # Somebody standing far off on a bank can come out in the water: too small for the pose to show their legs.
   confidence_threshold: 0.35
   nms_threshold: 0.45
   on_boat_overlap: 0.4          # a person box this much inside a boat box is on the boat: not a victim
   water_lower_body_score: 0.25  # hips, knees, ankles scored below this on average: in the water
+  near_camera_margin: 0.03      # unless the box reaches this close to the bottom edge (of the frame height): legs cut off by the frame
   max_poses: 3                  # MoveNet runs on at most this many people a frame (the nearest)
   detection_hold_s: 0.40
   report_cooldown_s: 10.0
@@ -82,6 +92,9 @@ camera:
   pan_gain: 0.25
   pan_deadband_deg: 2.0
   pan_limit_deg: 80.0
+  # The smooth sweep goes out this many times a second from its own thread, whatever the detector's
+  # pace; the controller glides the servo between commands (STM32F4 App/camera_pan.c). 0: once a frame.
+  pan_rate_hz: 20.0
   recenter_after_s: 1.5
   recenter_step_deg: 3.0
   # Search sweep, while the autopilot is armed in one of `modes` and nobody is in view. Any other
@@ -101,6 +114,7 @@ camera:
     sweep_limit_deg: 60
     sweep_rate_deg_s: 30
     modes: [AUTO]
+    always: false               # true: sweep whether armed or not, for a bench without the RC (config/bench_scan.yaml)
 # LiDAR of the Pixhawk boat (rescue_main.py). none: no LiDAR, only the keep-outs reach the autopilot.
 # serial: the module of serial.lidar_model on serial.lidar_port (config/boat_pixhawk.yaml).
 # gazebo: the simulator's (config/sim.yaml).
@@ -182,6 +196,19 @@ rescue:
   blocked_last_mode: HOLD
   estop_mode: HOLD            # the E-stop button of the helper board asks the autopilot for this mode
   detector: camera            # camera: the TFLite model. simulated: known positions (sim section)
+# STM32 boat (main.py) only. The search route the Pi drives itself (modules/waypoints.py): a YAML
+# list of lat/lon or a Mission Planner .waypoints file; tools/set_waypoints.py writes it. No file: no route.
+mission:
+  file: config/mission_stm32.yaml
+# STM32 boat (main.py) only: SEARCH the route, FOLLOW a person, back (modules/follow.py).
+follow:
+  confirm_frames: 3           # seen in this many detector passes
+  confirm_s: 2.5              # within this long (the 640 px detector looks about every 0.8 s)
+  lost_s: 4.0                 # no sighting this long while following: back to the route
+# STM32 boat (main.py) only: spoken messages (modules/announcer.py), WAVs from tools/make_sounds.ps1.
+audio:
+  device: plughw:0,0          # the Pi's 3.5 mm jack; plughw:1,0 is the HDMI monitor
+  sounds_dir: sounds
 # Obstacles sent to the autopilot's avoidance (modules/obstacle_feed.py): MAVLink OBSTACLE_DISTANCE.
 avoidance:
   rate_hz: 5.0

@@ -43,7 +43,9 @@ class Stm32Uart(threading.Thread):
                 self._state.update_gps(float(lat), float(lon), int(fix), float(hdop), float(speed), float(course))
             elif packet.command == "SYS" and len(packet.fields) >= 5:
                 _, battery, motor_fault, estop, link_ok = packet.fields[:5]
-                self._state.update_system(float(battery), bool(int(motor_fault)), bool(int(estop)), bool(int(link_ok)))
+                # Firmware from 2026-10-17 adds the presses of the victim's confirm button (PE4).
+                presses = int(packet.fields[7]) if len(packet.fields) >= 8 else -1
+                self._state.update_system(float(battery), bool(int(motor_fault)), bool(int(estop)), bool(int(link_ok)), presses)
                 if len(packet.fields) >= 7:
                     # Newer firmware adds armed and the RC mode switch; the camera's search sweep
                     # (camera.scan.modes) runs on them as it does on the autopilot's mode.

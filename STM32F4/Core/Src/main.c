@@ -85,9 +85,10 @@ static void send_telemetry(uint16_t sequence)
   Protocol_Send(&huart4, "IMU", payload);
   snprintf(payload, sizeof(payload), "%u,%.6f,%.6f,%u,%.1f,%.2f,%.1f", sequence, gps.latitude_deg, gps.longitude_deg, gps.fix, gps.hdop, gps.speed_mps, gps.course_deg);
   Protocol_Send(&huart4, "GPS", payload);
-  /* The last two fields let the Pi sweep its camera while the boat waits in AUTO. */
-  snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U,
-           control.armed ? 1U : 0U, control.auto_requested ? 1U : 0U);
+  /* armed and auto let the Pi sweep its camera while the boat waits in AUTO; the last field counts
+     presses of the victim's confirm button (PE4) since boot. */
+  snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U,
+           control.armed ? 1U : 0U, control.auto_requested ? 1U : 0U, (unsigned)control.confirm.presses);
   Protocol_Send(&huart4, "SYS", payload);
 }
 #endif
@@ -132,7 +133,6 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM8_Init();
   MX_UART4_Init();
-  MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
   Protocol_Init(&pi_command);
   IBUS_Init(&ibus);
@@ -176,7 +176,7 @@ int main(void)
       HwTest_Tick(now);
 #else
       Control_Tick(&control, &pi_command, &ibus, &imu, now);
-      Camera_Tick(&pi_command);
+      Camera_Tick(&pi_command, now);
       Buzzer_Tick(now);
 #endif
       /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
@@ -281,6 +281,8 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   if (huart == &huart3) (void)HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
   /* Same for the Pi link: without this one overrun leaves UART4 deaf until reset. */
   else if (huart == &huart4) (void)HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
+  /* And iBUS: a framing error while the receiver powers up would leave the RC dead. */
+  else if (huart == &huart2) (void)HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
 }
 /* USER CODE END 4 */
 

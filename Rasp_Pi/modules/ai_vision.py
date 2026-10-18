@@ -7,12 +7,14 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
-from time import monotonic, sleep
+from pathlib import Path
+from time import monotonic, sleep, strftime
 from typing import Callable
 
 import cv2
 import numpy as np
 
+from modules.edge_model import EDGES
 from modules.perception import SweepPattern, associate_person, estimate_distance_bbox, make_scan, standing_score, track_pan
 from modules.state_store import HumanTarget, StateStore
 from utils.geometry import bearing_deg, signed_angle_deg
@@ -27,11 +29,65 @@ class PersonDetection:
     box: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)  # ymin, xmin, ymax, xmax, 0..1; for drawing
     in_water: bool | None = None   # yolo_movenet: lower body hidden (pose); None without a pose
     keypoints: tuple[tuple[float, float, float], ...] = ()   # yolo_movenet: x, y (0..1 of the frame), score
+    near_camera: bool = False      # yolo_movenet: box on the bottom edge, so not in the water (NEAR_CAMERA_SAFE)
 
 
 def source_needs_box(camera: dict) -> bool:
     """Whether the range can come from the box height (everything but distance_source: lidar)."""
     return camera["distance_source"] != "lidar"
+
+
+class CameraReader:
+    """Frames from a capture that may drop off the bus. No frame for lost_s: one warning, the capture
+    is released and reopened every lost_s until frames come again. open_capture returns an opened
+    capture or None."""
+
+    def __init__(self, open_capture: Callable[[], object | None], name: str, lost_s: float, log: logging.Logger,
+                 clock: Callable[[], float] = monotonic, pause: Callable[[float], None] = sleep) -> None:
+        self._open, self._name, self._lost_s, self._log = open_capture, name, lost_s, log
+        self._clock, self._pause = clock, pause
+        self._cap = None
+        self._next_open = 0.0
+        self._last_frame = clock()
+        self._lost_since: float | None = None
+
+    def read(self) -> np.ndarray | None:
+        now = self._clock()
+        if self._cap is None:
+            if now < self._next_open:
+                self._pause(0.2)
+                return None
+            self._cap = self._open()
+            self._next_open = now + self._lost_s
+            if self._cap is None:
+                self._mark_lost(now, "cannot open")
+                return None
+            self._last_frame = now
+        ok, frame = self._cap.read()
+        if not ok:
+            if now - self._last_frame > self._lost_s:
+                self._cap.release()
+                self._cap = None
+                self._next_open = now + self._lost_s
+                self._mark_lost(now, f"no frame for {now - self._last_frame:.0f} s from")
+            else:
+                self._pause(0.05)
+            return None
+        self._last_frame = now
+        if self._lost_since is not None:
+            self._log.warning("camera %s back after %.0f s", self._name, now - self._lost_since)
+            self._lost_since = None
+        return frame
+
+    def _mark_lost(self, now: float, what: str) -> None:
+        if self._lost_since is None:
+            self._lost_since = now
+            self._log.warning("%s camera %s: reopening every %.0f s", what, self._name, self._lost_s)
+
+    def release(self) -> None:
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
 
 
 class VisionWorker(threading.Thread):
@@ -50,7 +106,16 @@ class VisionWorker(threading.Thread):
         scan = camera.get("scan") or {}
         self._scan = make_scan(scan)
         self._scan_modes = {str(mode).upper() for mode in scan.get("modes", [])}
+        self._scan_always = bool(scan.get("always", False))   # bench: no RC to arm with
         self._scanning = False
+        # A smooth sweep goes out at camera.pan_rate_hz from its own thread, not once per detector
+        # pass: at 0.8 s a pass the servo would jump 23 deg at a time. The lock keeps that thread and
+        # this one from moving the sweep or the pan at the same time.
+        self._pan_rate_hz = float(camera.get("pan_rate_hz", 20.0))
+        self._pan_lock = threading.RLock()
+        # camera.snapshot_dir: a JPEG of the frame each time somebody is in view, at most one per snapshot_cooldown_s.
+        self._snapshot_dir = camera.get("snapshot_dir")
+        self._last_snapshot = 0.0
         self._last_frame = 0.0
         self._ranged_standing: bool | None = None
         self._frame_aspect = 4.0 / 3.0       # width over height, taken from the frames once they come
@@ -69,17 +134,18 @@ class VisionWorker(threading.Thread):
         return (value.astype(np.float32) - zero) * scale if scale else value.astype(np.float32)
 
     def _person(self, box: tuple[float, float, float, float], confidence: float, in_water: bool | None = None,
-                keypoints: tuple = ()) -> PersonDetection:
+                keypoints: tuple = (), near_camera: bool = False) -> PersonDetection:
         ymin, xmin, ymax, xmax = box
         bearing = ((xmin + xmax) / 2.0 - 0.5) * float(self.c["horizontal_fov_deg"])
-        return PersonDetection(bearing, confidence, max(0.0, ymax - ymin), ymin < 0.02 or ymax > 0.98, box, in_water, keypoints)
+        return PersonDetection(bearing, confidence, max(0.0, ymax - ymin), ymin < 0.02 or ymax > 0.98, box, in_water, keypoints,
+                               near_camera)
 
     def _detect_edge(self, frame: np.ndarray) -> list[PersonDetection]:
         """YOLOv8n + MoveNet. People on a boat are left out: they are not the ones to rescue."""
         people, boats = self._model.detect(frame)
         self._view_boats = [b.box for b in boats]
         self._view_ignored = [p.box for p in people if p.on_boat]
-        found = [self._person(p.box, p.confidence, p.in_water, p.keypoints) for p in people if not p.on_boat]
+        found = [self._person(p.box, p.confidence, p.in_water, p.keypoints, p.near_camera) for p in people if not p.on_boat]
         return sorted(found, key=lambda d: -d.box_height_frac)
 
     def _detect(self, interpreter: object, details: list[dict], frame: np.ndarray) -> list[PersonDetection]:
@@ -203,12 +269,66 @@ class VisionWorker(threading.Thread):
 
     def _searching(self) -> bool:
         vehicle = self.state.snapshot().vehicle
-        return self._scan is not None and vehicle.armed and vehicle.mode in self._scan_modes
+        return self._scan is not None and (self._scan_always or (vehicle.armed and vehicle.mode in self._scan_modes))
+
+    def _save_snapshot(self, frame: np.ndarray, people: list[PersonDetection], followed: PersonDetection,
+                       pan_deg: float, now: float) -> None:
+        """Everybody in view with their box, skeleton and state; the person followed in a thicker box,
+        people on a boat (left out of people) in orange."""
+        if not self._snapshot_dir or now - self._last_snapshot < float(self.c.get("snapshot_cooldown_s", 5.0)):
+            return
+        self._last_snapshot = now
+        image = frame.copy()
+        height, width = image.shape[:2]
+        states = []
+        for ymin, xmin, ymax, xmax in self._view_ignored:
+            states.append("ON BOAT")
+            cv2.rectangle(image, (int(xmin * width), int(ymin * height)), (int(xmax * width), int(ymax * height)), (0, 160, 255), 1)
+            cv2.putText(image, "ON BOAT", (int(xmin * width) + 3, max(14, int(ymin * height) - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 160, 255), 2)
+        for person in people:
+            state, colour = (("NEAR CAMERA", (0, 220, 0)) if person.near_camera else ("IN WATER", (0, 0, 255)) if person.in_water
+                             else ("NO POSE", (200, 200, 200)) if person.in_water is None else ("ON LAND", (0, 220, 0)))
+            states.append(state)
+            ymin, xmin, ymax, xmax = person.box
+            cv2.rectangle(image, (int(xmin * width), int(ymin * height)), (int(xmax * width), int(ymax * height)),
+                          colour, 3 if person is followed else 1)
+            cv2.putText(image, f"{state} {person.confidence:.2f}", (int(xmin * width) + 3, max(14, int(ymin * height) - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 2)
+            points = person.keypoints
+            for a, b in EDGES:
+                if len(points) > max(a, b) and points[a][2] > 0.25 and points[b][2] > 0.25:
+                    cv2.line(image, (int(points[a][0] * width), int(points[a][1] * height)),
+                             (int(points[b][0] * width), int(points[b][1] * height)), (255, 200, 0), 2)
+            for x, y, score in points:
+                if score > 0.25:
+                    cv2.circle(image, (int(x * width), int(y * height)), 3, (0, 255, 255), -1)
+        cv2.putText(image, f"{len(states)} in view  pan {pan_deg:+.0f} deg", (8, height - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        directory = Path(self._snapshot_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"person_{strftime('%Y%m%d_%H%M%S')}.jpg"
+        cv2.imwrite(str(path), image)
+        self.log.warning("person in view: %s, pan %+.0f deg, saved %s", ", ".join(states), pan_deg, path)
 
     def _publish_pan(self, now: float) -> None:
-        if abs(self._pan - self._sent_pan) >= 0.5 or now - self._sent_at >= 0.25:
-            self.send_pan(self._pan)
-            self._sent_pan, self._sent_at = self._pan, now
+        with self._pan_lock:
+            if abs(self._pan - self._sent_pan) >= 0.5 or now - self._sent_at >= 0.25:
+                self.send_pan(self._pan)
+                self._sent_pan, self._sent_at = self._pan, now
+
+    def _sweep_step(self, now: float) -> None:
+        """Move a smooth sweep on to `now` and send the angle; nothing outside a smooth sweep."""
+        with self._pan_lock:
+            if self._scanning and isinstance(self._scan, SweepPattern):
+                self._pan = self._scan.frame_done(now)
+                self._publish_pan(now)
+
+    def _pan_loop(self) -> None:
+        period = 1.0 / self._pan_rate_hz
+        while not self.stop.is_set():
+            self._sweep_step(monotonic())
+            self.stop.wait(period)
 
     def run(self) -> None:
         # tflite-runtime on the Pi; it has no wheels for Python 3.12, where its
@@ -230,33 +350,41 @@ class VisionWorker(threading.Thread):
             interpreter = Interpreter(model_path=self.c["model_path"])
             interpreter.allocate_tensors()
             details = interpreter.get_input_details() + interpreter.get_output_details()
-        if self.c.get("source", "device") == "gazebo":
-            from modules.gazebo_io import GazeboCapture   # simulator only: needs the Gazebo bindings
-            cap = GazeboCapture(self.c["gazebo_topic"])
-        else:
-            cap = cv2.VideoCapture(int(self.c["device"]))
-        if not cap.isOpened():
-            self.log.error("cannot open camera %s", self.c.get("gazebo_topic") if self.c.get("source") == "gazebo" else self.c["device"])
-            return
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # a queue of old frames delays the camera servo loop
+        gazebo = self.c.get("source", "device") == "gazebo"
+
+        def open_capture():
+            if gazebo:
+                from modules.gazebo_io import GazeboCapture   # simulator only: needs the Gazebo bindings
+                cap = GazeboCapture(self.c["gazebo_topic"])
+            else:
+                device = self.c["device"]
+                # An index (0) or a path (/dev/v4l/by-id/...): the index follows the plugging order.
+                cap = cv2.VideoCapture(device, cv2.CAP_V4L2) if isinstance(device, str) else cv2.VideoCapture(int(device))
+            if not cap.isOpened():
+                cap.release()
+                return None
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # a queue of old frames delays the camera servo loop
+            return cap
+
+        # A USB camera can drop off the bus and come back: camera_lost_s without a frame and it is reopened.
+        camera = CameraReader(open_capture, str(self.c["gazebo_topic"] if gazebo else self.c["device"]),
+                              float(self.c.get("camera_lost_s", 2.0)), self.log)
         max_fps = float(self.c.get("max_fps", 0.0))
         self.log.info("vision worker started, search sweep %s", "off" if self._scan is None
                       else f"smooth +-{self._scan.limit:.0f} deg at {self._scan.rate:.0f} deg/s" if isinstance(self._scan, SweepPattern)
                       else f"steps {self._scan.angles} deg")
+        if isinstance(self._scan, SweepPattern) and self._pan_rate_hz > 0:
+            threading.Thread(target=self._pan_loop, name="camera-pan", daemon=True).start()
         try:
             while not self.stop.is_set():
-                ok, frame = cap.read()
-                if not ok:
-                    sleep(0.05)
+                frame = camera.read()
+                if frame is None:
                     continue
                 now = monotonic()
                 self._view_frame = frame
                 self._frame_aspect = frame.shape[1] / frame.shape[0]
-                # A smooth sweep is commanded on every camera frame, not only on those the detector
-                # gets to look at: at 5 frames a second the servo would move in 6 deg jumps.
-                if self._scanning and isinstance(self._scan, SweepPattern):
-                    self._pan = self._scan.frame_done(now)
-                    self._publish_pan(now)
+                self._sweep_step(now)        # without the pan thread (pan_rate_hz: 0), once per frame
+                pan_at_capture = self._pan   # the sweep moves on while the detector runs
                 # Simulator only (camera.max_fps): hold the detector to the rate expected of the Pi.
                 if max_fps and now - self._last_frame < 1.0 / max_fps:
                     continue
@@ -278,19 +406,23 @@ class VisionWorker(threading.Thread):
                             self._publish_pan(now)
                         elif now - self._last_seen > self.c["recenter_after_s"]:
                             if self._searching():
-                                self._pan = self._scan.frame_done(now) if self._scanning else self._scan.start(now, self._pan)
-                                self._scanning = True
-                                self._publish_pan(now)
+                                with self._pan_lock:
+                                    self._pan = self._scan.frame_done(now) if self._scanning else self._scan.start(now, self._pan)
+                                    self._scanning = True
+                                    self._publish_pan(now)
                             else:
                                 self._scanning = False
                                 self._recenter()
                     continue
-                self._scanning = False   # somebody in view: stop the sweep, the servo now follows them
+                with self._pan_lock:
+                    self._scanning = False   # somebody in view: stop the sweep, the servo now follows them
                 self._last_seen = now
-                pan_at_capture = self._pan
                 detection = self._follow(detections, pan_at_capture)
-                self._pan = track_pan(self._pan, detection.bearing_cam_deg, self.c["pan_gain"], self.c["pan_deadband_deg"], self.c["pan_limit_deg"])
-                self._publish_pan(now)
+                self._save_snapshot(frame, detections, detection, pan_at_capture, now)
+                with self._pan_lock:
+                    # From where the camera pointed when the frame was taken, not where the sweep got to since.
+                    self._pan = track_pan(pan_at_capture, detection.bearing_cam_deg, self.c["pan_gain"], self.c["pan_deadband_deg"], self.c["pan_limit_deg"])
+                    self._publish_pan(now)
                 # Everybody in the frame goes to the rescue logic, each with a bearing and a range.
                 targets, target, others = [], None, []
                 for found in detections:
@@ -313,4 +445,4 @@ class VisionWorker(threading.Thread):
                     self.on_confirmed(target)
                     self._last_report = now
         finally:
-            cap.release()
+            camera.release()

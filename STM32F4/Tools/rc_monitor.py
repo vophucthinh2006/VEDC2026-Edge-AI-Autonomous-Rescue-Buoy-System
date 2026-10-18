@@ -104,9 +104,11 @@ def snapshot(ocd, sym):
     now = struct.unpack("<I", ocd.read(sym["uwTick"], 4))[0]
     ch = struct.unpack("<14H", ibus[:28])
     last_rx, valid = struct.unpack("<IB", ibus[28:33])
-    c = ocd.read(sym["control"], 16)
+    # controller_t: armed..estop at 0-5; last_imu_ms at 72 since confirm_button_t (12 bytes) and the
+    # heading controller sit before it (arm-none-eabi-gdb: print (int)&((controller_t*)0)->last_imu_ms).
+    c = ocd.read(sym["control"], 76)
     armed, released, ready, overturned, _fault, estop = c[:6]
-    last_imu = struct.unpack("<I", c[12:16])[0]
+    last_imu = struct.unpack("<I", c[72:76])[0]
     d = ocd.read(sym["actuator_debug"], 30)
     cmd = struct.unpack("<4f", d[:16])
     esc = struct.unpack("<3H", d[16:22])

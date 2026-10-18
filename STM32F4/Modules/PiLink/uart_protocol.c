@@ -21,7 +21,10 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
     if (count < 2U) return;
     if (strcmp(fields[0], "NAV") == 0 && count >= 6U) {
         uint16_t seq = (uint16_t)strtoul(fields[1], NULL, 10);
-        if (command->last_nav_ms != 0U && !sequence_is_newer(seq, command->sequence)) return;
+        /* Old packets are only dropped while the stream is live: a restarted Pi counts from 1
+           again, and comparing with the last run's sequence would refuse it for as long as that run lasted. */
+        bool stream_live = command->last_nav_ms != 0U && (uint32_t)(now_ms - command->last_nav_ms) <= NAV_TIMEOUT_MS;
+        if (stream_live && !sequence_is_newer(seq, command->sequence)) return;
         nav_mode_t mode = strcmp(fields[2], "AUTO") == 0 ? NAV_AUTO : (strcmp(fields[2], "MANUAL") == 0 ? NAV_MANUAL : NAV_STOP);
         float speed = strtof(fields[3], NULL), heading = strtof(fields[4], NULL);
         uint16_t ttl = (uint16_t)strtoul(fields[5], NULL, 10);

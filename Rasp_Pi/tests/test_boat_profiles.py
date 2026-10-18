@@ -5,7 +5,7 @@ from pathlib import Path
 from time import monotonic
 
 from modules.lidar_ld14 import LidarPoint
-from modules.lidar_serial import to_boat_frame
+from modules.lidar_serial import drop_self_returns, in_sector, to_boat_frame
 from modules.obstacle_feed import lidar_fresh
 from modules.helper_board import HelperBoard, position_fields
 from modules.perception import ray_obstacles
@@ -48,6 +48,21 @@ class SerialLidarTest(unittest.TestCase):
         # Anticlockwise sensor: 10 deg on the sensor is 10 deg to port of the bow.
         self.assertEqual([p.angle_deg for p in to_boat_frame(scan, 0.0, True)], [350.0, 10.0])
         self.assertEqual(to_boat_frame(scan, 0.0, True)[0].distance_m, 2.0)
+
+    def test_the_boats_own_parts_are_dropped(self):
+        scan = (LidarPoint(172.0, 0.10, 90), LidarPoint(10.0, 0.25, 90), LidarPoint(10.0, 2.0, 90),
+                LidarPoint(235.0, 0.65, 90), LidarPoint(235.0, 1.5, 90), LidarPoint(355.0, 0.5, 90),
+                LidarPoint(90.0, 0.0, 0))
+        kept = drop_self_returns(scan, 0.30, [[228, 250, 0.9], [350, 5, 0.6]])
+        self.assertEqual(len(kept), len(scan))   # rays are kept, as "nothing seen"
+        self.assertEqual([(p.angle_deg, p.distance_m) for p in kept if p.distance_m > 0], [(10.0, 2.0), (235.0, 1.5)])
+        self.assertTrue(all(p.intensity == 0 for p in kept if p.distance_m == 0.0))
+        self.assertEqual(drop_self_returns(scan, 0.0, []), scan)
+
+    def test_a_mask_sector_may_run_across_zero(self):
+        self.assertTrue(in_sector(355.0, 350, 5) and in_sector(3.0, 350, 5) and in_sector(350.0, 350, 5))
+        self.assertFalse(in_sector(10.0, 350, 5) or in_sector(180.0, 350, 5))
+        self.assertTrue(in_sector(240.0, 228, 250) and not in_sector(251.0, 228, 250))
 
     def test_a_wall_ahead_becomes_one_obstacle_per_ray_and_a_lone_return_is_dropped(self):
         scan = tuple(LidarPoint(float(a % 360), 3.0, 80) for a in range(-5, 6)) + (LidarPoint(120.0, 2.0, 80),)

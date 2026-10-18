@@ -15,7 +15,9 @@ FRAME_CLASS     2
 SERVO3_FUNCTION 26      # GroundSteering -> front pod
 SERVO3_REVERSED 1
 SERVO4_FUNCTION 26      # GroundSteering -> right rear pod
+SERVO4_REVERSED 0
 SERVO5_FUNCTION 26      # GroundSteering -> left rear pod
+SERVO5_REVERSED 0
 # Pod centres and swing: the values the STM32F4 firmware was trimmed to on the bench
 # (STM32F4/App/app_config.h: centres 1280 / 1460 / 1280 us, 250 us each side). CONFIRM on this
 # boat: with the stick centred the pods must point straight, and stick right must pull the bow right.
@@ -31,16 +33,23 @@ SERVO5_MAX      1530
 # Rear motors, skid steering. Their ESCs turn ONE WAY only: with the trim at the low end a demand
 # for reverse comes out as stop. (If the ESCs are ever set to bidirectional, put TRIM back to 1500
 # and use sim/params/avoidance.parm as it is.)
+# REVERSED stays 0 on every output, written out because a leftover 1 is not overwritten otherwise:
+# the bench Pixhawk came with SERVO6_REVERSED 1, and with the trim at the low end that clamps every
+# forward demand to 1000 us, so the left motor never turned. A one-way motor spinning backwards is
+# fixed by swapping two of its three phase wires, never here.
 SERVO6_FUNCTION 73      # ThrottleLeft  -> left rear motor
+SERVO6_REVERSED 0
 SERVO6_MIN      1000
 SERVO6_TRIM     1000
 SERVO6_MAX      2000
 SERVO7_FUNCTION 74      # ThrottleRight -> right rear motor
+SERVO7_REVERSED 0
 SERVO7_MIN      1000
 SERVO7_TRIM     1000
 SERVO7_MAX      2000
 # Front motor, bidirectional, 1500 us = stop: the only reverse and the only brake the boat has.
 SERVO8_FUNCTION 70      # Throttle
+SERVO8_REVERSED 0
 SERVO8_MIN      1000
 SERVO8_TRIM     1500
 SERVO8_MAX      2000
@@ -74,6 +83,10 @@ WP_RADIUS       2.0
 LOIT_RADIUS     0.5     # station keeping next to a person
 
 # ---- Failsafes ----------------------------------------------------------------------------------
+# Every pre-arm check on. The bench Pixhawk came with 0 ("Arming Checks Disabled"): it would arm
+# with no GPS, compass or radio. Indoors without a fix it refuses to arm with this; the motor test
+# still runs, and a bench session may set 0 for itself, never on the water.
+ARMING_CHECK    1
 # Radio lost or throttle failsafe: Hold (motors stop, the boat drifts). RTL would drive back
 # through whatever lies in between, with nobody able to take over.
 FS_THR_ENABLE   1

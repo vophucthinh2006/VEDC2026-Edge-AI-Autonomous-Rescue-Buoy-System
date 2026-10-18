@@ -81,7 +81,8 @@ def main() -> int:
     if args.http:
         threading.Thread(target=ThreadingHTTPServer(("0.0.0.0", args.http), _Stream).serve_forever, daemon=True).start()
         print(f"stream on http://0.0.0.0:{args.http}/")
-    cap = cv2.VideoCapture(int(c["device"]))
+    device = c["device"]
+    cap = cv2.VideoCapture(device, cv2.CAP_V4L2) if isinstance(device, str) else cv2.VideoCapture(int(device))
     if not cap.isOpened():
         print("cannot open camera")
         return 1

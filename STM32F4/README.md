@@ -20,8 +20,7 @@ STM32F4/
 ├── Core/                  code CubeMX sinh ra (main.c, gpio.c, i2c.c, tim.c, usart.c, adc.c)
 ├── Drivers/               CMSIS + STM32F4xx HAL
 ├── Modules/               mỗi thư mục con là MỘT ngoại vi / thiết bị
-│   ├── Actuators/         ESC (DShot sau, PWM trước) + servo bánh lái, ramp và đảo chiều
-│   ├── DShot/             DShot300 trên TIM2 bằng DMA burst
+│   ├── Actuators/         ESC (PWM trên TIM2) + servo bánh lái, ramp và đảo chiều
 │   ├── BNO055/            driver IMU (I2C) + calibration profile
 │   ├── GPS/               bộ phân tích NMEA
 │   ├── IBUS/              bộ phân tích khung iBUS của FS-iA6B
@@ -30,6 +29,8 @@ STM32F4/
 │   ├── control.c/.h       vòng điều khiển + watchdog an toàn, arm/disarm
 │   ├── manual.c/.h        trộn kênh iBUS thành lệnh lái tay kiểu xe RC
 │   ├── hw_test.c/.h       test bàn servo / ESC / còi qua debugger
+│   ├── camera_pan.c/.h    servo camera trượt mượt tới góc CAM (bộ P giới hạn tốc độ, như khớp Gazebo)
+│   ├── confirm_button.c/.h đếm số lần nhấn nút xác nhận PE4 (chống dội) để báo lên Pi
 │   ├── imu.c/.h           lớp đệm trên driver BNO055
 │   └── app_config.h       ngưỡng, timeout, hằng số PWM
 ├── Tools/                 dump calibration, dashboard STM32CubeMonitor
@@ -100,15 +101,15 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 | RC receiver FS-iA6B | USART2 | PA2 (single-wire half-duplex) | 115200 8N1, RX interrupt | cổng i-BUS SERVO: S → PA2, + → 5 V, − → GND |
 | IMU BNO055 | I2C1 | PB8 SCL, PB9 SDA | Fast Mode 400 kHz | địa chỉ 0x29 (ADR thả nổi) |
 | Reset BNO055 | GPIO_Output | PB5 | mức cao khi chạy | chân nRESET của module |
-| ESC sau trái | TIM2_CH1 | PA5 | DShot300, một chiều, dừng = DShot 0 | chỉ dây signal + GND |
-| ESC sau phải | TIM2_CH4 | PA3 | DShot300, một chiều, dừng = DShot 0 | chỉ dây signal + GND |
-| ESC trước | TIM5_CH2 | PA1 | PWM 50 Hz, **hai chiều**, dừng = 1500 µs | chỉ dây signal + GND |
-| Servo camera | TIM3_CH1 | PA6 | PWM 50 Hz, 1500 µs | cấp nguồn servo độc lập |
+| ESC sau trái | TIM2_CH1 | PA5 | PWM 50 Hz, một chiều, dừng = 1000 µs, chạy 1500–2000 µs | chỉ dây signal + GND |
+| ESC sau phải | TIM2_CH4 | PA3 | PWM 50 Hz, một chiều, dừng = 1000 µs, chạy 1500–2000 µs | chỉ dây signal + GND |
+| ESC trước | TIM2_CH2 | PA1 | PWM 50 Hz, **hai chiều**, dừng = 1500 µs, **tiến < 1500 µs** (`ESC_FRONT_DIR -1`) | chỉ dây signal + GND |
+| Servo camera | TIM3_CH1 | PA6 | PWM 50 Hz, 1500 µs ± 11 µs/độ, 600–2400 µs (±80°) | cấp nguồn servo độc lập |
 | Bánh lái trước | TIM3_CH2 | PA7 | PWM 50 Hz, tâm `SERVO_CENTER_FRONT_US` | cấp nguồn servo độc lập |
 | Bánh lái trái | TIM3_CH3 | PB0 | PWM 50 Hz, tâm `SERVO_CENTER_LEFT_US` | cấp nguồn servo độc lập |
 | Bánh lái phải | TIM3_CH4 | PB1 | PWM 50 Hz, tâm `SERVO_CENTER_RIGHT_US` | cấp nguồn servo độc lập |
 | Còi | TIM8_CH3 | PC8 | PWM 4 kHz | qua transistor |
-| E-stop | GPIO_EXTI | PE4 | **pull-up**, tiếp điểm thường đóng | nút NC → GND |
+| Nút xác nhận "đã lấy đồ" | GPIO_EXTI (nhãn CubeMX `ESTOP`) | PE4 | **pull-up**, nhấn = mức thấp | nút thường mở → GND |
 | SOS / relay | GPIO_Output | PD13 | khởi tạo mức thấp | qua transistor, không nối tải trực tiếp |
 | Chip select accelerometer | GPIO_Output | PE3 | **giữ mức cao** | không nối gì — xem mục 3 |
 | Battery sense | ADC1_IN4 | PA4 | rank 1, 3 cycles — **chưa dùng trong code** | qua cầu chia áp |
@@ -116,7 +117,7 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 | Debug | SWD | PA13 SWDIO, PA14 SWCLK | — | ST-LINK trên board (CN1) |
 | Thạch anh | RCC | PH0, PH1 | khai báo sẵn, **chưa dùng** | xem mục 5 |
 
-### Vì sao TIM3/TIM5 dùng prescaler 83 và period 19999
+### Vì sao TIM2/TIM3 dùng prescaler 83 và period 19999
 
 APB1 chạy 42 MHz, hệ số chia khác 1 nên **timer clock của APB1 là 84 MHz**:
 
@@ -153,22 +154,15 @@ tiên. **Không bật I2S2/I2S3** vì PC7 và PB10 dính vào codec và micro ME
 
 ---
 
-## 4. E-stop: bắt buộc đấu thường đóng
+## 4. PE4: nút xác nhận, không phải E-stop
 
-PE4 bật pull-up nội và firmware coi **mức cao là E-stop tác động**. Nút phải là loại
-**thường đóng (NC)** nối PE4 xuống GND:
+PE4 (nhãn CubeMX vẫn là `ESTOP`) là nút người được cứu nhấn khi **đã lấy đồ tiếp tế**. Pull-up
+nội, nút thường mở nối xuống GND: nhấn là mức thấp. `App/confirm_button.c` chống dội
+(`CONFIRM_DEBOUNCE_MS`) và đếm số lần nhấn; số đếm đi lên Pi ở trường thứ 8 của `$SYS`, Pi
+phát loa "Đã xác nhận lấy đồ" mỗi khi số đếm tăng. Nút **không dừng gì cả**.
 
-| Tình huống | PE4 | Kết quả |
-|---|---|---|
-| Bình thường, tiếp điểm đóng | thấp | chạy |
-| Nhấn nút, tiếp điểm mở | cao | dừng |
-| **Đứt dây, tuột jack** | cao | **dừng** |
-
-Đấu ngược lại (nút thường mở kéo lên 3.3 V) sẽ khiến dây đứt bị hiểu là "không nhấn" và
-chân vịt vẫn quay — đúng cái mà E-stop sinh ra để chống.
-
-Chưa có nút thì khi test tạm nối PE4 thẳng xuống GND bằng một sợi dây. Rút dây ra là mô
-phỏng đứt dây, phải thấy trạng thái dừng.
+Xuồng không có đầu vào E-stop riêng: tắt arm bằng SwD trên tay cầm, hoặc các điều kiện an
+toàn (mất link, lật, IMU lỗi) đưa ESC về dừng.
 
 ---
 
@@ -395,6 +389,7 @@ $NAV,seq,AUTO|STOP|MANUAL,speed_mps,heading_deg,ttl_ms*CS\n
 $HBT,seq,state*CS\n
 $SOS,seq,0|1*CS\n
 $TXD,seq,event,lat,lon,confidence*CS\n
+$CAM,seq,pan_deg*CS\n
 ```
 
 STM32 → Raspberry Pi:
@@ -402,16 +397,20 @@ STM32 → Raspberry Pi:
 ```
 $IMU,seq,pitch,roll,yaw,imu_ok,overturned*CS\n
 $GPS,seq,lat,lon,fix,hdop,speed,course*CS\n
-$SYS,seq,battery,motor_fault,estop,link_ok,armed,auto*CS\n
+$SYS,seq,battery,motor_fault,estop,link_ok,armed,auto,confirm_presses*CS\n
 $ACK,seq,TXD,ACCEPTED*CS\n
 ```
 
-`armed` và `auto` (công tắc SwB đang ở AUTO) để Pi biết lúc nào cho camera quét tìm. Mỗi gói
+`armed` và `auto` (công tắc SwB đang ở AUTO) để Pi biết lúc nào cho camera quét tìm. `estop` luôn 0
+(PE4 giờ là nút xác nhận); `confirm_presses` là số lần nhấn nút đó từ lúc khởi động. Mỗi gói
 `TXD` có sự kiện `VICTIM_FOUND` làm tăng số người đã báo, số này đi theo khung LoRa (mục LoRa, trường `v`).
+
+`CAM` là góc quay camera, dương sang phải, giới hạn `CAM_PAN_LIMIT_DEG`. `App/camera_pan.c` cho servo
+trượt tới góc đó (`CAM_PAN_SMOOTH_KP`, tối đa `CAM_PAN_MAX_RATE_DPS`); Pi gửi 20 lần/s khi quét hoặc bám người.
 
 Checksum là XOR của các ký tự ASCII giữa `$` và `*`, giống `Rasp_Pi/utils/nmea_packet.py`.
 
-`NAV` và `HBT` phải mới hơn 300 ms. Nếu sai checksum, E-stop tác động, BNO055 lỗi, nghiêng
+`NAV` và `HBT` phải mới hơn 300 ms. Nếu sai checksum, BNO055 lỗi, nghiêng
 quá `MAX_PITCH_DEG` / `MAX_ROLL_DEG`, hoặc receiver mất link — output ESC lập tức về stop.
 
 Giữ hướng dùng PID trong `App/heading_controller.c`: `u = Kp·e + Ki·∫e − Kd·yaw_rate`,
@@ -473,8 +472,8 @@ an toàn: cần ga thấp nhất, cần phải về giữa, SwB và SwD gạt l�
 | CH6 | SwD | lên DISARM, xuống ARM |
 
 **Arm** chỉ xảy ra khi gạt SwD từ OFF sang ON trong lúc: CH3 thấp nhất, cần phải ở giữa, SwB ở
-MANUAL, iBUS và IMU đang có dữ liệu, E-stop nhả, xuồng không lật. Sau đó chỉ SwD hoặc
-một điều kiện an toàn mới disarm. Mất link, E-stop hay lật xong **không tự arm lại** —
+MANUAL, iBUS và IMU đang có dữ liệu, xuồng không lật. Sau đó chỉ SwD hoặc
+một điều kiện an toàn mới disarm. Mất link hay lật xong **không tự arm lại** —
 phải gạt SwD về OFF rồi lên lại. Từ AUTO về MANUAL, motor đứng yên cho tới khi cần phải
 về giữa một lần.
 

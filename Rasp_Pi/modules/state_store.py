@@ -34,6 +34,7 @@ class SysState:
     estop: bool = False
     link_ok: bool = False
     timestamp: float = 0.0
+    confirm_presses: int = -1   # STM32F407: presses of the victim's confirm button (PE4) since its boot; -1: not reported
 
 
 @dataclass(frozen=True)
@@ -120,9 +121,9 @@ class StateStore:
         with self._lock:
             self._gps = GpsState(lat, lon, fix, hdop, speed, course % 360.0, monotonic())
 
-    def update_system(self, battery: float, motor_fault: bool, estop: bool, link_ok: bool) -> None:
+    def update_system(self, battery: float, motor_fault: bool, estop: bool, link_ok: bool, confirm_presses: int = -1) -> None:
         with self._lock:
-            self._system = SysState(battery, motor_fault, estop, link_ok, monotonic())
+            self._system = SysState(battery, motor_fault, estop, link_ok, monotonic(), confirm_presses)
 
     def update_obstacles(self, obstacles: tuple[object, ...], scan_timestamp: float | None = None) -> None:
         with self._lock:

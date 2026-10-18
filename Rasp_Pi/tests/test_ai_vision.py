@@ -1,8 +1,9 @@
+import logging
 import threading
 import unittest
 
 try:
-    from modules.ai_vision import PersonDetection, VisionWorker
+    from modules.ai_vision import CameraReader, PersonDetection, VisionWorker
 except ImportError:          # OpenCV or numpy missing
     VisionWorker = None
 
@@ -55,6 +56,83 @@ class FusedRangeTest(unittest.TestCase):
     def test_something_close_in_front_of_them_is_not_their_range(self):
         self.state.update_obstacles((Obstacle(20.5, 2.3, 0.5),))      # bamboo between the boat and the house
         self.assertAlmostEqual(self.worker._distance(self.roof, 20.0), 1.95 / (0.865 * 0.27), delta=0.2)
+
+
+@unittest.skipIf(VisionWorker is None, "OpenCV not installed")
+class SweepStepTest(unittest.TestCase):
+    def test_the_sweep_goes_out_in_small_steps_between_detector_passes(self):
+        sent = []
+        camera = dict(CAMERA, scan={"enabled": True, "mode": "sweep", "sweep_limit_deg": 60, "sweep_rate_deg_s": 30})
+        worker = VisionWorker(camera, StateStore(), threading.Event(), lambda _t: None, sent.append, 2.0)
+        worker._pan = worker._scan.start(0.0, 0.0)
+        worker._scanning = True
+        for tick in range(1, 21):              # 1 s at 20 Hz, as the camera-pan thread does
+            worker._sweep_step(tick * 0.05)
+        steps = [abs(b - a) for a, b in zip(sent, sent[1:])]
+        self.assertEqual(len(sent), 20)
+        self.assertAlmostEqual(max(steps), 1.5, places=3)  # 30 deg/s in 50 ms
+        self.assertAlmostEqual(abs(sent[-1]), 30.0, places=3)
+
+    def test_no_sweep_step_while_following_somebody(self):
+        sent = []
+        camera = dict(CAMERA, scan={"enabled": True, "mode": "sweep", "sweep_limit_deg": 60, "sweep_rate_deg_s": 30})
+        worker = VisionWorker(camera, StateStore(), threading.Event(), lambda _t: None, sent.append, 2.0)
+        worker._scanning = False
+        worker._sweep_step(1.0)
+        self.assertEqual(sent, [])
+
+
+class FakeCapture:
+    def __init__(self, frames):
+        self.frames, self.released = list(frames), False
+
+    def read(self):
+        return (True, "frame") if self.frames and self.frames.pop(0) else (False, None)
+
+    def release(self):
+        self.released = True
+
+
+@unittest.skipIf(VisionWorker is None, "OpenCV not installed")
+class CameraReaderTest(unittest.TestCase):
+    def setUp(self):
+        self.now = 0.0
+        self.opened = []      # what each open returns, in order; None: the camera is not there
+        self.log = logging.getLogger("test_camera")
+
+    def reader(self):
+        return CameraReader(lambda: self.opened.pop(0) if self.opened else None, "cam", 2.0, self.log,
+                            clock=lambda: self.now, pause=lambda _s: None)
+
+    def read_at(self, reader, t):
+        self.now = t
+        return reader.read()
+
+    def test_a_camera_that_stops_is_released_and_reopened(self):
+        first, second = FakeCapture([1, 0, 0, 0]), FakeCapture([1])
+        self.opened = [first, second]
+        reader = self.reader()
+        self.assertIsNotNone(self.read_at(reader, 0.0))
+        self.assertIsNone(self.read_at(reader, 1.0))        # a failed read inside lost_s: wait
+        self.assertFalse(first.released)
+        with self.assertLogs("test_camera", "WARNING") as logs:
+            self.assertIsNone(self.read_at(reader, 2.5))    # past lost_s: let it go
+        self.assertTrue(first.released)
+        self.assertIn("no frame", logs.output[0])
+        self.assertIsNone(self.read_at(reader, 3.0))        # not before lost_s has passed again
+        with self.assertLogs("test_camera", "WARNING") as logs:
+            self.assertIsNotNone(self.read_at(reader, 4.6))
+        self.assertIn("back after 2 s", logs.output[0])
+
+    def test_a_camera_missing_at_start_is_waited_for_with_one_warning(self):
+        self.opened = [None, None, FakeCapture([1])]
+        reader = self.reader()
+        with self.assertLogs("test_camera", "WARNING") as logs:
+            self.assertIsNone(self.read_at(reader, 0.0))
+            self.assertIsNone(self.read_at(reader, 2.1))
+            self.assertIsNotNone(self.read_at(reader, 4.2))
+        self.assertEqual(len(logs.output), 2)               # "cannot open" once, then "back"
+        self.assertIn("cannot open", logs.output[0])
 
 
 if __name__ == "__main__":

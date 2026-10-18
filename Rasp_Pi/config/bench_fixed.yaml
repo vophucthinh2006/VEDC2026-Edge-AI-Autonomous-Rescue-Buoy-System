@@ -1,0 +1,5 @@
+# Bench: the camera stays ahead (0 deg), no sweep and no following. After bench_snapshot.yaml.
+camera:
+  pan_limit_deg: 0
+  scan:
+    enabled: false
