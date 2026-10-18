@@ -119,7 +119,7 @@ bash sim/tools/rescue_test.sh simulated   # bộ phát hiện hình học
 ### Đi qua đúng đường phần cứng của phao (`--hw`)
 
 Mặc định code Pi lấy LiDAR thẳng từ topic Gazebo và tự quay camera. Trên phao thật thì khác: LiDAR
-LDS-008 vào Pi qua cổng nối tiếp, còn servo camera, relay báo động, nút dừng và LoRa nằm trên bo
+LD14 vào Pi qua cổng nối tiếp, còn servo camera, relay báo động, nút dừng và LoRa nằm trên bo
 STM32F103. `--hw` đặt hai thứ thế chỗ vào giữa, mỗi thứ sau một cổng nối tiếp ảo:
 
 ```bash
@@ -128,7 +128,7 @@ wsl -d Ubuntu-24.04 -- bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/
 
 | Trên phao | Thế chỗ trong giả lập | Code Pi được chạy thật |
 |---|---|---|
-| LDS-008 | `tools/lds008_emulator.py`: LiDAR Gazebo → dòng byte 22 byte/gói, chờ `startlds$` | `SerialLidar` → `LDS008Decoder` → `ray_obstacles` → `ObstacleFeed` |
+| LD14 | `tools/ld14_emulator.py`: LiDAR Gazebo → gói 47 byte (`0x54 0x2C`, 12 điểm), phát ngay không chờ lệnh | `SerialLidar` → `LD14Decoder` → `ray_obstacles` → `ObstacleFeed` |
 | Bo STM32F103 | `tools/helper_board_sim.py` chạy `STM32F103/Tests/helper_sim.c`, tức **chính** `pi_link.c`, `helper_logic.c`, `lora_frame.c` của firmware biên dịch cho máy tính | `HelperBoard`: `$CAM`, `$HBT`, `$VIC`, `$POS`, đọc `$AUX` |
 
 Bo ảo đưa xung servo vào khớp camera của Gazebo (camera chỉ quay nếu lệnh đi trọn qua bo), ghi mọi việc
@@ -149,9 +149,8 @@ Lần chạy đầu của bài test này đã bắt được một lỗi không 
 trống LiDAR không trả điểm nào, Pi coi đó là LiDAR chết và autopilot không cho arm. Bộ giải mã giờ chuyển
 cả những góc "không thấy gì" để một vòng quét rỗng vẫn là một vòng quét.
 
-Giới hạn: trình thế chỗ LDS-008 phát đúng định dạng mà bộ giải mã **giả định** (theo LDS-006). Nó chứng
-minh đường nối tiếp của Pi, không chứng minh module thật nói đúng định dạng đó; việc ấy vẫn phải kiểm bằng
-`Rasp_Pi/tools/lidar_capture.py`. Cảm biến iBus, INA226, SPI của LoRa không có trong giả lập.
+Trình thế chỗ LD14 phát đúng định dạng gói mà `Rasp_Pi/modules/lidar_ld14.py` giải mã (`encode_scan` của
+chính module đó). Muốn chạy lại với LDS-008 cũ: `VEDC_LIDAR_MODEL=lds008`. Cảm biến iBus, INA226, SPI của LoRa không có trong giả lập.
 
 **Camera trong giả lập**: 640 × 480, 15 khung/giây, góc nhìn ngang 60° (dọc 46.8°), cao 0.295 m trên mặt
 nước. Bộ phát hiện bị giữ ở 8 khung hình/giây (`camera.max_fps` trong `sim.yaml`), tốc độ đội báo cho Pi 4.
@@ -708,15 +707,13 @@ Chân vịt không quay trên hình (lực đẩy vẫn đúng). STL không mang
 | Servo pod **DS51150-12V** | tốc độ khớp pod 5 rad/s (0.21 s/60° ở 12 V) | thông số nhà sản xuất |
 | Servo camera **SG90** | khớp `camera_pan_joint`, ±90°, 10 rad/s; lệnh góc (rad, dương là quay phải) trên `/model/vedc_buoy/joint/camera_pan_joint/cmd_pos` | thông số phổ biến của SG90 |
 | Camera **OV9726**, ống kính **60°** | 640 × 480, góc nhìn ngang 60° (dọc 46.8° ở tỉ lệ 4:3); `settings.yaml` của Pi cũng đặt 60°. Phát 15 khung/giây: số tự chọn cho giả lập, chưa đối chiếu với camera thật | mã camera và góc: đội cung cấp |
-| LiDAR **LDS-008** (loại của robot hút bụi) | 360 điểm/vòng, 5 vòng/giây theo model cùng họ LDS-006; tầm 0.15–8 m **chưa xác nhận** | ảnh nhãn + tài liệu LDS-006 |
+| LiDAR **LDROBOT LD14** | 384 điểm/vòng (2300 mẫu/giây ở 6 vòng/giây), tầm 0.15–8 m, UART 115200 | [bảng thông số Waveshare](https://waveshare.com/wiki/Triangulation_LiDAR_LD14) |
 | GPS Holybro M10 | GPS mặc định của ArduPilot SITL | — |
 
 ### Những số còn giả định
 
-- **LiDAR LDS-008**: không có datasheet. Model cùng họ LDS-006 dùng 115200 baud, gói 22 byte bắt đầu
-  bằng `0xFA` (kiểu Neato XV-11), phải gửi `startlds$` mới quay. Giao thức này khác LD14, nên
-  `Rasp_Pi/modules/lidar_ld14.py` không đọc được; cần xác nhận trên module thật rồi viết bộ giải mã mới.
-  Tầm đo và khả năng làm việc ngoài nắng chưa biết.
+- **LiDAR LD14**: độ cao gắn và nhiễu trong mô hình là tự chọn. Bản LD14P khác: 4000 mẫu/giây và
+  230400 baud. Khả năng làm việc ngoài nắng chưa thử.
 - **DS51150** có bản 180° và 270°; mô hình đang để pod ±45° trên 1000–2000 µs.
 - Thân 0.14 × 0.20 m; lực đẩy ±15 N mỗi motor sau và ±10 N motor trước (motor, chân vịt chưa có thông số).
 - Tốc độ chạy model trên Pi 4 (giả lập chưa giới hạn theo tốc độ Pi).

@@ -11,7 +11,7 @@
 #               of the TFLite model. Its log goes to ~/vedc_sim/sitl_run/pi.log, and what it
 #               sees (camera with the detector's box, LiDAR from above) to http://127.0.0.1:8090/
 #   --hw        with --pi: the Pi code reaches the simulator the way it reaches the boat's hardware.
-#               The LiDAR comes as the LDS-008's serial stream (tools/lds008_emulator.py) and the
+#               The LiDAR comes as the LD14's serial stream (tools/ld14_emulator.py) and the
 #               camera servo, alarm and LoRa beacon go through a simulated STM32F103 helper board
 #               running the firmware's own logic (tools/helper_board_sim.py). What the board does
 #               is logged in ~/vedc_sim/sitl_run/helper_events.log; a file named "estop" there
@@ -97,7 +97,7 @@ if [ -n "$PI_DETECTOR" ] && [ "$HW" = 1 ]; then
     source "$VEDC_SIM_REPO/tools/hw_standins.sh"
     start_hw_standins "$RUN" /vedc_buoy/lidar /model/vedc_buoy/joint/camera_pan_joint/cmd_pos
     PI_OVERLAYS+=(--overlay config/sim_hw.yaml --overlay "$RUN/hw_ports.yaml")
-    echo "Hardware stand-ins: LDS-008 on $RUN/lidar_pty, helper board on $RUN/helper_pty (log: $RUN/helper_events.log)"
+    echo "Hardware stand-ins: ${VEDC_LIDAR_MODEL:-ld14} LiDAR on $RUN/lidar_pty, helper board on $RUN/helper_pty (log: $RUN/helper_events.log)"
 fi
 if [ -n "$PI_DETECTOR" ]; then
     # The avoidance parameters need the Pi's obstacle data to pass the pre-arm check.

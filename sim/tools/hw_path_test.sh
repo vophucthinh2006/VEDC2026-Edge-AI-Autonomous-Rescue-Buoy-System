@@ -2,7 +2,7 @@
 # The rescue scenario with the Pi code reaching the simulator the way it reaches the boat's
 # hardware, on SITL instance 1 so it can run beside a run_boat.sh session:
 #
-#   LiDAR          Gazebo -> LDS-008 serial stream (lds008_emulator.py) -> SerialLidar -> autopilot
+#   LiDAR          Gazebo -> LD14 serial stream (ld14_emulator.py) -> SerialLidar -> autopilot
 #   helper board   Pi -> $CAM/$VIC/$POS on a serial port -> the STM32F103 firmware's logic
 #                  (helper_board_sim.py) -> camera joint, alarm relays, LoRa beacon
 #
