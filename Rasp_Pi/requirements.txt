@@ -1,5 +1,6 @@
-numpy>=1.24,<3
+numpy>=1.24,<2             # tflite-runtime 2.14 is built against numpy 1.x: "_ARRAY_API not found" with 2.x
 pyserial>=3.5,<4
 PyYAML>=6.0,<7
-opencv-python-headless>=4.8,<5
+opencv-python-headless>=4.8,<4.12   # 4.12 and later need numpy 2
 tflite-runtime>=2.14
+pymavlink>=2.4.41           # rescue_main.py (Pixhawk boat)
