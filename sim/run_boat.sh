@@ -3,6 +3,7 @@
 # Mission Planner on Windows then connects with UDP, port 14550.
 #
 #   bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh [--headless] [--wipe] [--pi[=simulated]] [--hw] [--oneway] [--world=flood|village|two|central]
+#   bash .../sim/run_boat.sh --stm32 [--start=east,north,heading] [--headless] [--world=...]
 #
 #   --headless  Gazebo without its window (physics and sensors only)
 #   --wipe      reset ArduPilot's stored parameters to the defaults + params/vedc_buoy.parm
@@ -17,6 +18,13 @@
 #               is logged in ~/vedc_sim/sitl_run/helper_events.log; a file named "estop" there
 #               presses the E-stop button. With VEDC_INGEST_TOKEN set, its LoRa beacons are posted
 #               to VEDC_INGEST_URL (default http://127.0.0.1:8787/api/ingest) as buoy PHAO-01.
+#   --stm32     the STM32 boat instead: no ArduPilot. The Pi's STM32 runtime (Rasp_Pi/main.py)
+#               drives the buoy through a simulated STM32F407 (tools/stm32_board_sim.py: the
+#               firmware's protocol, heading PID and mixing) and reads the LiDAR as the LDS-008's
+#               serial stream. Logs in ~/vedc_sim/sitl_run: pi.log, stm32_sim.log, stm32_events.log;
+#               a file named "estop" there presses the E-stop.
+#   --start=    with --stm32: put the buoy at east,north (m from home) facing heading (deg) first
+#               STM32_PI_ARGS="..." adds options to main.py, STM32_SIM_ARGS="..." to the board
 #   --oneway    rear motors forward only, like the boat's ESCs (params/oneway_esc.parm)
 #   --world=    lake (default): open water, marker buoys, one person in the water.
 #               flood: a street under water, houses, obstacles on the way, one person in the
@@ -44,6 +52,8 @@ PI_DETECTOR=""
 PI_OVERLAYS=(--overlay config/sim.yaml)
 HW=0
 ONEWAY=0
+STM32=0
+START=""
 for arg in "$@"; do
     case "$arg" in
         --headless) HEADLESS=1 ;;
@@ -52,6 +62,8 @@ for arg in "$@"; do
         --pi=*)     PI_DETECTOR="${arg#--pi=}" ;;
         --hw)       HW=1 ;;
         --oneway)   ONEWAY=1 ;;
+        --stm32)    STM32=1 ;;
+        --start=*)  START="${arg#--start=}" ;;
         --world=lake)  ;;
         --world=flood) WORLD="vedc_flood.sdf"; PI_OVERLAYS+=(--overlay config/sim_flood.yaml) ;;
         --world=two)   WORLD="vedc_two.sdf";   PI_OVERLAYS+=(--overlay config/sim_two.yaml) ;;
@@ -60,6 +72,10 @@ for arg in "$@"; do
         *) echo "unknown option $arg" >&2; exit 2 ;;
     esac
 done
+
+if [ "$STM32" = 1 ] && [ -n "$PI_DETECTOR" ]; then
+    echo "--stm32 and --pi are two different boats: pick one" >&2; exit 2
+fi
 
 GZ_ARGS=(-v 3 -r "$WORLD")
 MAVPROXY_ARGS=()
@@ -88,6 +104,27 @@ done
 sleep 2
 
 mkdir -p "$SIM_DIR/sitl_run"
+if [ "$STM32" = 1 ]; then
+    # The STM32 boat: no autopilot. ArduPilotPlugin stays idle without SITL (it only drives the
+    # joints once SITL talks to it), so the stand-in board has the thrusters and pods to itself.
+    RUN="$SIM_DIR/sitl_run"
+    rm -f "$RUN/estop"
+    WORLD_NAME="$(sed -n 's/.*<world name="\([^"]*\)".*/\1/p' "$VEDC_SIM_REPO/worlds/$WORLD" | head -n 1)"
+    source "$VEDC_SIM_REPO/tools/hw_standins.sh"
+    start_stm32_standins "$RUN" "${HOME_LOCATION%,*,*}" "$WORLD_NAME" "$START"
+    echo "STM32F407 board on $RUN/stm32_pty (log: $RUN/stm32_sim.log, $RUN/stm32_events.log), LDS-008 on $RUN/lidar_pty"
+    ( cd "$VEDC_SIM_REPO/../Rasp_Pi"
+      exec python3 -u main.py --overlay config/boat_stm32.yaml "${PI_OVERLAYS[@]}" --overlay "$RUN/stm32_ports.yaml" ${STM32_PI_ARGS:-}
+    ) > "$RUN/pi.log" 2>&1 &
+    PI_PID=$!
+    echo "Pi STM32 runtime (main.py) running, log: $RUN/pi.log. Ctrl+C stops everything."
+    # Without SITL the Gazebo server was seen to hang on SIGTERM: give it 10 s, then kill it.
+    trap 'echo "Stopping Gazebo"; kill $PI_PID $HW_PIDS 2>/dev/null; kill $GZ_PID 2>/dev/null
+          for _ in $(seq 10); do kill -0 $GZ_PID 2>/dev/null || break; sleep 1; done
+          kill -9 $GZ_PID 2>/dev/null; wait $GZ_PID 2>/dev/null' EXIT
+    wait $GZ_PID
+    exit 0
+fi
 PARAM_FILES=(--add-param-file="$VEDC_SIM_REPO/params/vedc_buoy.parm")
 if [ -n "$PI_DETECTOR" ] && [ "$HW" = 1 ]; then
     # The two stand-ins for the boat's hardware, each behind a pseudo-terminal the Pi code opens

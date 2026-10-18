@@ -252,6 +252,76 @@ ngưỡng 0.01–0.14: đây là điều kiện đẹp nhất. Trên mặt hồ 
 tới 4 m, chập chờn ở 5–6 m, và phao tiêu màu cam từng bị chấm 0.33–0.56. Vì vậy tốc độ quét để 1.0 m/s và
 các tuyến quét phải đủ sát nhau.
 
+## Phao Pi + STM32F407 (`--stm32`)
+
+Phao thứ hai không có Pixhawk: Pi chạy `Rasp_Pi/main.py` (`./run.sh stm32`), tự lập kế hoạch và gửi
+`$NAV` / `$HBT` / `$CAM` cho STM32F407, F407 giữ hướng và lái motor. `--stm32` bỏ ArduPilot, đặt một
+**F407 ảo** (`tools/stm32_board_sim.py`) sau cổng nối tiếp ảo và cho `main.py` chạy y như trên phao:
+
+```bash
+wsl -d Ubuntu-24.04 -- bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh --stm32 --start=26,4,90
+```
+
+`--start=đông,bắc,hướng` đặt phao cách gốc bao nhiêu mét, mũi quay về hướng nào (độ la bàn) trước khi
+chạy. Ở cảnh hồ, `26,4,90` là cách người 7 m, người lệch 34° bên trái mũi. Không có lộ trình (file
+`mission.file`, `--mission`, hoặc gửi từ dashboard, xem dưới) thì phao chỉ chạy khi camera thấy người; xuất phát
+ở gốc (cách 33 m) thì phao đứng yên, camera quét.
+
+| Trên phao | Thế chỗ trong giả lập |
+|---|---|
+| STM32F407 | `tools/stm32_board_sim.py`: giao thức `uart_protocol.c` (checksum, NAV TTL, HBT 500 ms, kiểm `seq`), PID `heading_controller.c` và `Heading_Mix` (bánh lái + chênh ga hai motor sau), ga = tốc độ / 1 m/s tối đa 0.5, ramp ESC 2/s, motor trước tắt ở AUTO. Gửi `$IMU`, `$GPS`, `$SYS` 10 Hz từ odometry Gazebo, `$ACK` cho mỗi `$TXD`, `$CAM` → khớp camera |
+| BNO055, GPS | tư thế và vị trí phao trong Gazebo; GPS = `HOME_LOCATION` + độ dời |
+| LDS-008 | `tools/lds008_emulator.py`, như `--hw` |
+| LoRa RA-02 + trạm bờ ESP32 | `tools/shore_station_sim.py` và `tools/lora_radio.py`: UDP thay sóng 433 MHz, có thời gian trên không và cửa sổ nghe 1.5 s; cả hai đầu chạy **chính** `route_link.c` (F407) và `route_downlink.c` (ESP32) qua ctypes |
+| Tay khiển FS-i6 | không có: bo luôn arm, công tắc SwB ở AUTO (`STM32_SIM_ARGS="--switch manual"` để thử MANUAL) |
+
+Log trong `~/vedc_sim/sitl_run`: `pi.log` (main.py), `stm32_sim.log` (mỗi giây một dòng: chế độ, hướng
+đích/hiện tại, `u`, ga hai motor, bánh lái, tốc độ, vị trí, góc camera), `stm32_events.log` (đổi chế độ,
+`TXD`, gói NAV bị bỏ). `touch ~/vedc_sim/sitl_run/estop` là nhấn nút dừng. Thêm tùy chọn cho `main.py` bằng
+`STM32_PI_ARGS="--overlay ..."`, cho bo bằng `STM32_SIM_ARGS="..."` (`--gps-fix`, `--rear-thrust-n`).
+
+Bo ảo theo **đúng** firmware, kể cả những chỗ có thể chưa đúng ý:
+- `$SYS` trường `auto` là công tắc SwB, không phải "Pi đang gửi AUTO": phao đứng chờ thì camera vẫn quét.
+- `$GPS` trường `fix` là chất lượng GGA chuyển nguyên: GPS thường là **1**. `safety.py` chặn lệnh
+  `waypoint` khi `fix < 2`, nên trên phao thật đi waypoint sẽ bị dừng `gps_stale_or_no_fix`.
+- `$NAV` có `seq` không mới hơn gói trước thì bị bỏ. Khởi động lại `main.py` mà F407 vẫn chạy thì `seq`
+  về 1 và mọi NAV bị bỏ tới khi vượt số cũ; bo ảo ghi "dropped" vào `stm32_events.log`.
+
+Lần chạy đầu (17/10/2026, model `yolov8n_320_int8.tflite` vì `yolov8n_320_drq.tflite` trong
+`settings.yaml` chưa có trong repo): camera quét thấy người ở −39°, 5.7 m sau 2.5 s; phao quay mũi từ 94°
+về 54° trong khoảng 6 s ở tốc độ bò rồi chạy tới. Nhưng Pi xin 0.10–0.20 m/s mà phao đi **0.6–0.75 m/s**:
+ga 0.2 là 3 N mỗi motor sau (lực đẩy tối đa 15 N là số giả định của mô hình). Motor sau chỉ chạy tới, khi
+Pi xin 0 thì phao trôi tiếp hơn 2 m và dừng cách tâm người 0.7 m, trong vùng giữ khoảng cách 2 m. Cần đo
+tốc độ theo ga trên nước và sửa ánh xạ tốc độ → ga trong `control.c` (hoặc cho phao lùi bằng motor trước).
+
+### Gửi lộ trình từ dashboard xuống phao
+
+Đường thật: dashboard → Worker → trạm bờ ESP32 → LoRa → F407 → Pi ([docs/lora-route-downlink.md](../docs/lora-route-downlink.md)).
+Trong giả lập, trạm bờ ảo đọc bản gửi từ Worker chạy cục bộ:
+
+```powershell
+cd esp32-lora-station\cloud
+npm run dev:idp                    # IdP giả để đăng nhập admin (README của esp32-lora-station)
+npx wrangler dev --port 8787       # .dev.vars có INGEST_TOKEN=dev-token
+```
+
+```bash
+wsl -d Ubuntu-24.04 -- env VEDC_INGEST_TOKEN=dev-token STM32_SIM_ARGS="--gps-fix 2" \
+    bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh --stm32
+```
+
+Mở http://localhost:8787, đăng nhập admin, tab **Lộ trình**: đặt điểm rồi bấm **Gửi tới phao**. Bảng dưới nút
+hiện "đang chờ phao nhận" → "phao đang nhận k/n" → "Pi đã nhận lộ trình và đang chạy theo nó". Không cần
+Worker thì cho trạm đọc file: `VEDC_ROUTE_FILE=route.yaml` (`waypoints: [[lat, lon], ...]`, `loop`, `id`); mỗi
+lần sửa file là một bản gửi mới. `--gps-fix 2` vì `safety.py` chặn lệnh `waypoint` khi GPS báo fix 1 (xem trên).
+
+Log thêm: `station_sim.log` (bản gửi trạm thấy, mỗi khung `RTE` đã phát), trong `stm32_events.log` các dòng
+`LoRa RTE taken: rev r, k/n points` và `RTE rev r to the Pi`, trong `pi.log` dòng `route from the dashboard (rev r)`.
+
+Đo ngày 18/10/2026 (main.py có `modules/waypoints.py` của phiên chính, cùng móc ở mục 4 của tài liệu giao thức):
+23 điểm tới Pi sau 13 s; lộ trình 3 điểm tới Pi 5 s sau khi trạm thấy bản gửi, thay lộ trình file đang chạy,
+và phao đi qua điểm 1 rồi điểm 2 của nó. Dashboard đổi trạng thái theo đúng từng bước.
+
 ## Cảnh lũ lụt
 
 ```bash
@@ -644,6 +714,9 @@ Kiểm thử tự động (không cần Mission Planner): chạy `--headless`, r
 | `tools/avoid_compare.sh` | so sánh BendyRuler với các thuật toán né vật cản chạy trên Pi (thí nghiệm) |
 | `models/victim_person/` | người giống thật (mesh "Standing person" của Gazebo Fuel, CC0, tự tải lần đầu), ngập nước tới ngực |
 | `tools/rescue_test.sh` | kiểm thử trọn kịch bản cứu hộ với code Pi, trên instance 1 |
+| `tools/stm32_board_sim.py` | STM32F407 ảo cho `main.py` (`--stm32`): giao thức, PID giữ hướng, trộn bánh lái và motor của firmware F4, beacon LoRa |
+| `tools/shore_station_sim.py` | trạm bờ ESP32 ảo: nghe beacon, đẩy lên Worker, trả lời bằng khung lộ trình `RTE` |
+| `tools/lora_radio.py`, `tools/route_radio_shim.c` | đường LoRa ảo (UDP, thời gian trên không) và lớp ctypes để hai trạm ảo chạy `route_link.c` / `route_downlink.c` của firmware |
 | `tools/smoke_test.py` | Kiểm thử nhanh qua pymavlink: arm, GUIDED 20 m |
 | `tools/integration_test.sh` | Kiểm thử đầy đủ trên instance 1 (cổng 9012/5770/14561), chạy song song được với phiên đang mở: tham số, nhiễu IMU, arm, GUIDED, chiều kênh khi rẽ |
 
