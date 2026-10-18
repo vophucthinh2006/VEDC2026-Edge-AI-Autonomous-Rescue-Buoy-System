@@ -6,6 +6,7 @@
 #include "ibus.h"
 #include "uart_protocol.h"
 #include "heading_controller.h"
+#include "confirm_button.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -23,7 +24,8 @@ typedef struct {
     bool manual_ready;          /* speed stick centred since entering MANUAL */
     bool overturned;
     bool motor_fault;
-    bool estop;
+    bool estop;                 /* always false: PE4 is the confirm button (App/confirm_button.c) */
+    confirm_button_t confirm;   /* presses of the victim's confirm button, sent in $SYS */
     bool auto_requested;        /* RC mode switch at AUTO, whether or not the Pi is steering yet */
     heading_controller_t heading;
     float heading_target_deg;
@@ -91,5 +93,5 @@ typedef enum {
 extern volatile heading_debug_t heading_debug;
 
 void Control_Init(controller_t *control);
-void Camera_Tick(const pi_command_t *pi);
+void Camera_Tick(const pi_command_t *pi, uint32_t now_ms);
 void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_state_t *rc, const bno055_euler_t *imu, uint32_t now_ms);

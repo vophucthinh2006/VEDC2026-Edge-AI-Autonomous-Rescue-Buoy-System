@@ -17,13 +17,10 @@
 /* Arming needs fresh BNO055 data. 0 only while the IMU is not wired yet:
    the overturn check is then off too. Set back to 1 before any water run. */
 #define ARM_REQUIRES_IMU           1
-/* E-stop contact on PE4, internal pull-up. 1 = normally closed, the design:
-   pressed or a cut wire reads high and stops. 0 = normally open, bench only:
-   pressed reads low and stops, but a cut wire reads as released. */
-#define ESTOP_CONTACT_NC           0
-#if ACTUATORS_ENABLED && !ESTOP_CONTACT_NC
-#warning "E-stop on its NO contact: a cut wire does not stop the motors. Bench only."
-#endif
+/* PE4 (CubeMX label ESTOP) is the victim's confirm button, "supplies taken", not an E-stop:
+   App/confirm_button.c counts presses for the Pi, nothing stops. Contact to GND against the
+   internal pull-up: pressed reads low. The boat has no E-stop input; the RC (SwD) disarms. */
+#define CONFIRM_DEBOUNCE_MS        50U
 #if ACTUATORS_ENABLED && !ARM_REQUIRES_IMU
 #warning "Arming without the IMU: no overturn stop. Bench only."
 #endif
@@ -67,13 +64,20 @@
 #define RC_HOLD_LOCK_RATE_DPS      10.0f
 #define RC_HOLD_LOCK_TIMEOUT_MS    1000U
 
-/* Rear ESCs: one-direction BLHeli_S, driven over DShot; the microsecond range
-   below is kept as the command scale. */
+/* Rear ESCs: unbranded 30 A, one direction, PWM 50 Hz (TIM2_CH1 PA5, TIM2_CH4 PA3). Their
+   throttle range is fixed (no calibration): stepped on the bench (2026-10-18) they stay still up to
+   1490 us and turn from 1500 us; 1500..2000 us is the range settled on after the motor phase swap.
+   Any rear demand above zero is spread over START..REAR_MAX. */
 #define ESC_STOP_US                1000U
+#define ESC_REAR_START_US          1500U
+#define ESC_REAR_MAX_US            2000U
 #define ESC_MAX_US                 2000U
-/* Front ESC (ZTW Shark G2 50A) is bidirectional: 1500 us is stop, 1000 us is
-   full reverse. It stays on plain PWM (TIM5_CH2, PA1). */
+/* Front ESC (ZTW Shark G2 50A) is bidirectional: 1500 us is stop, 1000 and 2000 us
+   are full speed either way. PWM 50 Hz on TIM2_CH2, PA1. */
 #define ESC_FRONT_NEUTRAL_US       1500U
+/* Pulse direction for a forward push. -1: above 1500 us the front prop pushes against the rear
+   ones (bench, 2026-10-18), so forward is below neutral and reverse (the brake) above it. */
+#define ESC_FRONT_DIR              (-1)
 #define SERVO_MIN_US               1000U
 #define SERVO_CENTER_US            1500U
 #define SERVO_MAX_US               2000U
@@ -104,17 +108,25 @@
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
    instead of the control loop. ESC output is capped and time-limited. */
 #define HW_TEST_ENABLED            0
-#define HW_TEST_ESC_MAX_US         1500U   /* props stay on: about DShot 1047, half throttle */
+#define HW_TEST_ESC_MAX_US         1500U   /* props stay on: half throttle */
 #define HW_TEST_ESC_FRONT_SPAN_US  150U    /* front ESC: neutral +/- this, about 30 % each way; water-cooled, keep runs short */
 #define HW_TEST_ESC_MAX_RUN_MS     60000U  /* motors on a stand; a lost debugger still stops them */
-#define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (DShot rear, neutral front) so the ESCs arm */
+#define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (1000 us rear, neutral front) so the ESCs arm */
 #define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */
 
 /* Camera pan servo (SERVO_CAMERA, TIM3_CH1) follows the CAM packet from the Pi.
    Pulse = centre + dir * us_per_deg * angle. Flip DIR if the camera turns away from the person. */
-#define CAM_PAN_US_PER_DEG         5.5f    /* 1000..2000 us over about 180 deg */
+#define CAM_PAN_US_PER_DEG         11.0f   /* measured on the boat: 1005 us turned it 45 deg from 1500 */
 #define CAM_PAN_DIR                (-1)
 #define CAM_PAN_LIMIT_DEG          80.0f
+/* App/camera_pan.c glides the servo to the CAM angle: speed = KP * error, at most MAX_RATE.
+   The simulator's joint: 20 /s and 573 deg/s; softer here for the real servo and camera head.
+   KP 10 /s settles a step in about 0.3 s and trails a 30 deg/s sweep by 3 deg. */
+#define CAM_PAN_SMOOTH_KP          10.0f   /* per second */
+#define CAM_PAN_MAX_RATE_DPS       180.0f
+/* The camera servo needs more than 1000..2000 us for +-80 deg; the rudders keep SERVO_MIN/MAX_US. */
+#define CAM_SERVO_MIN_US           600U
+#define CAM_SERVO_MAX_US           2400U
 
 /* iBUS: channels are 1000..2000 approximately, channel indexes start at zero.
    FS-i6 in stick mode 2, SwB and SwD set as the aux sources of CH5 and CH6. */

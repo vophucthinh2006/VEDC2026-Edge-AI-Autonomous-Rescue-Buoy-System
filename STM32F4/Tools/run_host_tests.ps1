@@ -13,6 +13,26 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to compile heading_controller_test' }
 & $headingExe
 if ($LASTEXITCODE -ne 0) { throw 'heading_controller_test failed' }
 
+$panExe = Join-Path $testDir 'camera_pan_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror -Wno-error=cpp `
+  -I (Join-Path $repo 'STM32F4/App') `
+  (Join-Path $repo 'STM32F4/Tests/camera_pan_test.c') `
+  (Join-Path $repo 'STM32F4/App/camera_pan.c') `
+  -lm -o $panExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile camera_pan_test' }
+& $panExe
+if ($LASTEXITCODE -ne 0) { throw 'camera_pan_test failed' }
+
+$buttonExe = Join-Path $testDir 'confirm_button_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror -Wno-error=cpp `
+  -I (Join-Path $repo 'STM32F4/App') `
+  (Join-Path $repo 'STM32F4/Tests/confirm_button_test.c') `
+  (Join-Path $repo 'STM32F4/App/confirm_button.c') `
+  -o $buttonExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile confirm_button_test' }
+& $buttonExe
+if ($LASTEXITCODE -ne 0) { throw 'confirm_button_test failed' }
+
 $parserExe = Join-Path $testDir 'lora_payload_test.exe'
 & gcc -std=c11 -Wall -Wextra -Werror `
   -I (Join-Path $repo 'esp32-lora-station/main') `

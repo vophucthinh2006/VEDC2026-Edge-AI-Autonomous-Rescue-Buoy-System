@@ -9,7 +9,7 @@
    is set, the ESC outputs stay silent until esc_enable is written to 1. */
 typedef struct {
     uint16_t servo_us[4];   /* 0x00: camera, front rudder, right rudder, left rudder */
-    uint16_t esc_us[3];     /* 0x08: front (PWM, 1500 = stop), right, left (DShot) */
+    uint16_t esc_us[3];     /* 0x08: front (PWM, 1500 = stop), right, left (1000 = stop) */
     uint16_t buzzer_ms;     /* 0x0E: beep length, counts down */
     uint32_t servo_run_ms;  /* 0x10: servos return to their trimmed centre at 0 */
     uint32_t esc_run_ms;    /* 0x14: ESCs return to stop at 0, capped */

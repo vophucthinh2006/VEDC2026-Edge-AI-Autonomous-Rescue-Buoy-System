@@ -60,6 +60,8 @@ void Error_Handler(void);
 #define BNO055_INT_Pin GPIO_PIN_2
 #define BNO055_INT_GPIO_Port GPIOE
 #define BNO055_INT_EXTI_IRQn EXTI2_IRQn
+#define ACC_CS_N_Pin GPIO_PIN_3
+#define ACC_CS_N_GPIO_Port GPIOE
 #define ESTOP_Pin GPIO_PIN_4
 #define ESTOP_GPIO_Port GPIOE
 #define ESTOP_EXTI_IRQn EXTI4_IRQn

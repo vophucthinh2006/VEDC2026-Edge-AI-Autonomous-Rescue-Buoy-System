@@ -5,8 +5,8 @@
 #include <stdint.h>
 
 /* Output map, from the Pinout (Hy) sheet:
-   rear ESCs  DShot300 on TIM2 (PA5 left CH1, PA3 right CH4), forward only
-   front ESC  PWM on TIM5_CH2 (PA1), bidirectional around ESC_FRONT_NEUTRAL_US
+   rear ESCs  PWM 50 Hz on TIM2 (PA5 left CH1, PA3 right CH4), forward only
+   front ESC  PWM 50 Hz on TIM2_CH2 (PA1), bidirectional around ESC_FRONT_NEUTRAL_US
    servos     PWM on TIM3: PA6 camera, PA7 front, PB0 left, PB1 right rudder */
 
 typedef enum { SERVO_CAMERA, SERVO_FRONT, SERVO_RIGHT, SERVO_LEFT, SERVO_COUNT } servo_id_t;
@@ -35,7 +35,7 @@ extern const uint16_t actuator_servo_center[SERVO_COUNT];
 /* Servos to their trimmed centres. ESC outputs stay silent until
    Actuators_StartEscs(). */
 void Actuators_Init(void);
-/* Start the stop signal (DShot 0 rear, neutral front) so the ESCs arm. */
+/* Start the stop signal (1000 us rear, neutral front) so the ESCs arm. */
 void Actuators_StartEscs(void);
 bool Actuators_EscsStarted(void);
 
@@ -46,7 +46,6 @@ void Actuators_Apply(const actuator_cmd_t *cmd, uint32_t now_ms);
 /* Everything to stop and rudders to centre, immediately. */
 void Actuators_Stop(void);
 
-/* Raw pulses for the bench test, no ramp and no ACTUATORS_ENABLED gate.
-   Rear ESCs take 1000..2000 us, mapped onto DShot 0 / 48..2047. */
+/* Raw pulses for the bench test, no ramp and no ACTUATORS_ENABLED gate. */
 void Actuators_WriteServo(servo_id_t id, uint32_t us);
 void Actuators_WriteEsc(esc_id_t id, uint32_t us);
