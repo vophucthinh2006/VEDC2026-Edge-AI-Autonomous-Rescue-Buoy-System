@@ -67,6 +67,7 @@ def main() -> int:
     navigator = BapfNavigator(config["vehicle"], config["planner"])
     safety = SafetyArbiter(config["vehicle"], route.inside_fence)
     sequence = 0
+    lora_rev = 0          # route sent from the dashboard over LoRa now running, 0 = the file's
 
     def person_confirmed(target: HumanTarget) -> None:
         # The report to the shore is Follow's "found" event, with the person's reckoned position.
@@ -125,6 +126,13 @@ def main() -> int:
                     announcer.say("supplies_confirmed")
                     log.warning("confirm button pressed: the person reached the boat and took the supplies")
                 confirm_seen = presses
+            lora = uart.lora_route
+            if lora is not None and lora.rev != lora_rev:
+                # The dashboard's route replaces the file's, from its first point; the pool's geofence stays.
+                route = Route(list(lora.points), arrive_m, lora.loop, route.geofence)
+                lora_rev = lora.rev
+                state.update_route(tuple((i + 1, lat, lon) for i, (lat, lon) in enumerate(route.waypoints)))
+                log.warning("route from the dashboard (rev %d): %s", lora_rev, route.describe())
             if snapshot.gps.fix >= 2 and route.update(snapshot.gps.lat_deg, snapshot.gps.lon_deg):
                 log.info("waypoint reached, now %s", route.describe())
             planned, events = follow.step(replace(snapshot, waypoint=route.current), now)
@@ -139,7 +147,8 @@ def main() -> int:
             proposed = navigator.plan(planned)
             command = safety.check(planned, proposed)
             uart.send("NAV", sequence, command.mode, f"{command.speed_mps:.2f}", f"{command.heading_deg:.1f}", config["vehicle"]["nav_ttl_ms"])
-            uart.send("HBT", sequence, command.reason)
+            # 4th field: the LoRa route revision running, so the STM32 stops resending it (docs/lora-route-downlink.md)
+            uart.send("HBT", sequence, command.reason, lora_rev)
             goal = route.current
             target_bearing = bearing_deg(snapshot.gps.lat_deg, snapshot.gps.lon_deg, *goal) if goal else command.heading_deg
             state.update_steering(command.heading_deg, target_bearing)

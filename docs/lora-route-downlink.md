@@ -93,5 +93,5 @@ khởi động lại thì F407 gửi lại, vì `$HBT` báo `route_rev = 0`.
 | Dashboard | `web/index.html`, `web/js/app.js` (nút Gửi tới phao, trạng thái nhận) |
 | ESP32 | `main/route_downlink.c` (dựng khung, C thuần, có test), `main/main.c` (lấy bản gửi, trả lời beacon) |
 | F407 | `App/route_link.c` (nhận khung, ráp lộ trình, dòng `$RTE`, C thuần, có test), `Modules/LoRa/sx127x.c` (RX), `App/lora_beacon.c` (cửa sổ nhận, `w=`), `Core/Src/main.c` (gửi `$RTE`, đọc `$HBT`) |
-| Pi | `modules/lora_route.py` (ráp `$RTE`), `modules/uart_comm.py` (`lora_route`), `main.py` (thay `Route`, `$HBT` thêm `lora_rev`; móc này viết trên `main.py` có `modules/waypoints.py`) |
+| Pi | `modules/lora_route.py` (ráp `$RTE`), `modules/uart_comm.py` (`lora_route`), `main.py` (thay `Route`, `$HBT` thêm `lora_rev`) |
 | Giả lập | `sim/tools/stm32_board_sim.py` (phần phao, dùng chính `route_link.c`), `sim/tools/shore_station_sim.py` (phần trạm, dùng chính `route_downlink.c`) |
