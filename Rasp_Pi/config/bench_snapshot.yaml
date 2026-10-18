@@ -1,0 +1,10 @@
+# Bench: the camera sweeps and follows a person without the RC, and a JPEG with the box is saved
+# each time somebody is in view, at most one every snapshot_cooldown_s. The STM32F407 drives the
+# camera servo whether armed or not; disarmed, the ESCs get stop and the rudders sit at centre.
+# Not for the water: there the sweep waits for armed and AUTO.
+#   ./run.sh stm32 --overlay config/bench_snapshot.yaml
+camera:
+  snapshot_dir: logs/snapshots
+  snapshot_cooldown_s: 5.0
+  scan:
+    always: true

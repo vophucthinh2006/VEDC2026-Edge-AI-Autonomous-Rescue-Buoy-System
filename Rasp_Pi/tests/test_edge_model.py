@@ -3,7 +3,7 @@ from pathlib import Path
 
 try:
     import numpy as np
-    from modules.edge_model import BOAT, PERSON, EdgeModel, decode_yolo, letterbox, overlap_fraction
+    from modules.edge_model import BOAT, PERSON, EdgeDetection, EdgeModel, decode_yolo, letterbox, overlap_fraction
 except ImportError:          # OpenCV or numpy missing
     decode_yolo = None
 
@@ -54,14 +54,14 @@ class DecodeTest(unittest.TestCase):
         self.assertEqual(overlap_fraction((0.0, 0.0, 0.1, 0.1), (0.5, 0.5, 1.0, 1.0)), 0.0)
 
 
-@unittest.skipIf(decode_yolo is None or Interpreter is None or not (WEIGHTS / "yolov8n_int8.tflite").exists(),
+@unittest.skipIf(decode_yolo is None or Interpreter is None or not (WEIGHTS / "yolov8n_640_int8.tflite").exists(),
                  "no TFLite interpreter or weights")
 class ModelTest(unittest.TestCase):
     def test_finds_the_person_in_the_team_video_and_reads_a_pose(self):
         import cv2
-        model = EdgeModel(Interpreter, {"model_path": str(WEIGHTS / "yolov8n_int8.tflite"),
+        model = EdgeModel(Interpreter, {"model_path": str(WEIGHTS / "yolov8n_640_int8.tflite"),
                                         "pose_model_path": str(WEIGHTS / "movenet_lighting_int8.tflite"),
-                                        "confidence_threshold": 0.5})
+                                        "confidence_threshold": 0.35})
         capture = cv2.VideoCapture(str(VIDEO))
         ok, frame = capture.read()
         capture.release()
@@ -73,9 +73,31 @@ class ModelTest(unittest.TestCase):
         self.assertIsNotNone(people[0].in_water)
 
     def test_an_empty_frame_has_nobody(self):
-        model = EdgeModel(Interpreter, {"model_path": str(WEIGHTS / "yolov8n_int8.tflite"), "confidence_threshold": 0.5})
+        model = EdgeModel(Interpreter, {"model_path": str(WEIGHTS / "yolov8n_640_int8.tflite"), "confidence_threshold": 0.35})
         people, boats = model.detect(np.full((480, 640, 3), 120, np.uint8))
         self.assertEqual((people, boats), ([], []))
+
+
+@unittest.skipIf(decode_yolo is None, "OpenCV or numpy not installed")
+class NearCameraTest(unittest.TestCase):
+    """NEAR_CAMERA_SAFE: legs out of sight because the box runs off the bottom of the frame are not water."""
+
+    def model(self, box):
+        model = EdgeModel.__new__(EdgeModel)       # no TFLite: the two stages are stand-ins
+        model.on_boat, model.max_poses, model.near_camera, model._pose = 0.4, 3, 0.03, object()
+        model._boxes = lambda _frame: [EdgeDetection(box, 0.5, PERSON)]
+        model._read_pose = lambda _frame, _box: (True, 0.05, ())   # no hips, knees or ankles seen
+        return model
+
+    def test_a_box_on_the_bottom_edge_is_near_the_camera_not_in_the_water(self):
+        people, _ = self.model((0.2, 0.3, 0.99, 0.7)).detect(None)
+        self.assertTrue(people[0].near_camera)
+        self.assertFalse(people[0].in_water)
+
+    def test_a_box_clear_of_the_bottom_keeps_the_pose_reading(self):
+        people, _ = self.model((0.4, 0.3, 0.8, 0.5)).detect(None)
+        self.assertFalse(people[0].near_camera)
+        self.assertTrue(people[0].in_water)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+# The Rapoo C270L webcam instead of the Suyin camera, after config/boat_stm32.yaml:
+#   ./run.sh stm32 --overlay config/cam_rapoo.yaml [--overlay config/bench_snapshot.yaml] --viewer
+# Its lens covers about 105 deg (retailer figure), so the camera stays ahead: no sweep, no following
+# with the servo. Not measured yet: horizontal_fov_deg stays at 60 until it is.
+camera:
+  device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._rapoo_camera_SN0001-video-index0
+  pan_limit_deg: 0
+  scan:
+    enabled: false
