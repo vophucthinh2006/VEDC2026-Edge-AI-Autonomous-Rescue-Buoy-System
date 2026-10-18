@@ -42,3 +42,15 @@ $parserExe = Join-Path $testDir 'lora_payload_test.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Failed to compile lora_payload_test' }
 & $parserExe
 if ($LASTEXITCODE -ne 0) { throw 'lora_payload_test failed' }
+
+$routeExe = Join-Path $testDir 'route_link_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'STM32F4/App') `
+  -I (Join-Path $repo 'esp32-lora-station/main') `
+  (Join-Path $repo 'STM32F4/Tests/route_link_test.c') `
+  (Join-Path $repo 'STM32F4/App/route_link.c') `
+  (Join-Path $repo 'esp32-lora-station/main/route_downlink.c') `
+  -lm -o $routeExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile route_link_test' }
+& $routeExe
+if ($LASTEXITCODE -ne 0) { throw 'route_link_test failed' }

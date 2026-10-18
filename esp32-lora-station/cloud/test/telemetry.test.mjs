@@ -95,3 +95,10 @@ test("accepts the 'no waypoint' and 'no battery' markers", () => {
   assert.equal(result.nav.wp_dist, -1);
   assert.equal(result.nav.batt_pct, -1);
 });
+
+test("keeps the route progress of a buoy fed over LoRa, drops it when malformed", () => {
+  assert.deepEqual(sanitizeBuoy({ ...base, route: { rev: 7, have: 12, pi: 0 } }).route, { rev: 7, have: 12, pi: 0 });
+  for (const bad of [{ rev: 0, have: 1, pi: 0 }, { rev: 7, have: 301, pi: 0 }, { rev: 7, have: 1, pi: 2 }, { rev: "7", have: 1, pi: 0 }, 7]) {
+    assert.equal(Object.hasOwn(sanitizeBuoy({ ...base, route: bad }), "route"), false);
+  }
+});

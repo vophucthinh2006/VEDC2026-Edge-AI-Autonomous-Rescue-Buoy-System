@@ -89,6 +89,23 @@ bool lora_payload_parse(const char *message, lora_payload_t *out) {
             uint32_t parsed;
             out->has_victims = parse_uint(value, &parsed) && parsed <= 255U;
             if (out->has_victims) out->victims = (uint8_t)parsed;
+        } else if (strcmp(token, "w") == 0) {
+            /* Route progress (rev:have:pi), outside the attitude group too. */
+            char *first_colon = strchr(value, ':');
+            char *second_colon = first_colon != NULL ? strchr(first_colon + 1, ':') : NULL;
+            uint32_t rev = 0U, have = 0U, pi = 0U;
+            if (second_colon != NULL) {
+                *first_colon = '\0';
+                *second_colon = '\0';
+                out->has_route = parse_uint(value, &rev) && rev >= 1U && rev <= 0xFFFFU &&
+                                 parse_uint(first_colon + 1, &have) && have <= 300U &&
+                                 parse_uint(second_colon + 1, &pi) && pi <= 1U;
+            }
+            if (out->has_route) {
+                out->route_rev = (uint16_t)rev;
+                out->route_have = (uint16_t)have;
+                out->route_pi = (uint8_t)pi;
+            }
         }
     }
 

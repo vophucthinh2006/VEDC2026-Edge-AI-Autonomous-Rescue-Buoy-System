@@ -239,6 +239,12 @@ void sx127x_set_coding_rate(sx127x_t *dev, uint8_t denominator) {
     write_reg(dev, REG_MODEM_CONFIG_1, (reg1 & 0xf1) | (cr << 1));
 }
 
+// RxPayloadCrcOn (bit 2 của RegModemConfig2): bên phát gắn CRC, bên nhận thấy cờ trong header và kiểm
+void sx127x_set_crc(sx127x_t *dev, bool on) {
+    uint8_t reg2 = read_reg(dev, REG_MODEM_CONFIG_2);
+    write_reg(dev, REG_MODEM_CONFIG_2, on ? (reg2 | 0x04) : (reg2 & ~0x04));
+}
+
 void sx127x_set_tx_power(sx127x_t *dev, uint8_t level_dbm) {
     if (level_dbm > 20) level_dbm = 20;
     if (level_dbm < 2)  level_dbm = 2;

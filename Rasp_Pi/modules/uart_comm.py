@@ -9,6 +9,7 @@ from time import monotonic
 
 import serial
 
+from modules.lora_route import LoraRoute, RouteAssembler
 from modules.state_store import StateStore
 from utils.nmea_packet import Packet, decode, encode
 
@@ -26,6 +27,10 @@ class Stm32Uart(threading.Thread):
         self.outbound: queue.Queue[Outbound] = queue.Queue(maxsize=100)
         self.log = logging.getLogger(__name__)
         self.rx_errors = 0
+        # Route sent from the dashboard over LoRa (modules/lora_route.py): the last complete one,
+        # for the main loop to take; it reports lora_route.rev back in $HBT.
+        self._routes = RouteAssembler()
+        self.lora_route: LoraRoute | None = None
 
     def send(self, command: str, *fields: object) -> None:
         try:
@@ -51,6 +56,11 @@ class Stm32Uart(threading.Thread):
                     # (camera.scan.modes) runs on them as it does on the autopilot's mode.
                     armed, auto = bool(int(packet.fields[5])), bool(int(packet.fields[6]))
                     self._state.update_vehicle("AUTO" if auto else "MANUAL", armed, 0)
+            elif packet.command == "RTE":
+                route = self._routes.feed(packet.fields)
+                if route is not None:
+                    self.lora_route = route
+                    self.log.warning("route rev %d from the dashboard: %d points%s", route.rev, len(route.points), ", loop" if route.loop else "")
             elif packet.command == "LRA" and len(packet.fields) >= 3 and packet.fields[1] == "WAYPOINT":
                 # Format: LRA,seq,WAYPOINT,lat;lon - semicolon prevents CSV ambiguity.
                 lat, lon = packet.fields[2].split(";")

@@ -3,10 +3,12 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "driver/uart.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -15,10 +17,12 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "nvs_flash.h"
+#include "cJSON.h"
 
 #include "sx127x.h"
 #include "nmea_gps.h"
 #include "lora_payload.h"
+#include "route_downlink.h"
 #include "secrets.h"   // WIFI_SSID, WIFI_PASSWORD, CLOUD_INGEST_URL, CLOUD_INGEST_TOKEN (xem secrets.example.h)
 
 static const char *TAG = "tram_bo";
@@ -52,11 +56,19 @@ static const char *TAG = "tram_bo";
 
 #define JSON_MAX 384
 
+// LỘ TRÌNH GỬI XUỐNG PHAO (docs/lora-route-downlink.md)
+#define DOWNLINK_POLL_MS       5000   // chu kỳ hỏi Worker bản admin đã bấm "Gửi tới phao"
+#define DOWNLINK_BODY_MAX      16384  // 300 điểm khoảng 8 KB JSON
+#define LORA_TURNAROUND_MS     50     // phao chuyển sang nghe ngay khi phát xong beacon
+#define LORA_TX_TIMEOUT_MS     2000   // khung 120 byte ở SF9 mất khoảng 0.5 s
+
 typedef struct { char json[JSON_MAX]; bool station; } cloud_msg_t;   // station: vị trí trạm (/api/station), ngược lại là gói phao (/api/ingest)
 
 static sx127x_t lora_dev;
 static EventGroupHandle_t wifi_event_group;
 static QueueHandle_t cloud_queue;
+static route_downlink_t downlink;          // bản đang gửi, rev = 0: không có gì để gửi
+static SemaphoreHandle_t downlink_lock;
 #define WIFI_CONNECTED_BIT BIT0
 
 // ---------------------------------------------------------------- WiFi Station
@@ -180,6 +192,10 @@ static void xu_ly_goi_lora(const char *raw, int rssi, float snr) {
                  payload.mode, payload.imu_ok, payload.calibration,
                  (unsigned long)payload.sequence);
     }
+    if (payload.has_route) {
+        json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"route\":{\"rev\":%u,\"have\":%u,\"pi\":%u}",
+                 payload.route_rev, payload.route_have, payload.route_pi);
+    }
     if (payload.has_victims) {
         json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"victims\":%u", payload.victims);
         if (payload.victims > 0U) ESP_LOGW(TAG, "[NHAN] id=%s da bao phat hien nguoi: %u", co_id ? id_sach : "(khong co)", payload.victims);
@@ -199,6 +215,25 @@ static void xu_ly_goi_lora(const char *raw, int rssi, float snr) {
     }
 }
 
+// ------------------------------------------------- Trả lời beacon bằng một khung lộ trình RTE
+// Phao chỉ nghe 1.5 s sau mỗi beacon, nên trạm chỉ phát ngay sau khi nghe phao đích.
+static void tra_loi_lo_trinh(const char *raw) {
+    lora_payload_t payload;
+    if (!lora_payload_parse(raw, &payload) || payload.id[0] == '\0') return;
+    route_ack_t ack = { .has = payload.has_route, .rev = payload.route_rev, .have = payload.route_have, .pi = payload.route_pi };
+    char frame[DOWNLINK_FRAME_MAX + 1];
+    xSemaphoreTake(downlink_lock, portMAX_DELAY);
+    size_t len = RouteDownlink_Frame(&downlink, payload.id, &ack, frame, sizeof(frame));
+    uint16_t count = downlink.count;
+    xSemaphoreGive(downlink_lock);
+    if (len == 0) return;
+    vTaskDelay(pdMS_TO_TICKS(LORA_TURNAROUND_MS));
+    bool ok = sx127x_send_packet(&lora_dev, (const uint8_t *)frame, (uint8_t)len, LORA_TX_TIMEOUT_MS);
+    sx127x_start_receive(&lora_dev);
+    ESP_LOGI(TAG, "[LO TRINH] %s -> %s (phao co %u/%u diem): %s", ok ? "da phat" : "LOI phat", payload.id,
+             ack.has ? ack.have : 0U, count, frame);
+}
+
 // ---------------------------------------------------------------- Task nhận LoRa
 static void task_nhan_lora(void *arg) {
     uint8_t buf[256];
@@ -211,6 +246,7 @@ static void task_nhan_lora(void *arg) {
         if (len > 0) {
             buf[len] = '\0';
             xu_ly_goi_lora((const char *)buf, rssi, snr);
+            tra_loi_lo_trinh((const char *)buf);
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -222,6 +258,88 @@ static void tao_url_tram(char *out, size_t n) {
     const char *p = strstr(u, "/api/ingest");
     if (p) snprintf(out, n, "%.*s/api/station", (int)(p - u), u);
     else   snprintf(out, n, "%s", u);
+}
+
+// URL lấy lộ trình gửi xuống phao: .../api/ingest -> .../api/downlink
+static void tao_url_downlink(char *out, size_t n) {
+    const char *u = CLOUD_INGEST_URL;
+    const char *p = strstr(u, "/api/ingest");
+    if (p) snprintf(out, n, "%.*s/api/downlink", (int)(p - u), u);
+    else   snprintf(out, n, "%s", u);
+}
+
+// {"rev":7,"id":"PHAO-01","loop":false,"pts":[[lat,lon],...]} -> downlink. False nếu sai dạng.
+static bool doc_downlink(const char *body, route_downlink_t *out) {
+    cJSON *root = cJSON_Parse(body);
+    if (root == NULL) return false;
+    bool ok = false;
+    memset(out, 0, sizeof(*out));
+    const cJSON *rev = cJSON_GetObjectItem(root, "rev");
+    if (cJSON_IsNumber(rev) && rev->valueint == 0) {
+        ok = true;                                    // chưa gửi gì
+    } else if (cJSON_IsNumber(rev) && rev->valueint > 0 && rev->valueint <= 0xFFFF) {
+        const cJSON *id = cJSON_GetObjectItem(root, "id");
+        const cJSON *loop = cJSON_GetObjectItem(root, "loop");
+        const cJSON *pts = cJSON_GetObjectItem(root, "pts");
+        int n = cJSON_IsArray(pts) ? cJSON_GetArraySize(pts) : -1;
+        if (cJSON_IsString(id) && strlen(id->valuestring) < sizeof(out->id) && n >= 0 && n <= (int)DOWNLINK_MAX_POINTS) {
+            out->rev = (uint16_t)rev->valueint;
+            strcpy(out->id, id->valuestring);
+            out->loop = cJSON_IsTrue(loop);
+            ok = true;
+            for (int i = 0; i < n && ok; i++) {
+                const cJSON *pt = cJSON_GetArrayItem(pts, i);
+                const cJSON *lat = cJSON_GetArrayItem(pt, 0), *lon = cJSON_GetArrayItem(pt, 1);
+                ok = cJSON_IsNumber(lat) && cJSON_IsNumber(lon) && fabs(lat->valuedouble) <= 90.0 && fabs(lon->valuedouble) <= 180.0;
+                if (ok) { out->lat[i] = lat->valuedouble; out->lon[i] = lon->valuedouble; }
+            }
+            out->count = (uint16_t)n;
+        }
+    }
+    cJSON_Delete(root);
+    if (!ok) memset(out, 0, sizeof(*out));
+    return ok;
+}
+
+// ------------------------------------------------- Task lấy lộ trình admin đã bấm gửi
+static void task_lay_lo_trinh(void *arg) {
+    static char url[160];
+    static route_downlink_t moi;                      // 5 KB: không để trên stack của task
+    tao_url_downlink(url, sizeof(url));
+    char *body = malloc(DOWNLINK_BODY_MAX);
+    if (body == NULL) { ESP_LOGE(TAG, "Khong du bo nho cho lo trinh"); vTaskDelete(NULL); return; }
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = CLOUD_HTTP_TIMEOUT_MS,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    while (true) {
+        xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        esp_http_client_set_header(client, "Authorization", "Bearer " CLOUD_INGEST_TOKEN);
+        int len = -1;
+        if (esp_http_client_open(client, 0) == ESP_OK && esp_http_client_fetch_headers(client) >= 0 &&
+            esp_http_client_get_status_code(client) == 200) {
+            len = 0;
+            int r;
+            while (len < DOWNLINK_BODY_MAX - 1 && (r = esp_http_client_read(client, body + len, DOWNLINK_BODY_MAX - 1 - len)) > 0) len += r;
+        }
+        esp_http_client_cleanup(client);
+        if (len >= 0) {
+            body[len] = '\0';
+            if (doc_downlink(body, &moi)) {
+                xSemaphoreTake(downlink_lock, portMAX_DELAY);
+                bool doi = moi.rev != downlink.rev;
+                downlink = moi;
+                xSemaphoreGive(downlink_lock);
+                if (doi && moi.rev) ESP_LOGW(TAG, "[LO TRINH] ban gui #%u: %u diem cho %s%s", moi.rev, moi.count, moi.id, moi.loop ? ", di vong" : "");
+            } else {
+                ESP_LOGW(TAG, "[LO TRINH] Worker tra ve lo trinh sai dang");
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(DOWNLINK_POLL_MS));
+    }
 }
 
 // ------------------------------------------------------------ Task đẩy dữ liệu lên cloud
@@ -331,6 +449,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "Khoi dong tram bo (ESP32-S3) -> Cloudflare...");
 
     cloud_queue = xQueueCreate(CLOUD_QUEUE_LEN, sizeof(cloud_msg_t));
+    downlink_lock = xSemaphoreCreateMutex();
 
     khoi_dong_wifi_sta();   // không chặn: WiFi kết nối ở nền
 
@@ -343,10 +462,12 @@ void app_main(void) {
     sx127x_set_spreading_factor(&lora_dev, LORA_SPREADING_FACTOR);
     sx127x_set_bandwidth(&lora_dev, LORA_BANDWIDTH_HZ);
     sx127x_set_coding_rate(&lora_dev, LORA_CODING_RATE);
+    sx127x_set_crc(&lora_dev, true);   // khung lộ trình gửi xuống phao có CRC như beacon của phao
 
     xTaskCreate(task_gps_tram, "gps_tram", 3072, NULL, 3, NULL);
     xTaskCreate(task_gui_cloud, "gui_cloud", 8192, NULL, 4, NULL);
     xTaskCreate(task_nhan_lora, "nhan_lora", 4096, NULL, 5, NULL);
+    xTaskCreate(task_lay_lo_trinh, "lay_lo_trinh", 6144, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "San sang. Dang cho tin hieu LoRa...");
 }
