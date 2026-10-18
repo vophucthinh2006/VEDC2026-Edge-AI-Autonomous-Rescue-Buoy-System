@@ -1,3 +1,22 @@
 # The STM32F407 boat (Raspberry Pi + STM32F407), on top of settings.yaml.
-# run.sh stm32 adds this file by itself. Nothing differs from settings.yaml yet: put here what
-# only this boat needs, so the Pixhawk boat's values stay untouched.
+# run.sh stm32 adds this file by itself. Put here what only this boat needs, so the Pixhawk
+# boat's values stay untouched.
+serial:
+  # The STM32F407's UART4 on a USB-to-TTL adapter in socket usb-0:1.2 (the Pi 4 8 GB, 2026-10-18):
+  # by socket, not /dev/ttyUSBn, which swaps between boots. tools/port_probe.py names it after re-plugging.
+  stm32_port: /dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2:1.0-port0
+  # Socket usb-0:1.3 is the camera's: on the Pi 4 8 GB the webcam (480 Mbit/s) enumerates and streams
+  # only there; in 1.1, 1.2 and 1.4 it connects and drops again (error -71), while the 12 Mbit/s
+  # adapters and an ESP32 run fine in those. Checked 2026-10-18 with clean power and the new EEPROM.
+  # The LD14 on its USB-to-TTL adapter in socket usb-0:1.1, by socket, not /dev/ttyUSBn, which swaps
+  # between boots. tools/port_probe.py names it after re-plugging.
+  lidar_port: /dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-port0
+vehicle:
+  # A swimming pool: slow, and arrive within the GPS's wander (2 to 3 m) of a waypoint.
+  max_speed_mps: 0.30
+  approach_speed_mps: 0.15
+  face_speed_mps: 0.10
+  arrive_radius_m: 3.0
+camera:
+  # The Suyin USB camera by its serial number: /dev/video0, 1, ... change with the plugging order.
+  device: /dev/v4l/by-id/usb-Suyin_HD_Camera_200910120001-video-index0

@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 from time import monotonic
+from typing import Callable
 
 from modules.navigation import NavCommand
 from modules.state_store import Snapshot
 
 
 class SafetyArbiter:
-    def __init__(self, vehicle: dict) -> None:
+    def __init__(self, vehicle: dict, inside_fence: Callable[[float, float], bool] | None = None) -> None:
+        """inside_fence(lat, lon): the mission's geofence (modules/waypoints.py Route.inside_fence)."""
         self.v = vehicle
+        self.inside_fence = inside_fence
 
     def check(self, snapshot: Snapshot, proposed: NavCommand) -> NavCommand:
         now = monotonic()
@@ -23,4 +26,8 @@ class SafetyArbiter:
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "lidar_stale")
         if proposed.reason == "waypoint" and (snapshot.gps.fix < 2 or now - snapshot.gps.timestamp > self.v["gps_stale_s"]):
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "gps_stale_or_no_fix")
+        # Outside the fence the boat stops where it is: without a LiDAR, a way back could lead onto the pool wall.
+        if (proposed.mode == "AUTO" and self.inside_fence is not None and snapshot.gps.fix >= 2
+                and not self.inside_fence(snapshot.gps.lat_deg, snapshot.gps.lon_deg)):
+            return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "outside_geofence")
         return proposed
