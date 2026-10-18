@@ -17,7 +17,8 @@ STM32F4/Modules/PiLink/uart_protocol.c) and does in Gazebo what the F407 does on
                            its $HBT reports the route (docs/lora-route-downlink.md)
 
 There is no RC receiver: the board is armed, and the mode switch SwB stands where --switch puts it
-(AUTO by default, as on the pool test). A file named "estop" in --dir is the E-stop pressed.
+(AUTO by default, as on the pool test). PE4 is the victim's confirm button, not an E-stop: a file named
+"confirm" in --dir is one press (counted in $SYS, then the file is removed).
 Everything the board decides is appended to <dir>/stm32_events.log, a status line a second goes
 to stdout.
 
@@ -45,7 +46,7 @@ from gz.transport13 import Node
 
 # App/app_config.h
 NAV_SPEED_MAX = 2.0
-HBT_TIMEOUT_S, IMU_TIMEOUT_S = 0.5, 0.1
+NAV_TIMEOUT_S, HBT_TIMEOUT_S, IMU_TIMEOUT_S = 0.3, 0.5, 0.1
 CONTROL_PERIOD_S, TELEMETRY_PERIOD_S = 0.01, 0.1
 MAX_PITCH_DEG = MAX_ROLL_DEG = 35.0
 KP, KI, KD = 0.020, 0.002, 0.008
@@ -171,7 +172,8 @@ class Board:
         self.state = "S"
         self.u = 0.0
         self.armed = False
-        self.estop = False
+        self.estop = False          # PE4 is the confirm button now: estop always 0 (App/control.c)
+        self.confirm_presses = 0
         self.events = (args.dir / "stm32_events.log").open("a", buffering=1)
         self.seq_drops = 0
 
@@ -200,7 +202,9 @@ class Board:
         try:
             if kind == "NAV" and len(fields) >= 6:
                 seq = int(fields[1]) & 0xFFFF
-                if self.last_nav != 0.0 and ((seq - self.nav_seq) & 0xFFFF) >= 0x8000:
+                # Old packets are only dropped while the stream is live: a restarted Pi counts from 1 again.
+                stream_live = self.last_nav != 0.0 and now - self.last_nav <= NAV_TIMEOUT_S
+                if stream_live and ((seq - self.nav_seq) & 0xFFFF) >= 0x8000:
                     self.seq_drops += 1
                     if self.seq_drops in (1, 10) or self.seq_drops % 100 == 0:
                         self.event(f"NAV seq {seq} not newer than {self.nav_seq}: dropped ({self.seq_drops})")
@@ -235,7 +239,11 @@ class Board:
         with b.lock:
             imu_fresh = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
             heading, rate, pitch, roll = b.heading, b.yaw_rate, b.pitch, b.roll
-        self.estop = (self.args.dir / "estop").exists()
+        confirm = self.args.dir / "confirm"
+        if confirm.exists():
+            confirm.unlink()
+            self.confirm_presses += 1
+            self.event(f"confirm button pressed ({self.confirm_presses})")
         overturned = imu_fresh and (abs(pitch) > MAX_PITCH_DEG or abs(roll) > MAX_ROLL_DEG)
         # No RC: armed whenever it is safe. (The boat needs the arm switch cycled after a stop.)
         armed = imu_fresh and not self.estop and not overturned
@@ -295,7 +303,8 @@ class Board:
         course = math.degrees(math.atan2(ve, vn)) % 360.0
         self.send(fd, "IMU", seq, f"{pitch:.2f}", f"{roll:.2f}", f"{heading:.2f}", int(imu_ok), int(overturned))
         self.send(fd, "GPS", seq, f"{lat:.6f}", f"{lon:.6f}", self.args.gps_fix, "0.9", f"{speed:.2f}", f"{course:.1f}")
-        self.send(fd, "SYS", seq, "0.0", 0, int(self.estop), int(self.link_ok), int(self.armed), int(self.args.switch == "auto"))
+        self.send(fd, "SYS", seq, "0.0", 0, int(self.estop), int(self.link_ok), int(self.armed), int(self.args.switch == "auto"),
+                  self.confirm_presses)
         if self.lora is not None:
             # Route from the dashboard: one $RTE line a period until $HBT reports its revision.
             self.lora.route.set_pi_rev(self.pi_route_rev)
@@ -397,7 +406,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pty", required=True, type=Path, help="path the Pi opens as serial.stm32_port (a link to the pseudo-terminal)")
     parser.add_argument("--home", required=True, help="lat,lon of the Gazebo world origin (run_boat.sh HOME_LOCATION)")
-    parser.add_argument("--dir", type=Path, default=Path("."), help="where stm32_events.log goes and the estop file is looked for")
+    parser.add_argument("--dir", type=Path, default=Path("."), help="where stm32_events.log goes and the confirm file is looked for")
     parser.add_argument("--world", default="vedc_lake", help="Gazebo world name, for --start")
     parser.add_argument("--start", help="east,north,heading: move the buoy there first (metres from the origin, compass degrees)")
     parser.add_argument("--switch", choices=("auto", "manual"), default="auto", help="where the RC mode switch SwB stands")

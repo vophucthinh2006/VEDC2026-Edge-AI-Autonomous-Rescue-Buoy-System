@@ -37,7 +37,7 @@ start_hw_standins() {
     return 1
 }
 
-# The Pi + STM32F407 boat (Rasp_Pi/main.py): the F407 board and the LDS-008, each behind a
+# The Pi + STM32F407 boat (Rasp_Pi/main.py): the F407 board and the LiDAR (LD14, or VEDC_LIDAR_MODEL), each behind a
 # pseudo-terminal, the overlay with their ports, and the ESP32 shore station on the simulated LoRa
 # link (tools/lora_radio.py), which hands the board the route an admin sends from the dashboard
 # (docs/lora-route-downlink.md). The station reads that route from the Worker with
@@ -62,7 +62,8 @@ start_stm32_standins() {
         station_args=(--cloud "${VEDC_CLOUD_URL:-http://127.0.0.1:8787}")
     fi
     : > "$run/stm32_events.log"
-    python3 -u "$VEDC_SIM_REPO/tools/lds008_emulator.py" --pty "$run/lidar_pty" --topic /vedc_buoy/lidar \
+    local lidar_model="${VEDC_LIDAR_MODEL:-ld14}"
+    python3 -u "$VEDC_SIM_REPO/tools/${lidar_model}_emulator.py" --pty "$run/lidar_pty" --topic /vedc_buoy/lidar \
         > "$run/lidar_sim.log" 2>&1 &
     LIDAR_SIM_PID=$!
     python3 -u "$VEDC_SIM_REPO/tools/shore_station_sim.py" --radio-lib "$run/librouteradio.so" "${station_args[@]}" \
@@ -72,7 +73,7 @@ start_stm32_standins() {
         --home "$home" --world "$world" "${start_args[@]}" ${STM32_SIM_ARGS:-} > "$run/stm32_sim.log" 2>&1 &
     STM32_SIM_PID=$!
     HW_PIDS="$LIDAR_SIM_PID $STATION_SIM_PID $STM32_SIM_PID"
-    printf 'serial:\n  stm32_port: %s\n  lidar_port: %s\n  lidar_model: lds008\n' "$run/stm32_pty" "$run/lidar_pty" > "$run/stm32_ports.yaml"
+    printf 'serial:\n  stm32_port: %s\n  lidar_port: %s\n  lidar_model: %s\n' "$run/stm32_pty" "$run/lidar_pty" "$lidar_model" > "$run/stm32_ports.yaml"
     for _ in $(seq 30); do
         [ -e "$run/lidar_pty" ] && [ -e "$run/stm32_pty" ] && return 0
         sleep 0.5

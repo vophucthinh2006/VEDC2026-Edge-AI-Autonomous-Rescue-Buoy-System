@@ -22,7 +22,7 @@
 #               drives the buoy through a simulated STM32F407 (tools/stm32_board_sim.py: the
 #               firmware's protocol, heading PID and mixing) and reads the LiDAR as the LDS-008's
 #               serial stream. Logs in ~/vedc_sim/sitl_run: pi.log, stm32_sim.log, stm32_events.log;
-#               a file named "estop" there presses the E-stop.
+#               a file named "confirm" there is one press of the victim's confirm button.
 #   --start=    with --stm32: put the buoy at east,north (m from home) facing heading (deg) first
 #               STM32_PI_ARGS="..." adds options to main.py, STM32_SIM_ARGS="..." to the board
 #   --oneway    rear motors forward only, like the boat's ESCs (params/oneway_esc.parm)
@@ -108,11 +108,11 @@ if [ "$STM32" = 1 ]; then
     # The STM32 boat: no autopilot. ArduPilotPlugin stays idle without SITL (it only drives the
     # joints once SITL talks to it), so the stand-in board has the thrusters and pods to itself.
     RUN="$SIM_DIR/sitl_run"
-    rm -f "$RUN/estop"
+    rm -f "$RUN/confirm"
     WORLD_NAME="$(sed -n 's/.*<world name="\([^"]*\)".*/\1/p' "$VEDC_SIM_REPO/worlds/$WORLD" | head -n 1)"
     source "$VEDC_SIM_REPO/tools/hw_standins.sh"
     start_stm32_standins "$RUN" "${HOME_LOCATION%,*,*}" "$WORLD_NAME" "$START"
-    echo "STM32F407 board on $RUN/stm32_pty (log: $RUN/stm32_sim.log, $RUN/stm32_events.log), LDS-008 on $RUN/lidar_pty"
+    echo "STM32F407 board on $RUN/stm32_pty (log: $RUN/stm32_sim.log, $RUN/stm32_events.log), ${VEDC_LIDAR_MODEL:-ld14} LiDAR on $RUN/lidar_pty"
     ( cd "$VEDC_SIM_REPO/../Rasp_Pi"
       exec python3 -u main.py --overlay config/boat_stm32.yaml "${PI_OVERLAYS[@]}" --overlay "$RUN/stm32_ports.yaml" ${STM32_PI_ARGS:-}
     ) > "$RUN/pi.log" 2>&1 &

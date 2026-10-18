@@ -271,21 +271,22 @@ chạy. Ở cảnh hồ, `26,4,90` là cách người 7 m, người lệch 34° 
 |---|---|
 | STM32F407 | `tools/stm32_board_sim.py`: giao thức `uart_protocol.c` (checksum, NAV TTL, HBT 500 ms, kiểm `seq`), PID `heading_controller.c` và `Heading_Mix` (bánh lái + chênh ga hai motor sau), ga = tốc độ / 1 m/s tối đa 0.5, ramp ESC 2/s, motor trước tắt ở AUTO. Gửi `$IMU`, `$GPS`, `$SYS` 10 Hz từ odometry Gazebo, `$ACK` cho mỗi `$TXD`, `$CAM` → khớp camera |
 | BNO055, GPS | tư thế và vị trí phao trong Gazebo; GPS = `HOME_LOCATION` + độ dời |
-| LDS-008 | `tools/lds008_emulator.py`, như `--hw` |
+| LiDAR LD14 | `tools/ld14_emulator.py`, như `--hw` (`VEDC_LIDAR_MODEL=lds008` để dùng LDS-008) |
+| Nút xác nhận PE4 | file `confirm` trong `~/vedc_sim/sitl_run`: mỗi lần tạo là một lần nhấn, đếm trong `$SYS` |
 | LoRa RA-02 + trạm bờ ESP32 | `tools/shore_station_sim.py` và `tools/lora_radio.py`: UDP thay sóng 433 MHz, có thời gian trên không và cửa sổ nghe 1.5 s; cả hai đầu chạy **chính** `route_link.c` (F407) và `route_downlink.c` (ESP32) qua ctypes |
 | Tay khiển FS-i6 | không có: bo luôn arm, công tắc SwB ở AUTO (`STM32_SIM_ARGS="--switch manual"` để thử MANUAL) |
 
 Log trong `~/vedc_sim/sitl_run`: `pi.log` (main.py), `stm32_sim.log` (mỗi giây một dòng: chế độ, hướng
 đích/hiện tại, `u`, ga hai motor, bánh lái, tốc độ, vị trí, góc camera), `stm32_events.log` (đổi chế độ,
-`TXD`, gói NAV bị bỏ). `touch ~/vedc_sim/sitl_run/estop` là nhấn nút dừng. Thêm tùy chọn cho `main.py` bằng
+`TXD`, gói NAV bị bỏ). `touch ~/vedc_sim/sitl_run/confirm` là nạn nhân nhấn nút xác nhận. Thêm tùy chọn cho `main.py` bằng
 `STM32_PI_ARGS="--overlay ..."`, cho bo bằng `STM32_SIM_ARGS="..."` (`--gps-fix`, `--rear-thrust-n`).
 
 Bo ảo theo **đúng** firmware, kể cả những chỗ có thể chưa đúng ý:
 - `$SYS` trường `auto` là công tắc SwB, không phải "Pi đang gửi AUTO": phao đứng chờ thì camera vẫn quét.
 - `$GPS` trường `fix` là chất lượng GGA chuyển nguyên: GPS thường là **1**. `safety.py` chặn lệnh
   `waypoint` khi `fix < 2`, nên trên phao thật đi waypoint sẽ bị dừng `gps_stale_or_no_fix`.
-- `$NAV` có `seq` không mới hơn gói trước thì bị bỏ. Khởi động lại `main.py` mà F407 vẫn chạy thì `seq`
-  về 1 và mọi NAV bị bỏ tới khi vượt số cũ; bo ảo ghi "dropped" vào `stm32_events.log`.
+- `$NAV` có `seq` không mới hơn gói trước thì bị bỏ, nhưng chỉ khi luồng NAV còn sống (≤ 300 ms): `main.py`
+  khởi động lại đếm từ 1 vẫn được nhận. Gói bị bỏ được ghi "dropped" vào `stm32_events.log`.
 
 Lần chạy đầu (17/10/2026, model `yolov8n_320_int8.tflite` vì `yolov8n_320_drq.tflite` trong
 `settings.yaml` chưa có trong repo): camera quét thấy người ở −39°, 5.7 m sau 2.5 s; phao quay mũi từ 94°
