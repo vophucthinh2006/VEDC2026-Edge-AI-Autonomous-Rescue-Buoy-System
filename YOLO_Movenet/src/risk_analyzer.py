@@ -8,7 +8,6 @@ class RiskAnalyzer:
         Kiểm tra xem Bounding Box của Người có nằm trong/đè lên Bounding Box của Thuyền không.
         - person_box: [x, y, w, h]
         - boat_detections: danh sách các thuyền [(box, conf, cls_id), ...]
-        - overlap_thresh: tỷ lệ diện tích người nằm trong thuyền (mặc định >= 40% là ở trên thuyền)
         """
         if not boat_detections:
             return False
@@ -23,7 +22,6 @@ class RiskAnalyzer:
         for (bx, by, bw, bh), _, _ in boat_detections:
             bx2, by2 = bx + bw, by + bh
 
-            # Tính diện tích giao nhau (Intersection) giữa Người và Thuyền
             ix1 = max(px, bx)
             iy1 = max(py, by)
             ix2 = min(px2, bx2)
@@ -33,7 +31,6 @@ class RiskAnalyzer:
             ih = max(0, iy2 - iy1)
             intersection_area = iw * ih
 
-            # Nếu phần lớn diện tích BBox của người đè lên thuyền -> Xác nhận ở trên thuyền
             overlap_ratio = intersection_area / person_area
             if overlap_ratio >= overlap_thresh:
                 return True
@@ -41,8 +38,19 @@ class RiskAnalyzer:
         return False
 
     @staticmethod
-    def evaluate_water_risk(keypoints):
-        """Đánh giá mức độ nguy hiểm dựa trên điểm Confidence khớp thân dưới."""
+    def evaluate_water_risk(keypoints, person_box=None, orig_shape=None, edge_margin=15):
+        """
+        Đánh giá nguy cơ dưới nước.
+        Bổ sung: Nếu BBox chạm mép dưới màn hình (y + h >= orig_h - margin) -> Người đứng quá gần camera, không báo động.
+        """
+        if person_box is not None and orig_shape is not None:
+            x, y, w, h = person_box
+            orig_h = orig_shape[0]
+
+            # Kiểm tra BBox chạm hoặc tràn qua mép dưới khung hình
+            if (y + h) >= (orig_h - edge_margin):
+                return "NEAR_CAMERA_SAFE", 1.0
+
         lower_scores = [keypoints[i][2] for i in LOWER_BODY_INDICES]
         avg_lower_score = np.mean(lower_scores) if lower_scores else 0.0
 
@@ -104,7 +112,6 @@ class BoxTracker:
                 updated_tracks.append([db[0], db[1], db[2], db[3], d_conf, d_cls, 0])
                 used_detection_indices.add(best_match_idx)
             else:
-                # Nếu không tìm thấy match, tăng missing count lên 1
                 if missing_count + 1 < self.max_missing_frames:
                     updated_tracks.append([tb[0], tb[1], tb[2], tb[3], t_conf, t_cls, missing_count + 1])
 

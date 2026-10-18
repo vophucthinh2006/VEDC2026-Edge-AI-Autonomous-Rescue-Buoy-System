@@ -47,7 +47,9 @@ class YOLOv8Detector:
         else:
             outputs = self._infer_onnx(img_rgb)
 
-        return self._process_output(outputs, orig_shape, pad_info, ratio)
+        # Lấy kích thước thực tế của ảnh đầu vào (320 hoặc 640)
+        in_h, in_w = img_rgb.shape[:2]
+        return self._process_output(outputs, orig_shape, pad_info, ratio, input_size=(in_w, in_h))
 
     def _infer_tflite(self, img_rgb):
         detail_in = self.input_details[0]
@@ -97,7 +99,7 @@ class YOLOv8Detector:
             self.net.setInput(blob)
             return self.net.forward()
 
-    def _process_output(self, output, orig_shape, pad_info, ratio):
+    def _process_output(self, output, orig_shape, pad_info, ratio, input_size=(640, 640)):
         predictions = np.squeeze(output)
         
         if predictions.shape[0] < predictions.shape[1]:
@@ -106,6 +108,8 @@ class YOLOv8Detector:
         boxes, confidences, class_ids = [], [], []
         pad_w, pad_h = pad_info
         num_classes = predictions.shape[1] - 4
+        
+        in_w, in_h = input_size
 
         for pred in predictions:
             scores = pred[4:]
@@ -115,12 +119,12 @@ class YOLOv8Detector:
             if confidence > self.conf_thresh:
                 cx, cy, w, h = pred[0:4]
 
-                # AUTO-FIX: Tự động quy đổi nếu TFLite xuất tọa độ dạng tỷ lệ [0.0, 1.0]
+                # Quy đổi dựa trên kích thước thực tế truyền vào (in_w, in_h)
                 if cx <= 1.0 and cy <= 1.0 and w <= 1.0 and h <= 1.0:
-                    cx *= 320.0
-                    cy *= 320.0
-                    w *= 320.0
-                    h *= 320.0
+                    cx *= float(in_w)
+                    cy *= float(in_h)
+                    w *= float(in_w)
+                    h *= float(in_h)
 
                 x1 = int((cx - w / 2.0 - pad_w) / ratio)
                 y1 = int((cy - h / 2.0 - pad_h) / ratio)
