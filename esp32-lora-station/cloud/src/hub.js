@@ -10,11 +10,15 @@ const MAX_HISTORY = 300;   // số mẫu RSSI/SNR/vị trí giữ cho mỗi phao
 const PERSIST_MS = 5000;
 const EMPTY_MISSION = { rev: 0, waypoints: [], poly: [], spacing: 10, angle: null, speed: 1.5 };
 
+// Bản tin cho trình duyệt: không kèm tọa độ (đã có trong bản tin mission)
+const downlinkSummary = d => ({ type: "downlink", rev: d.rev, id: d.id, loop: d.loop, n: d.pts.length, mission_rev: d.mission_rev, by: d.by, at: d.at });
+
 // Một Durable Object duy nhất giữ vị trí mới nhất của từng phao, lộ trình chung,
 // và phát cả hai cho mọi trình duyệt đang mở.
 export class Hub extends DurableObject {
   buoys = null;     // id -> { msg, t }
   mission = null;   // { rev, waypoints, poly, spacing, angle, speed, by?, at? }
+  downlink = null;  // lộ trình đang gửi xuống phao (docs/lora-route-downlink.md)
   station = undefined;   // { msg, t } vị trí GPS trạm bờ; undefined = chưa tải, null = chưa có
   hist = {};        // id -> [{ t, rssi, snr, lat?, lon? }], mỗi phao một khóa lưu trữ `h:<id>`
   persistedAt = {}; // id -> thời điểm ghi kho gần nhất (chỉ trong bộ nhớ)
@@ -26,6 +30,12 @@ export class Hub extends DurableObject {
   async loadMission() {
     if (!this.mission) this.mission = (await this.ctx.storage.get("mission")) || { ...EMPTY_MISSION };
     return this.mission;
+  }
+
+  // Bản chụp lộ trình admin đã bấm "Gửi tới phao": { rev, id, loop, pts: [[lat, lon]], by, at }
+  async loadDownlink() {
+    if (!this.downlink) this.downlink = (await this.ctx.storage.get("downlink")) || { rev: 0 };
+    return this.downlink;
   }
 
   async loadStation() {
@@ -66,7 +76,25 @@ export class Hub extends DurableObject {
       const st = await this.loadStation();
       if (st) server.send(JSON.stringify({ type: "station", ...st.msg, age_s: Math.round((now - st.t) / 1000) }));
       server.send(JSON.stringify({ type: "mission", ...(await this.loadMission()) }));
+      const dl = await this.loadDownlink();
+      if (dl.rev) server.send(JSON.stringify(downlinkSummary(dl)));
       return new Response(null, { status: 101, webSocket: client });
+    }
+
+    if (url.pathname === "/downlink") {
+      if (request.method === "GET") return json(await this.loadDownlink());
+      if (request.method === "PUT") {
+        const { id, loop, clear, by } = await request.json();
+        const mission = await this.loadMission();
+        const prev = await this.loadDownlink();
+        const pts = clear ? [] : mission.waypoints.map(p => [p.lat, p.lon]);
+        // rev 1..65535 trên LoRa, 0 nghĩa là "chưa có"
+        this.downlink = { rev: (prev.rev % 65535) + 1, id, loop: !!loop, pts, mission_rev: mission.rev, by: by || null, at: Date.now() };
+        await this.ctx.storage.put("downlink", this.downlink);
+        const summary = downlinkSummary(this.downlink);
+        this.broadcast(summary);
+        return json(summary);
+      }
     }
 
     if (url.pathname === "/state") {

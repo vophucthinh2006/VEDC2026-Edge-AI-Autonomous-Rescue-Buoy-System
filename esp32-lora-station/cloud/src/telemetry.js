@@ -71,6 +71,13 @@ export function sanitizeBuoy(m) {
   // Số người phao đã báo phát hiện từ lúc khởi động; firmware cũ không gửi trường này
   if (Number.isInteger(m.victims) && inRange(m.victims, 0, 255)) out.victims = m.victims;
 
+  // Lộ trình gửi qua LoRa: phao đang giữ/nhận bản rev, đã có have điểm, pi = 1 khi Pi đã nhận đủ
+  const r = m.route;
+  if (r && typeof r === "object" && Number.isInteger(r.rev) && inRange(r.rev, 1, 65535) &&
+      Number.isInteger(r.have) && inRange(r.have, 0, 300) && [0, 1].includes(r.pi)) {
+    out.route = { rev: r.rev, have: r.have, pi: r.pi };
+  }
+
   const attitudeKeys =["roll", "pitch", "yaw", "target_yaw", "mode", "imu_ok", "calib", "seq"];
   const hasAttitude = attitudeKeys.some(key => Object.hasOwn(m, key));
   if (!hasAttitude) return out;

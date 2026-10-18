@@ -217,8 +217,10 @@
           <button class="btn danger" id="m-clear" type="button"><i class="ph ph-trash" aria-hidden="true"></i>Xóa hết</button>
           <button class="btn" id="m-export" type="button"><i class="ph ph-export" aria-hidden="true"></i>Xuất file</button>
           <button class="btn" id="m-import" type="button"><i class="ph ph-download-simple" aria-hidden="true"></i>Nhập file</button>
-          <button class="btn primary wide" id="m-send" type="button" disabled title="Chưa có kênh gửi lộ trình xuống phao"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i>Gửi tới phao</button>
-          <div id="m-note">Lộ trình được lưu trên máy chủ và mọi người cùng thấy. Chưa có kênh gửi xuống phao nên nút gửi đang khóa.</div>
+          <label id="m-loopwrap" class="wide"><input id="m-loop" type="checkbox"> Đi vòng: hết lộ trình thì quay lại điểm đầu</label>
+          <button class="btn primary wide" id="m-send" type="button" title="Phát lộ trình đang lưu xuống phao qua trạm bờ LoRa"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i>Gửi tới phao</button>
+          <div id="m-sendstat" class="wide" aria-live="polite"></div>
+          <div id="m-note">Lộ trình được lưu trên máy chủ và mọi người cùng thấy. "Gửi tới phao" phát bản đang lưu qua trạm bờ LoRa tới phao STM32 đang chọn; sửa lộ trình sau đó thì phải gửi lại.</div>
           <input id="m-file" type="file" accept="application/json,.json" hidden>
         </div>
       </div>
