@@ -10,7 +10,9 @@
 #define REG_FIFO_ADDR_PTR        0x0DU
 #define REG_FIFO_TX_BASE_ADDR    0x0EU
 #define REG_FIFO_RX_BASE_ADDR    0x0FU
+#define REG_FIFO_RX_CURRENT_ADDR 0x10U
 #define REG_IRQ_FLAGS            0x12U
+#define REG_RX_NB_BYTES          0x13U
 #define REG_MODEM_CONFIG_1       0x1DU
 #define REG_MODEM_CONFIG_2       0x1EU
 #define REG_PREAMBLE_MSB         0x20U
@@ -27,8 +29,11 @@
 #define MODE_SLEEP               0x00U
 #define MODE_STDBY               0x01U
 #define MODE_TX                  0x03U
+#define MODE_RX_CONTINUOUS       0x05U
 
 #define IRQ_TX_DONE              0x08U
+#define IRQ_RX_DONE              0x40U
+#define IRQ_PAYLOAD_CRC_ERROR    0x20U
 
 #define SPI_TIMEOUT_MS           5U
 
@@ -61,6 +66,17 @@ static bool write_fifo(sx127x_t *d, const uint8_t *data, uint8_t len)
     nss(d, GPIO_PIN_RESET);
     HAL_StatusTypeDef st = HAL_SPI_Transmit(d->hspi, buf, (uint16_t)(len + 1U), SPI_TIMEOUT_MS);
     nss(d, GPIO_PIN_SET);
+    return st == HAL_OK;
+}
+
+static bool read_fifo(sx127x_t *d, uint8_t *data, uint8_t len)
+{
+    uint8_t tx[SX127X_MAX_PAYLOAD + 1U] = { (uint8_t)(REG_FIFO & 0x7FU) };
+    uint8_t rx[SX127X_MAX_PAYLOAD + 1U];
+    nss(d, GPIO_PIN_RESET);
+    HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(d->hspi, tx, rx, (uint16_t)(len + 1U), SPI_TIMEOUT_MS);
+    nss(d, GPIO_PIN_SET);
+    for (uint8_t i = 0U; i < len; i++) data[i] = rx[1U + i];
     return st == HAL_OK;
 }
 
@@ -156,6 +172,30 @@ bool SX127x_TxDone(sx127x_t *d)
     if ((SX127x_ReadReg(d, REG_IRQ_FLAGS) & IRQ_TX_DONE) == 0U) return false;
     (void)write_reg(d, REG_IRQ_FLAGS, 0xFFU);
     (void)set_mode(d, MODE_STDBY);
+    return true;
+}
+
+bool SX127x_StartRx(sx127x_t *d)
+{
+    bool ok = set_mode(d, MODE_STDBY);
+    ok &= write_reg(d, REG_FIFO_ADDR_PTR, 0x00U);
+    ok &= write_reg(d, REG_IRQ_FLAGS, 0xFFU);
+    ok &= set_mode(d, MODE_RX_CONTINUOUS);
+    return ok;
+}
+
+bool SX127x_ReadPacket(sx127x_t *d, uint8_t *buf, uint8_t max, uint8_t *len)
+{
+    uint8_t irq = SX127x_ReadReg(d, REG_IRQ_FLAGS);
+    if ((irq & IRQ_RX_DONE) == 0U) return false;
+    (void)write_reg(d, REG_IRQ_FLAGS, 0xFFU);
+    if ((irq & IRQ_PAYLOAD_CRC_ERROR) != 0U) return false;
+    uint8_t count = SX127x_ReadReg(d, REG_RX_NB_BYTES);
+    if (count > max) count = max;
+    if (count > SX127X_MAX_PAYLOAD) count = SX127X_MAX_PAYLOAD;
+    if (!write_reg(d, REG_FIFO_ADDR_PTR, SX127x_ReadReg(d, REG_FIFO_RX_CURRENT_ADDR))) return false;
+    if (!read_fifo(d, buf, count)) return false;
+    *len = count;
     return true;
 }
 

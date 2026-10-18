@@ -1,6 +1,7 @@
 #pragma once
 
-/* SX1276/77/78/79 driver (RA-02 module) for the STM32 HAL, transmit only.
+/* SX1276/77/78/79 driver (RA-02 module) for the STM32 HAL: transmit, and receive by polling the
+ * IRQ flags over SPI (no DIO0 line needed).
  * It knows nothing about the App layer: settings come in through a struct, pins through a handle.
  * Non-blocking: SX127x_StartTx() only loads the FIFO and starts TX, SX127x_TxDone() checks the flag.
  * Registers follow the Semtech datasheet, with the same formulas as
@@ -11,7 +12,7 @@
 #include "stm32f4xx_hal.h"
 
 #define SX127X_VERSION_EXPECTED  0x12U
-#define SX127X_MAX_PAYLOAD       100U
+#define SX127X_MAX_PAYLOAD       120U   /* beacon with the route field, RTE frames from the station */
 
 typedef struct {
     SPI_HandleTypeDef *hspi;
@@ -49,7 +50,14 @@ bool SX127x_StartTx(sx127x_t *dev, const uint8_t *data, uint8_t len);
 /* True once the packet is out (clears the flag, back to standby). Poll it after StartTx. */
 bool SX127x_TxDone(sx127x_t *dev);
 
-/* Abort TX, back to standby. */
+/* Continuous receive. Poll SX127x_ReadPacket() for what arrives. */
+bool SX127x_StartRx(sx127x_t *dev);
+
+/* A packet received since the last call: copies up to max bytes into buf, sets *len and returns
+ * true. False when nothing came, or what came failed its CRC (dropped). Stays in receive. */
+bool SX127x_ReadPacket(sx127x_t *dev, uint8_t *buf, uint8_t max, uint8_t *len);
+
+/* Abort TX or RX, back to standby. */
 void SX127x_Standby(sx127x_t *dev);
 
 /* Read one register (diagnostics). */

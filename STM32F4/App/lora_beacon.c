@@ -2,20 +2,24 @@
 #include "app_config.h"
 #include "main.h"
 #include "sx127x.h"
+#include "route_link.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
-/* Compact frame, always below 100 bytes because the station keeps 100 bytes:
+/* Compact frame, at most 120 bytes (the station parses up to 127):
  * id=PHAO-01,10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=280.0,m=A,i=1,c=3,q=12,v=0
  * id=PHAO-01,NO_FIX,r=2.1,p=-1.4,y=278.5,t=-1.0,m=S,i=0,c=0,q=13,v=1
  * v is the number of people the Pi has reported since boot.
- * The two decimal tokens without '=' remain lat/lon for backward compatibility. */
+ * The two decimal tokens without '=' remain lat/lon for backward compatibility.
+ * Once a route has come over LoRa the frame ends with w=rev:have:pi (route_link.h). */
 
 #define TX_TIMEOUT_MS      1500U   /* SF9 BW125 takes ~0.4 s on air, over 1.5 s means a fault */
 #define TX_POLL_PERIOD_MS  5U      /* do not poll TX_DONE every loop pass, it costs SPI time */
 #define FIRST_TX_DELAY_MS  1000U
-#define LORA_FRAME_SIZE    100U
+#define LORA_FRAME_SIZE    SX127X_MAX_PAYLOAD
+#define RX_WINDOW_MS       1500U   /* the station answers ~50 ms after the beacon; its frame takes ~0.5 s */
+#define ROUTE_BEACON_MS    1500U   /* beacon period while a route is coming in, one frame per beacon */
 
 volatile lora_debug_t lora_debug;
 
@@ -28,6 +32,8 @@ static uint32_t next_tx_ms;
 static uint32_t tx_start_ms;
 static uint32_t last_poll_ms;
 static uint8_t victims;
+static uint32_t rx_start_ms;
+static route_link_t route;
 
 /* Round to the 0.1 deg the frame carries, then wrap: 359.96 would print as
  * "360.0", which the station rejects as out of range. */
@@ -66,8 +72,14 @@ static uint16_t build_frame(char *buf, size_t size, uint32_t now_ms)
                      (unsigned long)lora_debug.seq, (unsigned int)victims);
     }
     lora_debug.gps_valid = fix ? 1U : 0U;
-    if (n < 0) return 0U;
-    return (uint16_t)((size_t)n >= size ? size - 1U : (size_t)n);
+    if (n < 0 || (size_t)n >= size) return 0U;   /* never send a cut frame */
+    char field[24];
+    if (RouteLink_BeaconField(&route, field, sizeof(field)) > 0U) {
+        int m = snprintf(buf + n, size - (size_t)n, ",%s", field);
+        if (m > 0 && (size_t)(n + m) < size) n += m;
+        else buf[n] = '\0';                       /* no room: the frame goes out without it */
+    }
+    return (uint16_t)n;
 }
 #endif /* LORA_ENABLED */
 
@@ -110,6 +122,7 @@ void LoraBeacon_Init(SPI_HandleTypeDef *hspi, const gps_state_t *gps,
     }
     lora_debug.init_ok = 1U;
     lora_debug.state = LORA_STATE_IDLE;
+    RouteLink_Init(&route);
     next_tx_ms = HAL_GetTick() + FIRST_TX_DELAY_MS;
 #endif
 }
@@ -134,7 +147,7 @@ void LoraBeacon_Tick(uint32_t now_ms)
 
         char frame[LORA_FRAME_SIZE];
         uint16_t len = build_frame(frame, sizeof(frame), now_ms);
-        next_tx_ms = now_ms + LORA_BEACON_PERIOD_MS;
+        next_tx_ms = now_ms + (RouteLink_Receiving(&route) ? ROUTE_BEACON_MS : LORA_BEACON_PERIOD_MS);
         lora_debug.seq++;
         if (len > 0U && SX127x_StartTx(&radio, (const uint8_t *)frame, (uint8_t)len)) {
             lora_debug.last_len = len;
@@ -151,14 +164,54 @@ void LoraBeacon_Tick(uint32_t now_ms)
         if (SX127x_TxDone(&radio)) {
             lora_debug.tx_count++;
             lora_debug.last_tx_ms = now_ms;
-            lora_debug.state = LORA_STATE_IDLE;
+            /* Listen for the station's answer; without it the radio rests until the next beacon. */
+            rx_start_ms = now_ms;
+            lora_debug.state = SX127x_StartRx(&radio) ? LORA_STATE_RX : LORA_STATE_IDLE;
         } else if ((uint32_t)(now_ms - tx_start_ms) > TX_TIMEOUT_MS) {
             SX127x_Standby(&radio);
             lora_debug.tx_fail++;
             lora_debug.state = LORA_STATE_IDLE;
         }
+    } else if (lora_debug.state == LORA_STATE_RX) {
+        if ((uint32_t)(now_ms - last_poll_ms) < TX_POLL_PERIOD_MS) return;
+        last_poll_ms = now_ms;
+        uint8_t frame[LORA_FRAME_SIZE + 1U];
+        uint8_t len = 0U;
+        bool got = SX127x_ReadPacket(&radio, frame, LORA_FRAME_SIZE, &len);
+        if (got) {
+            frame[len] = '\0';
+            bool was_receiving = RouteLink_Receiving(&route);
+            if (RouteLink_OnFrame(&route, (const char *)frame, LORA_BUOY_ID) && RouteLink_Complete(&route) &&
+                (was_receiving || route.total == 0U)) {
+                next_tx_ms = now_ms;   /* tell the station at once that the route is complete */
+            }
+        }
+        /* One answer per beacon: stop listening once it is in, or when the window closes. */
+        if (got || (uint32_t)(now_ms - rx_start_ms) > RX_WINDOW_MS) {
+            SX127x_Standby(&radio);
+            lora_debug.state = LORA_STATE_IDLE;
+        }
     }
 #else
     (void)now_ms;
+#endif
+}
+
+void LoraBeacon_SetPiRouteRev(uint16_t rev)
+{
+#if LORA_ENABLED
+    RouteLink_SetPiRev(&route, rev);
+#else
+    (void)rev;
+#endif
+}
+
+bool LoraBeacon_NextPiRouteLine(uint16_t seq, uint32_t now_ms, char *buf, size_t size)
+{
+#if LORA_ENABLED
+    return RouteLink_NextPiLine(&route, seq, now_ms, buf, size);
+#else
+    (void)seq; (void)now_ms; (void)buf; (void)size;
+    return false;
 #endif
 }

@@ -20,6 +20,7 @@ typedef struct {
     uint8_t victim_count;         /* VICTIM_FOUND events since boot, stops at 255; sent to shore in the LoRa beacon */
     float cam_pan_deg;            /* camera servo angle from the bow, positive right */
     uint32_t last_cam_ms;         /* 0 until the first CAM packet */
+    uint16_t route_rev;           /* LoRa route the Pi reports in $HBT, 0 = none (App/route_link.h) */
 } pi_command_t;
 
 void Protocol_Init(pi_command_t *command);
