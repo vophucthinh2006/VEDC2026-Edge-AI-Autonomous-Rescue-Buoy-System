@@ -1,11 +1,10 @@
 # The Pixhawk boat (Raspberry Pi + Pixhawk + STM32F103), on top of settings.yaml.
 # run.sh pixhawk adds this file by itself; the simulator uses sim.yaml instead.
 lidar:
-  source: serial              # the LDS-008 on serial.lidar_port
+  source: serial              # the LD14 on serial.lidar_port
 serial:
-  # The LDS-008 on its own USB-to-TTL adapter (socket usb-0:1.3), same reasoning as helper.port.
-  # Not decoded yet on the bench: the motor does not spin on startlds$ and no packet passes its
-  # checksum (docs/porting-checklist.md, step 4). Until it does, the Pi sends no obstacles.
+  # The LD14 on its own USB-to-TTL adapter (socket usb-0:1.3), same reasoning as helper.port.
+  # It needs only its TX wired to the adapter's RXD (and 5 V, GND): it spins and streams on power.
   lidar_port: /dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-port0
 helper:
   # The STM32F103 on its USB-to-TTL adapter; it drives the camera servo. By USB socket, not

@@ -1,12 +1,12 @@
 # On top of sim.yaml: the simulator reached the way the boat's hardware is (sim/run_boat.sh --pi --hw).
-# The LiDAR comes as the LDS-008's serial stream and the camera servo goes through the helper
-# board, both stand-ins behind pseudo-terminals (sim/tools/lds008_emulator.py, helper_board_sim.py).
+# The LiDAR comes as the LD14's serial stream and the camera servo goes through the helper
+# board, both stand-ins behind pseudo-terminals (sim/tools/ld14_emulator.py, helper_board_sim.py).
 # Their paths are written by the launcher into a second overlay (hw_ports.yaml):
-#   serial: {lidar_port: ...}
+#   serial: {lidar_port: ..., lidar_model: ld14 (or lds008 with VEDC_LIDAR_MODEL=lds008)}
 #   helper: {port: ...}
 lidar:
   source: serial
 serial:
-  lidar_model: lds008
+  lidar_model: ld14
 camera:
   pan_via: helper             # the Gazebo camera is turned by the simulated board, not by the Pi

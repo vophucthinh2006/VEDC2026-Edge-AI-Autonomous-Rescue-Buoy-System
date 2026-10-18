@@ -55,6 +55,37 @@ class LD14Decoder:
         return points
 
 
+POINTS_PER_PACKET = 12
+
+
+def encode_packet(start_deg: float, end_deg: float, points: list[tuple[float, int]], speed_dps: int = 2160,
+                  timestamp_ms: int = 0) -> bytes:
+    """One 47-byte packet: header, speed (deg/s), start angle, 12 x (distance mm, intensity), end
+    angle (both 0.01 deg, clockwise), timestamp (ms), CRC-8. For the simulator's stand-in and tests."""
+    assert len(points) == POINTS_PER_PACKET
+    body = bytearray(HEADER)
+    body += int(speed_dps).to_bytes(2, "little")
+    body += (round(start_deg * 100) % 36000).to_bytes(2, "little")
+    for distance_m, intensity in points:
+        body += min(0xFFFF, max(0, round(distance_m * 1000))).to_bytes(2, "little") + bytes([intensity & 0xFF])
+    body += (round(end_deg * 100) % 36000).to_bytes(2, "little")
+    body += (timestamp_ms % 30000).to_bytes(2, "little")
+    return bytes(body) + bytes([crc8(body)])
+
+
+def encode_scan(distances_m: list[float | None], scan_hz: float = 6.0, timestamp_ms: int = 0) -> bytes:
+    """A whole revolution, len(distances_m) evenly spaced samples clockwise from the module's zero
+    (a multiple of 12; the LD14 makes about 2300 / 6 = 384), as packets. None: no return, sent as 0 mm."""
+    count = len(distances_m)
+    step = 360.0 / count
+    packets = []
+    for first in range(0, count - count % POINTS_PER_PACKET, POINTS_PER_PACKET):
+        chunk = [(d if d is not None else 0.0, 200 if d is not None else 0) for d in distances_m[first:first + POINTS_PER_PACKET]]
+        packets.append(encode_packet(first * step, (first + POINTS_PER_PACKET - 1) * step, chunk,
+                                     round(360.0 * scan_hz), timestamp_ms))
+    return b"".join(packets)
+
+
 class ScanAssembler:
     """Accumulates one revolution; a wrap in angle marks a finished scan."""
     def __init__(self) -> None:
