@@ -50,6 +50,22 @@ int main(void) {
 
     assert(!lora_payload_parse("", &payload));
 
+    /* Route progress (docs/lora-route-downlink.md); the longest frame with it stays under 120 bytes. */
+    frame = "id=PHAO-01,-10.762622,-106.660172,r=-179.9,p=-89.9,y=359.9,t=359.9,m=A,i=1,c=3,q=4294967295,v=255,w=65535:300:1";
+    assert(strlen(frame) <= 120U);
+    assert(lora_payload_parse(frame, &payload));
+    assert(payload.has_attitude && payload.has_victims && payload.has_route);
+    assert(payload.route_rev == 65535U && payload.route_have == 300U && payload.route_pi == 1U);
+    assert(lora_payload_parse("id=PHAO-01,10.0,106.0,r=0,p=0,y=0,t=0,m=A,i=1,c=3,q=1,v=0,w=7:12:0", &payload));
+    assert(payload.has_route && payload.route_rev == 7U && payload.route_have == 12U && payload.route_pi == 0U);
+    const char *bad_route[] = { "w=0:1:0", "w=7:301:0", "w=7:1:2", "w=7:1", "w=x:1:0", "w=7::0" };
+    for (size_t i = 0; i < sizeof(bad_route) / sizeof(bad_route[0]); i++) {
+        char text[96];
+        snprintf(text, sizeof(text), "id=PHAO-01,10.0,106.0,r=0,p=0,y=0,t=0,m=A,i=1,c=3,q=1,%s", bad_route[i]);
+        assert(lora_payload_parse(text, &payload));
+        assert(!payload.has_route && payload.has_attitude);
+    }
+
     puts("lora_payload_test: PASS");
     return 0;
 }

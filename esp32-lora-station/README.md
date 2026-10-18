@@ -66,6 +66,8 @@ esp32-lora-station/
 | `POST /api/auth/logout` | — | xóa phiên |
 | `GET /ws`, `GET /api/state`, `GET /api/mission` | khách/admin | dữ liệu |
 | `PUT /api/mission` | **admin** | lưu lộ trình `{waypoints, poly, spacing, angle, speed}` (≤ 300 điểm) |
+| `POST /api/mission/send` `{id?, loop?, clear?}` | **admin** | nút "Gửi tới phao": chụp lộ trình đang lưu thành bản gửi xuống phao `id` (mặc định `PHAO-01`) |
+| `GET /api/downlink` | token ESP32 | trạm lấy bản gửi `{rev, id, loop, pts: [[lat, lon]]}` để phát LoRa (`{rev: 0}`: chưa gửi gì) |
 
 Mọi POST/PUT từ trình duyệt phải có header `Origin` trùng chính trang (chống CSRF). Phiên là cookie
 `HttpOnly; Secure; SameSite=Lax` ký HMAC; admin sống 7 ngày, khách 1 ngày. Mỗi request admin kiểm tra lại
@@ -235,6 +237,8 @@ RST->GPIO9       DIO0->GPIO8
 - Cấu hình LoRa (433 MHz, SF9, BW125 kHz, CR 4/5, sync word `0xF3`) phải khớp với node.
 - Bản đồ dùng Leaflet, tile OSM và nút đăng nhập Google tải từ internet, thiết bị mở web cần internet.
 - Chế độ Khách mở tự do: ai có link đều xem được vị trí phao (không sửa được gì).
-- Chưa có kênh gửi lộ trình xuống phao (nút "Gửi tới phao" đang khóa). Lộ trình đã nằm trên server nên bước tiếp theo
-  có thể là `GET /api/mission` dành cho ESP32 (xác thực bằng `INGEST_TOKEN`).
+- Gửi lộ trình xuống phao STM32 qua LoRa: admin bấm "Gửi tới phao", trạm hỏi `GET /api/downlink` mỗi 5 giây và trả lời
+  mỗi beacon của phao bằng một khung `RTE` (4 điểm). Phao báo tiến độ trong trường `w=` của beacon, dashboard hiện
+  "đang nhận k/n", "đã nhận đủ" rồi "Pi đã nhận". Chi tiết: [docs/lora-route-downlink.md](../docs/lora-route-downlink.md).
+  Phao Pixhawk không nhận qua đường này (lộ trình của nó nạp bằng Mission Planner).
 - WiFi và mật khẩu cũ (`khanh tran`) đã nằm trong lịch sử git; nếu là mạng thật thì nên đổi mật khẩu.
