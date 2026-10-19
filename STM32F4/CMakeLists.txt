@@ -48,7 +48,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/Actuators/actuators.c
     Modules/BNO055/bno055.c
     Modules/GPS/gps_nmea.c
-    Modules/IBUS/ibus.c
     Modules/PiLink/uart_protocol.c
     Modules/Buzzer/buzzer.c
     Modules/LoRa/sx127x.c
@@ -56,7 +55,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/heading_controller.c
     App/camera_pan.c
     App/confirm_button.c
-    App/manual.c
     App/imu.c
     App/hw_test.c
     App/lora_beacon.c
@@ -69,7 +67,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/Actuators
     Modules/BNO055
     Modules/GPS
-    Modules/IBUS
     Modules/PiLink
     Modules/Buzzer
     Modules/LoRa

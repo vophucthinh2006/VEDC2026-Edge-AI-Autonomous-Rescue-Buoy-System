@@ -9,6 +9,9 @@ FOLLOW  somebody was seen in confirm_frames frames within confirm_s: the navigat
         The detector looks about once every 0.8 s; between looks the last sighting is kept, as a
         compass bearing so it stays right while the boat turns, for up to lost_s.
 SEARCH  again after lost_s without a sighting.
+
+With follow.only_on_route (the STM32 boat with no RC transmitter) the boat moves only while it
+has a route from the dashboard: with none, plan() stands by and nobody is followed.
 """
 from __future__ import annotations
 
@@ -73,6 +76,22 @@ class Follow:
         held = HumanTarget(signed_angle_deg(self._last_world_deg - snap.imu.yaw_deg), self._last.distance_m,
                            self._last.confidence, self._last.timestamp)
         return replace(snap, human_target=held), events
+
+    def plan(self, snap: Snapshot, waypoint: tuple[float, float] | None, now: float,
+             only_on_route: bool) -> tuple[Snapshot, list[Event]]:
+        """The snapshot for the navigator and what happened: step() toward the route's waypoint,
+        or stand_by() when only_on_route holds and there is no waypoint to go to."""
+        if only_on_route and waypoint is None:
+            return self.stand_by(snap), []
+        return self.step(replace(snap, waypoint=waypoint), now)
+
+    def stand_by(self, snap: Snapshot) -> Snapshot:
+        """No route to run (follow.only_on_route): forget any sighting and give the navigator
+        neither a waypoint nor a person, so it stops (no_goal)."""
+        self.phase = SEARCH
+        self._sightings.clear()
+        self._last = None
+        return replace(snap, waypoint=None, human_target=None)
 
     def describe(self) -> str:
         return self.phase if self.phase == SEARCH else f"FOLLOW {self._last.distance_m:.1f} m" if self._last else FOLLOW

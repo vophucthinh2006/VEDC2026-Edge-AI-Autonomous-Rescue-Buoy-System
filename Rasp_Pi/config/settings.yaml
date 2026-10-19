@@ -200,11 +200,17 @@ rescue:
 # list of lat/lon or a Mission Planner .waypoints file; tools/set_waypoints.py writes it. No file: no route.
 mission:
   file: config/mission_stm32.yaml
+  # false: only the file's geofence is used; the waypoints come from the dashboard alone
+  # (docs/lora-route-downlink.md). config/boat_stm32.yaml sets it.
+  waypoints_from_file: true
 # STM32 boat (main.py) only: SEARCH the route, FOLLOW a person, back (modules/follow.py).
 follow:
   confirm_frames: 3           # seen in this many detector passes
   confirm_s: 2.5              # within this long (the 640 px detector looks about every 0.8 s)
   lost_s: 4.0                 # no sighting this long while following: back to the route
+  # true: with no route to run (none sent yet, an empty one sent, or the last waypoint reached)
+  # the boat stays still and follows nobody. config/boat_stm32.yaml sets it: no RC to stop it.
+  only_on_route: false
 # STM32 boat (main.py) only: spoken messages (modules/announcer.py), WAVs from tools/make_sounds.ps1.
 audio:
   device: plughw:0,0          # the Pi's 3.5 mm jack; plughw:1,0 is the HDMI monitor

@@ -7,8 +7,9 @@ target keeps running. The ELF must match the flashed firmware.
     python Tools/heading_monitor.py --csv run.csv  # also log every sample
 
 Desk check: turn the IMU clockwise (seen from above) -> yaw rises and
-rate is positive. With hold locked, turning the IMU right of the target
+rate is positive. With the Pi driving (AUTO), turning the IMU right of the target
 must give u < 0: rudders swing the bow left and the RIGHT motor speeds up.
+There is no RC: the boat is armed whenever it is safe and the Pi decides when it moves.
 """
 from __future__ import annotations
 
@@ -21,30 +22,19 @@ import time
 
 from bno055_monitor import DEFAULT_STLINK_CLI, ROOT, find_tool, load_symbols, memory_block, parse_memory
 
-STATE = {0: "OFF", 1: "WAIT", 2: "HOLD", 3: "AUTO"}
-BLOCK = {  # hold_block_t in App/control.h
+STATE = {0: "OFF", 1: "AUTO"}
+BLOCK = {  # drive_block_t in App/control.h
     0: "-",
-    1: "not armed (SwD)",
-    2: "SwB at AUTO",
-    3: "speed stick (CH2) not centred since arming",
-    4: "IMU stale (Euler or gyro read failing)",
-    5: "no forward throttle: CH2 forward and CH3 above 1050",
-    6: "steering CH1 not centred (1500 +/- RC_HOLD_STEER_BAND_US)",
-    7: "RC_HEADING_HOLD_ENABLED is 0",
+    1: "not armed",
+    2: "the Pi is not driving: no route from the dashboard, NAV STOP, or no NAV/HBT",
+    3: "IMU stale (Euler or gyro read failing)",
 }
 ARM_BLOCK = {  # arm_block_t in App/control.h
     0: "-",
-    1: "no iBUS from the receiver (RC lost)",
-    2: "IMU stale",
-    3: "E-STOP active: PE4 reads pressed (check ESTOP_CONTACT_NC and the wiring)",
-    4: "overturned: roll or pitch above 35 deg",
-    5: "SwD not ON: CH6 must reach 1800 (Aux. channels: CH6 source = SwD?) / SwD flipped OFF",
-    6: "SwD was ON at start: flip SwD OFF then ON again",
-    7: "SwB at AUTO: CH5 must stay below 1600",
-    8: "left stick CH3 not at the bottom (<= 1050)",
-    9: "right stick CH2 not centred",
+    1: "IMU stale",
+    2: "overturned: roll or pitch above 35 deg",
 }
-HEADING_FORMAT = "<13f6H7B"         # heading_debug_t: 13 floats, CH1/2/3/5/6, imu_fail, state, imu_ok, block, armed, arm_block, estop, last_disarm
+HEADING_FORMAT = "<13fH6B"          # heading_debug_t: 13 floats, imu_fail, state, imu_ok, block, armed, arm_block, last_disarm
 HEADING_SIZE = struct.calcsize(HEADING_FORMAT)
 ESC_NAMES = ("front", "right", "left")  # esc_id_t order
 SERVO_NAMES = ("cam", "front", "right", "left")  # servo_id_t order
@@ -64,8 +54,7 @@ def read_snapshot(cli: str, symbols: dict[str, int]) -> dict[str, object]:
     values = struct.unpack(HEADING_FORMAT, memory_block(memory, symbols["heading_debug"], HEADING_SIZE))
     actuators = memory_block(memory, symbols["actuator_debug"], ACTUATOR_SIZE)
     names = ("target", "yaw", "rate", "error", "p", "i", "d", "u", "steer", "left", "right", "roll", "pitch",
-             "ch_steer", "ch_speed", "ch_power", "ch_mode", "ch_arm", "imu_fail",
-             "state", "imu_ok", "block", "armed", "arm_block", "estop", "last_disarm")
+             "imu_fail", "state", "imu_ok", "block", "armed", "arm_block", "last_disarm")
     snap: dict[str, object] = dict(zip(names, values))
     snap["esc_us"] = struct.unpack("<3H", actuators[16:22])
     snap["servo_us"] = struct.unpack("<4H", actuators[22:30])
@@ -77,16 +66,13 @@ def print_snapshot(s: dict[str, object]) -> None:
     target = float(s["target"])
     print(f"uptime={int(s['tick']) / 1000.0:8.1f}s  state={STATE.get(int(s['state']), s['state'])}  "
           f"armed={int(s['armed'])}  imu={'OK' if s['imu_ok'] else 'STALE'}")
-    print(f"RC: CH1 steer={s['ch_steer']}  CH2 speed={s['ch_speed']}  CH3 power={s['ch_power']}  "
-          f"CH5 SwB={s['ch_mode']}  CH6 SwD={s['ch_arm']}")
-    print(f"E-stop={'PRESSED' if s['estop'] else 'released'}  roll={float(s['roll']):6.1f}  pitch={float(s['pitch']):6.1f}  "
-          f"IMU read fails={s['imu_fail']}")
+    print(f"roll={float(s['roll']):6.1f}  pitch={float(s['pitch']):6.1f}  IMU read fails={s['imu_fail']}")
     if int(s["last_disarm"]):
         print(f"last disarm: {ARM_BLOCK.get(int(s['last_disarm']), s['last_disarm'])}")
     if not int(s["armed"]):
         print(f"ARM blocked: {ARM_BLOCK.get(int(s['arm_block']), s['arm_block'])}")
-    elif int(s["state"]) in (0, 3) and int(s["block"]) != 0:
-        print(f"HOLD blocked: {BLOCK.get(int(s['block']), s['block'])}")
+    elif int(s["block"]) != 0:
+        print(f"not driving: {BLOCK.get(int(s['block']), s['block'])}")
     print(f"yaw={float(s['yaw']):7.1f} deg  rate={float(s['rate']):7.1f} deg/s  "
           f"target={'  -  ' if target < 0 else f'{target:7.1f}'}  error={float(s['error']):7.1f}")
     print(f"P={float(s['p']):+.3f}  I={float(s['i']):+.3f}  D={float(s['d']):+.3f}  ->  u={float(s['u']):+.3f}"

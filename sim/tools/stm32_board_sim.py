@@ -16,8 +16,8 @@ STM32F4/Modules/PiLink/uart_protocol.c) and does in Gazebo what the F407 does on
                            (App/route_link.c itself, through ctypes), $RTE lines to the Pi until
                            its $HBT reports the route (docs/lora-route-downlink.md)
 
-There is no RC receiver: the board is armed, and the mode switch SwB stands where --switch puts it
-(AUTO by default, as on the pool test). PE4 is the victim's confirm button, not an E-stop: a file named
+There is no RC transmitter, as on the boat (STM32F4/App/control.c): the board is armed whenever it is
+safe and AUTO is the only mode; the motors turn while the Pi drives. PE4 is the victim's confirm button, not an E-stop: a file named
 "confirm" in --dir is one press (counted in $SYS, then the file is removed).
 Everything the board decides is appended to <dir>/stm32_events.log, a status line a second goes
 to stdout.
@@ -245,10 +245,10 @@ class Board:
             self.confirm_presses += 1
             self.event(f"confirm button pressed ({self.confirm_presses})")
         overturned = imu_fresh and (abs(pitch) > MAX_PITCH_DEG or abs(roll) > MAX_ROLL_DEG)
-        # No RC: armed whenever it is safe. (The boat needs the arm switch cycled after a stop.)
+        # No RC: armed whenever it is safe, AUTO the only mode (App/control.c).
         armed = imu_fresh and not self.estop and not overturned
         throttle, u, state = 0.0, 0.0, "S"
-        if armed and self.args.switch == "auto":
+        if armed:
             nav_fresh = self.nav_mode == "AUTO" and now - self.last_nav <= self.nav_ttl
             hbt_fresh = self.link_ok and now - self.last_hbt <= HBT_TIMEOUT_S
             if imu_fresh and nav_fresh and hbt_fresh:
@@ -303,7 +303,7 @@ class Board:
         course = math.degrees(math.atan2(ve, vn)) % 360.0
         self.send(fd, "IMU", seq, f"{pitch:.2f}", f"{roll:.2f}", f"{heading:.2f}", int(imu_ok), int(overturned))
         self.send(fd, "GPS", seq, f"{lat:.6f}", f"{lon:.6f}", self.args.gps_fix, "0.9", f"{speed:.2f}", f"{course:.1f}")
-        self.send(fd, "SYS", seq, "0.0", 0, int(self.estop), int(self.link_ok), int(self.armed), int(self.args.switch == "auto"),
+        self.send(fd, "SYS", seq, "0.0", 0, int(self.estop), int(self.link_ok), int(self.armed), 1,
                   self.confirm_presses)
         if self.lora is not None:
             # Route from the dashboard: one $RTE line a period until $HBT reports its revision.
@@ -409,7 +409,6 @@ def main() -> int:
     parser.add_argument("--dir", type=Path, default=Path("."), help="where stm32_events.log goes and the confirm file is looked for")
     parser.add_argument("--world", default="vedc_lake", help="Gazebo world name, for --start")
     parser.add_argument("--start", help="east,north,heading: move the buoy there first (metres from the origin, compass degrees)")
-    parser.add_argument("--switch", choices=("auto", "manual"), default="auto", help="where the RC mode switch SwB stands")
     parser.add_argument("--gps-fix", type=int, default=1, help="GGA fix quality the board forwards (1 GPS, 2 DGPS)")
     parser.add_argument("--rear-thrust-n", type=float, default=15.0, help="thrust of one rear motor at full throttle (model.sdf guess)")
     parser.add_argument("--radio-lib", type=Path, help="librouteradio.so: with it the board beacons over the simulated LoRa "
@@ -438,8 +437,8 @@ def main() -> int:
         args.pty.unlink()
     args.pty.symlink_to(os.ttyname(slave))
     os.set_blocking(master, False)
-    print(f"STM32F407 board on {args.pty} -> {os.ttyname(slave)}, switch {args.switch.upper()}", flush=True)
-    board.event(f"board up, switch {args.switch.upper()}")
+    print(f"STM32F407 board on {args.pty} -> {os.ttyname(slave)}, no RC: AUTO", flush=True)
+    board.event("board up, no RC: AUTO")
 
     signal.signal(signal.SIGTERM, signal.default_int_handler)   # the launcher stops it with SIGTERM
     pending, seq = b"", 0

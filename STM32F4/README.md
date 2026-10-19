@@ -23,11 +23,9 @@ STM32F4/
 │   ├── Actuators/         ESC (PWM trên TIM2) + servo bánh lái, ramp và đảo chiều
 │   ├── BNO055/            driver IMU (I2C) + calibration profile
 │   ├── GPS/               bộ phân tích NMEA
-│   ├── IBUS/              bộ phân tích khung iBUS của FS-iA6B
 │   └── PiLink/            mã hoá / giải mã khung với Raspberry Pi
 ├── App/                   tầng ứng dụng
-│   ├── control.c/.h       vòng điều khiển + watchdog an toàn, arm/disarm
-│   ├── manual.c/.h        trộn kênh iBUS thành lệnh lái tay kiểu xe RC
+│   ├── control.c/.h       vòng điều khiển + watchdog an toàn, arm khi an toàn, chỉ có AUTO
 │   ├── hw_test.c/.h       test bàn servo / ESC / còi qua debugger
 │   ├── camera_pan.c/.h    servo camera trượt mượt tới góc CAM (bộ P giới hạn tốc độ, như khớp Gazebo)
 │   ├── confirm_button.c/.h đếm số lần nhấn nút xác nhận PE4 (chống dội) để báo lên Pi
@@ -98,7 +96,7 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 |---|---|---|---|---|
 | UART Raspberry Pi | UART4 | PC10 TX, PC11 RX | 115200 8N1, RX interrupt | Pi GPIO15/RXD0 ← PC10; Pi GPIO14/TXD0 → PC11 |
 | GPS Holybro M10 V2 | USART3 | PB10 TX, PB11 RX | 9600 8N1, RX interrupt | GPS TX → PB11; GPS RX ← PB10 |
-| RC receiver FS-iA6B | USART2 | PA2 (single-wire half-duplex) | 115200 8N1, RX interrupt | cổng i-BUS SERVO: S → PA2, + → 5 V, − → GND |
+| (không dùng) USART2 | USART2 | PA2 (single-wire half-duplex) | 115200 8N1 | từng là iBUS của receiver FS-iA6B; đã bỏ tay cầm, firmware không đọc nữa (CubeMX vẫn khởi tạo) |
 | IMU BNO055 | I2C1 | PB8 SCL, PB9 SDA | Fast Mode 400 kHz | địa chỉ 0x29 (ADR thả nổi) |
 | Reset BNO055 | GPIO_Output | PB5 | mức cao khi chạy | chân nRESET của module |
 | ESC sau trái | TIM2_CH1 | PA5 | PWM 50 Hz, một chiều, dừng = 1000 µs, chạy 1500–2000 µs | chỉ dây signal + GND |
@@ -161,8 +159,9 @@ nội, nút thường mở nối xuống GND: nhấn là mức thấp. `App/conf
 (`CONFIRM_DEBOUNCE_MS`) và đếm số lần nhấn; số đếm đi lên Pi ở trường thứ 8 của `$SYS`, Pi
 phát loa "Đã xác nhận lấy đồ" mỗi khi số đếm tăng. Nút **không dừng gì cả**.
 
-Xuồng không có đầu vào E-stop riêng: tắt arm bằng SwD trên tay cầm, hoặc các điều kiện an
-toàn (mất link, lật, IMU lỗi) đưa ESC về dừng.
+Xuồng không có đầu vào E-stop riêng và không còn tay cầm. Motor dừng khi: admin gửi **lộ trình rỗng** từ
+dashboard (tới phao sau khoảng 5–10 s qua LoRa), thuyền đi hết lộ trình, Pi im hoặc gửi STOP, xuồng lật,
+IMU lỗi, hoặc tắt nguồn (mục 13).
 
 ---
 
@@ -171,7 +170,7 @@ toàn (mất link, lật, IMU lỗi) đưa ESC về dừng.
 Hiện chạy **HSI 16 MHz** → PLL (M=8, N=168, P=2) → **168 MHz**. APB1 42 MHz, APB2 84 MHz.
 
 HSI được trim ±1% ở 25 °C và trôi thêm theo nhiệt độ. UART bất đồng bộ có tổng ngân sách
-sai lệch khoảng 3% chia cho cả hai đầu, nên ở 115200 (với Pi, và USART2 với iBUS) biên
+sai lệch khoảng 3% chia cho cả hai đầu, nên ở 115200 (với Pi) biên
 còn lại khá mỏng — mà phao phơi nắng rồi xuống nước là môi trường trôi nhiệt độ mạnh.
 
 **Việc cần làm trước khi thử ngoài nước:** chuyển sang HSE 8 MHz trong CubeMX
@@ -353,7 +352,8 @@ Triệu chứng khác:
 
 | Hiện tượng | Nguyên nhân thường gặp |
 |---|---|
-| Xuồng không bao giờ arm được | `ibus.valid` false — dây iBUS không vào PA2 hoặc cắm nhầm cổng SENS; hoặc chưa gạt SwD về OFF trước khi arm, CH3 chưa thấp nhất, cần phải chưa về giữa, SwB đang ở AUTO — xem mục 13 |
+| Xuồng không bao giờ arm được | BNO055 không đọc được (`heading_debug.arm_block` = 1, IMU stale) hoặc xuồng nghiêng quá `MAX_PITCH_DEG` / `MAX_ROLL_DEG` (= 2) — xem mục 8 và 13 |
+| Đã arm mà motor không chạy | Pi không lái: chưa có lộ trình từ dashboard, Pi gửi STOP (`gps_stale_or_no_fix`, `no_goal`...) hoặc Pi im (`heading_debug.block` = 2) |
 | GPS không có fix, `gps.fix` = 0 | baud USART3. Holybro M10 nhiều khả năng mặc định **38400** chứ không phải 9600 — xác minh bằng u-center |
 | PWM ESC trái méo hoặc mất | PE3 không ở mức cao → LIS3DSH đang đẩy tín hiệu vào PA6 |
 | `bno055_read_status` thỉnh thoảng nhảy 2 | nhiễu I2C — dây dài, thiếu pull-up ở PB8 |
@@ -407,7 +407,8 @@ $RTE,seq,rev,first,total,loop,lat;lon,...*CS\n
 tới khi `$HBT` của Pi mang `route_rev` bằng `rev`. Sau mỗi beacon LoRa phao nghe 1.5 s để nhận khung `RTE` của trạm;
 đang nhận dở thì beacon 1.5 s một lần, và cuối beacon có `w=rev:have:pi`.
 
-`armed` và `auto` (công tắc SwB đang ở AUTO) để Pi biết lúc nào cho camera quét tìm. `estop` luôn 0
+`armed` (xuồng an toàn để chạy: IMU mới, không lật) và `auto` (luôn 1, không còn công tắc SwB) để Pi biết lúc nào cho
+camera quét tìm. `estop` luôn 0
 (PE4 giờ là nút xác nhận); `confirm_presses` là số lần nhấn nút đó từ lúc khởi động. Mỗi gói
 `TXD` có sự kiện `VICTIM_FOUND` làm tăng số người đã báo, số này đi theo khung LoRa (mục LoRa, trường `v`).
 
@@ -417,7 +418,7 @@ trượt tới góc đó (`CAM_PAN_SMOOTH_KP`, tối đa `CAM_PAN_MAX_RATE_DPS`)
 Checksum là XOR của các ký tự ASCII giữa `$` và `*`, giống `Rasp_Pi/utils/nmea_packet.py`.
 
 `NAV` và `HBT` phải mới hơn 300 ms. Nếu sai checksum, BNO055 lỗi, nghiêng
-quá `MAX_PITCH_DEG` / `MAX_ROLL_DEG`, hoặc receiver mất link — output ESC lập tức về stop.
+quá `MAX_PITCH_DEG` / `MAX_ROLL_DEG`, hoặc Pi im — output ESC lập tức về stop.
 
 Giữ hướng dùng PID trong `App/heading_controller.c`: `u = Kp·e + Ki·∫e − Kd·yaw_rate`,
 `u ∈ [-1, 1]`, dương là quay mũi sang phải. Khâu D lấy từ **gyro Z** của BNO055 (qua lọc thông
@@ -426,14 +427,10 @@ thấp 5 Hz), nên đổi đích không gây giật. Trong deadband 2° khâu P 
 sau (`u·HEADING_DIFF_GAIN`, chia quanh ga chung, không motor nào dưới 0). Pi gửi tốc độ 0 thì
 motor dừng, không xoay tại chỗ. Tham số trong `App/app_config.h`.
 
-Hướng đích đến từ hai nguồn:
-- **AUTO**: gói `NAV` của Pi.
-- **Giữ hướng bằng RC** (`RC_HEADING_HOLD_ENABLED`): ở MANUAL, đẩy ga tiến và thả cần lái về
-  giữa thì khóa yaw hiện tại (chờ phao quay chậm dưới 10°/s, tối đa 1 s). Đánh cần lái, lùi
-  hoặc bỏ ga là nhả. Không cần Pi.
+Hướng đích là gói `NAV` của Pi (AUTO, chế độ duy nhất).
 
 Theo dõi trực tiếp: `python Tools/heading_monitor.py` (thêm `--csv run.csv` để ghi log).
-AUTO yêu cầu IMU mới không quá 100 ms cùng NAV/HBT còn hạn. Rời AUTO, disarm hoặc mất
+AUTO yêu cầu IMU mới không quá 100 ms cùng NAV/HBT còn hạn. Pi gửi STOP, disarm hoặc mất
 bất kỳ nguồn dữ liệu nào sẽ dừng motor và xóa tích phân. Các hằng số nằm trong
 `App/app_config.h`; chỉ tuning trên nước sau khi đã thử khô với chân vịt tháo rời.
 
@@ -461,37 +458,34 @@ Trước khi mở PR, kiểm tra tối thiểu:
 
 ---
 
-## 13. Lái tay bằng FS-i6 / FS-iA6B
+## 13. Không có tay cầm: arm và chạy
 
-Receiver xuất iBUS qua cổng **i-BUS SERVO** vào PA2. Tay phát đặt **stick mode 2**, type
-**Airplane**, Aux channels: CH5 = **SwB**, CH6 = **SwD**. Reverse, sub-trim, trim để 0,
-end points 100 %, Mix / Throttle hold tắt. Failsafe **bắt buộc** ghi cho cả 6 kênh ở tư thế
-an toàn: cần ga thấp nhất, cần phải về giữa, SwB và SwD gạt lên.
+Thuyền **không còn tay cầm RC** (FS-i6 / FS-iA6B, chế độ MANUAL đã bỏ). `App/control.c`:
 
-| Kênh | Điều khiển | Tác dụng |
-|---|---|---|
-| CH1 | cần phải ngang | lái cả ba pod; pod trước quay ngược chiều hai pod sau |
-| CH2 | cần phải dọc, tự về giữa | lên: hai motor sau tiến. Xuống: motor sau tắt, motor trước lùi (cũng là phanh). Thả tay: dừng |
-| CH3 | cần trái dọc | **giới hạn công suất** cho CH2, không tự chạy motor |
-| CH4 | cần trái ngang | chưa dùng |
-| CH5 | SwB | lên MANUAL, xuống AUTO |
-| CH6 | SwD | lên DISARM, xuống ARM |
+- **Arm** khi an toàn: IMU mới (hoặc `BENCH_IGNORE_IMU` trên gá) và không lật. Không cần công tắc;
+  còi kêu 1 tiếng khi arm, 2 tiếng khi disarm. Lý do không arm: `heading_debug.arm_block`.
+- **AUTO là chế độ duy nhất.** Motor chỉ chạy khi Pi đang lái: gói `NAV` AUTO còn hạn (TTL 300 ms) và
+  `HBT` mới hơn `HBT_TIMEOUT_MS`. Lý do không chạy: `heading_debug.block`.
+- **Pi chỉ lái theo lộ trình gửi từ dashboard** (`config/boat_stm32.yaml`: `mission.waypoints_from_file: false`,
+  `follow.only_on_route: true`). Chưa có lộ trình, đã nhận lộ trình rỗng hoặc đã đi hết thì Pi gửi STOP và
+  không bám người. Đang chạy lộ trình thì vẫn bám người thấy được.
 
-**Arm** chỉ xảy ra khi gạt SwD từ OFF sang ON trong lúc: CH3 thấp nhất, cần phải ở giữa, SwB ở
-MANUAL, iBUS và IMU đang có dữ liệu, xuồng không lật. Sau đó chỉ SwD hoặc
-một điều kiện an toàn mới disarm. Mất link hay lật xong **không tự arm lại** —
-phải gạt SwD về OFF rồi lên lại. Từ AUTO về MANUAL, motor đứng yên cho tới khi cần phải
-về giữa một lần.
+| Muốn | Làm |
+|---|---|
+| Chạy | dashboard: vẽ lộ trình, **Gửi tới phao** (tới phao sau khoảng 5–40 s tùy số điểm) |
+| Dừng | dashboard: xóa lộ trình rồi **Gửi tới phao** (lộ trình rỗng, tới phao sau khoảng 5–10 s) |
+| Dừng ngay tại chỗ | tắt nguồn ESC / thuyền: **không còn công tắc ngắt cầm tay** |
 
-Tăng ga bị giới hạn tốc độ (`ESC_RAMP_PER_S`), giảm ga có hiệu lực ngay, motor trước dừng
-`ESC_FRONT_REVERSE_DELAY_MS` trước khi đảo chiều. Trần công suất `MANUAL_REAR_MAX`,
-`MANUAL_FRONT_REV_MAX`, `MANUAL_FRONT_FWD_GAIN` và chiều bánh lái `RUDDER_DIR_*` nằm
-trong `App/app_config.h`.
+Chi tiết đường đi của lộ trình và việc phao không tự chạy lại lộ trình cũ sau khi bật nguồn:
+[docs/lora-route-downlink.md](../docs/lora-route-downlink.md).
 
-**Trước khi bật `ACTUATORS_ENABLED`**, với `HW_TEST_ENABLED = 0`, kiểm tra bằng debugger:
-gạt cần phải sang phải thì bánh lái phải kéo mũi sang phải và đẩy đuôi sang trái (sai thì
-đổi dấu `RUDDER_DIR_FRONT` / `RUDDER_DIR_REAR`), và `actuator_debug.esc_us` phải đúng như
-bảng trên khi đẩy / kéo cần phải.
+Tăng ga bị giới hạn tốc độ (`ESC_RAMP_PER_S`), giảm ga có hiệu lực ngay. Ở AUTO motor trước không
+dùng. Chiều bánh lái `RUDDER_DIR_*` nằm trong `App/app_config.h`.
+
+**Trước khi bật `ACTUATORS_ENABLED`**, thử từng motor và bánh lái trên gá bằng `..\motor_test.bat`
+(preset `HwTest`, `App/hw_test.c`): đúng chiều quay, đúng chân PA1 / PA3 / PA5. Sau đó với Pi chạy
+`config/bench_demo.yaml`, đứng lệch sang phải camera thì bánh lái phải kéo mũi sang phải (sai thì đổi dấu
+`RUDDER_DIR_FRONT` / `RUDDER_DIR_REAR`).
 
 ---
 

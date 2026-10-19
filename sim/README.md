@@ -298,7 +298,7 @@ chạy. Ở cảnh hồ, `26,4,90` là cách người 7 m, người lệch 34° 
 | LiDAR LD14 | `tools/ld14_emulator.py`, như `--hw` (`VEDC_LIDAR_MODEL=lds008` để dùng LDS-008) |
 | Nút xác nhận PE4 | file `confirm` trong `~/vedc_sim/sitl_run`: mỗi lần tạo là một lần nhấn, đếm trong `$SYS` |
 | LoRa RA-02 + trạm bờ ESP32 | `tools/shore_station_sim.py` và `tools/lora_radio.py`: UDP thay sóng 433 MHz, có thời gian trên không và cửa sổ nghe 1.5 s; cả hai đầu chạy **chính** `route_link.c` (F407) và `route_downlink.c` (ESP32) qua ctypes |
-| Tay khiển FS-i6 | không có: bo luôn arm, công tắc SwB ở AUTO (`STM32_SIM_ARGS="--switch manual"` để thử MANUAL) |
+| Tay khiển FS-i6 | đã bỏ khỏi thuyền: bo arm khi an toàn, AUTO là chế độ duy nhất, thuyền chạy lộ trình gửi từ dashboard |
 
 Log trong `~/vedc_sim/sitl_run`: `pi.log` (main.py), `stm32_sim.log` (mỗi giây một dòng: chế độ, hướng
 đích/hiện tại, `u`, ga hai motor, bánh lái, tốc độ, vị trí, góc camera), `stm32_events.log` (đổi chế độ,
@@ -306,7 +306,9 @@ Log trong `~/vedc_sim/sitl_run`: `pi.log` (main.py), `stm32_sim.log` (mỗi giâ
 `STM32_PI_ARGS="--overlay ..."`, cho bo bằng `STM32_SIM_ARGS="..."` (`--gps-fix`, `--rear-thrust-n`).
 
 Bo ảo theo **đúng** firmware, kể cả những chỗ có thể chưa đúng ý:
-- `$SYS` trường `auto` là công tắc SwB, không phải "Pi đang gửi AUTO": phao đứng chờ thì camera vẫn quét.
+- `$SYS` trường `auto` luôn là 1 (không còn công tắc SwB), không phải "Pi đang gửi AUTO": phao đứng chờ thì camera vẫn quét.
+- `boat_stm32.yaml` không lấy waypoint của file: phao đứng yên tới khi `shore_station_sim.py` chuyển xuống
+  một lộ trình gửi từ dashboard, và đứng lại khi nhận lộ trình rỗng hoặc đi hết lộ trình.
 - `$GPS` trường `fix` là chất lượng GGA chuyển nguyên: GPS thường là **1**. `safety.py` chặn lệnh
   `waypoint` khi `fix < 2`, nên trên phao thật đi waypoint sẽ bị dừng `gps_stale_or_no_fix`.
 - `$NAV` có `seq` không mới hơn gói trước thì bị bỏ, nhưng chỉ khi luồng NAV còn sống (≤ 300 ms): `main.py`

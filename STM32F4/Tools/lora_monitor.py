@@ -1,7 +1,7 @@
 """Live view of the LoRa beacon and the GPS state over ST-LINK.
 
 Reads RAM while the firmware runs (no halt), through OpenOCD's Tcl port,
-reusing the probe plumbing of rc_monitor.py. Symbol addresses come from the ELF.
+reusing the probe plumbing of openocd_probe.py. Symbol addresses come from the ELF.
 
     python Tools/lora_monitor.py              # refresh in place, Ctrl+C to stop
     python Tools/lora_monitor.py --once       # one snapshot
@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 
-from rc_monitor import OpenOcd, ROOT, find_tool
+from openocd_probe import OpenOcd, ROOT, find_tool
 
 STATES = {0: "DISABLED", 1: "INIT_FAIL", 2: "IDLE", 3: "TX"}
 ERRORS = {0: "ok", 1: "SPI error", 2: "chip not found (REG_VERSION != 0x12)", 3: "bad argument"}

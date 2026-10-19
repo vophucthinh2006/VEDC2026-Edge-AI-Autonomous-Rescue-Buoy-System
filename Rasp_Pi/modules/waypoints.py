@@ -79,6 +79,14 @@ def read_qgc_wpl(text: str) -> list[tuple[float, float]]:
     return points
 
 
+def start_route(path: Path | None, arrive_radius_m: float, waypoints_from_file: bool = True) -> Route:
+    """The route at boot: the mission file's (no file or a missing one: none). With
+    waypoints_from_file false (mission.waypoints_from_file, the STM32 boat) only the file's geofence
+    is kept: the waypoints come from the dashboard alone."""
+    route = load_route(path, arrive_radius_m) if path and path.exists() else Route([], arrive_radius_m)
+    return route if waypoints_from_file else Route([], arrive_radius_m, route.loop, route.geofence)
+
+
 def load_route(path: Path, arrive_radius_m: float) -> Route:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() == ".waypoints":

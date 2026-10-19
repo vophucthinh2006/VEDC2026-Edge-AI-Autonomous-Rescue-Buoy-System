@@ -76,5 +76,45 @@ class FollowTest(unittest.TestCase):
         self.assertEqual(self.follow.phase, SEARCH)
 
 
+class OnlyOnRouteTest(unittest.TestCase):
+    """The STM32 boat with no RC (follow.only_on_route): no route, no moving, nobody followed."""
+
+    def setUp(self):
+        self.follow = Follow({"confirm_frames": 2, "confirm_s": 5.0, "lost_s": 4.0})
+
+    def plan(self, t, waypoint, only_on_route=True):
+        return self.follow.plan(snap(t, target=HumanTarget(10.0, 5.0, 0.5, t)), waypoint, t, only_on_route)
+
+    def test_without_a_route_nobody_is_followed_and_there_is_no_goal(self):
+        for t in (0.0, 1.0, 2.0):
+            planned, events = self.plan(t, None)
+        self.assertEqual(self.follow.phase, SEARCH)
+        self.assertEqual(events, [])
+        self.assertIsNone(planned.waypoint)
+        self.assertIsNone(planned.human_target)
+
+    def test_on_a_route_people_are_followed_as_before(self):
+        self.plan(0.0, WAYPOINT)
+        planned, events = self.plan(1.0, WAYPOINT)
+        self.assertEqual(self.follow.phase, FOLLOW)
+        self.assertEqual([e.kind for e in events], ["found"])
+        self.assertIsNotNone(planned.human_target)
+
+    def test_a_route_cleared_while_following_stops_it_at_once(self):
+        self.plan(0.0, WAYPOINT)
+        self.plan(1.0, WAYPOINT)
+        planned, _ = self.plan(1.5, None)
+        self.assertEqual(self.follow.phase, SEARCH)
+        self.assertIsNone(planned.human_target)
+        planned, _ = self.plan(2.0, WAYPOINT)          # a new route: sightings start again from none
+        self.assertEqual(self.follow.phase, SEARCH)
+
+    def test_off_it_follows_without_a_route(self):
+        self.plan(0.0, None, only_on_route=False)
+        planned, _ = self.plan(1.0, None, only_on_route=False)
+        self.assertEqual(self.follow.phase, FOLLOW)
+        self.assertIsNotNone(planned.human_target)
+
+
 if __name__ == "__main__":
     unittest.main()
