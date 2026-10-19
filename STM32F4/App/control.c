@@ -2,7 +2,6 @@
 #include "app_config.h"
 #include "buzzer.h"
 #include "camera_pan.h"
-#include "manual.h"
 #include <math.h>
 #include <string.h>
 
@@ -27,16 +26,12 @@ void Control_Init(controller_t *control) {
     control->operating_mode = 'S';
 }
 
-/* Heading loop off: PID cleared, no target shown. */
-static void heading_off(controller_t *control) {
+/* Motors stopped, rudders centred, PID cleared, no target shown. */
+static void stop_heading(controller_t *control) {
     HeadingController_Reset(&control->heading);
     control->heading_cmd = 0.0f;
     control->heading_target_valid = false;
     control->heading_state = HEADING_OFF;
-}
-
-static void stop_heading(controller_t *control) {
-    heading_off(control);
     control->operating_mode = 'S';
     Actuators_Stop();
 }
@@ -49,46 +44,11 @@ static void heading_steer(controller_t *control, const bno055_euler_t *imu, actu
     Heading_Mix(control->heading_cmd, cmd->rear_left, &cmd->rear_left, &cmd->rear_right, &cmd->steer);
 }
 
-#if RC_HEADING_HOLD_ENABLED
-/* MANUAL heading hold: forward throttle with the steering centred locks the
-   heading once the turn has settled; anything else hands the rudders back. */
-static uint8_t rc_heading_hold(controller_t *control, const ibus_state_t *rc, const bno055_euler_t *imu,
-                               bool imu_fresh, actuator_cmd_t *cmd, uint32_t now_ms) {
-    int32_t steer_offset = (int32_t)rc->channel[RC_CH_STEER] - 1500;
-    uint8_t block = !imu_fresh ? HOLD_BLOCK_IMU
-                  : cmd->rear_left <= 0.0f ? HOLD_BLOCK_THROTTLE
-                  : (steer_offset > (int32_t)RC_HOLD_STEER_BAND_US || steer_offset < -(int32_t)RC_HOLD_STEER_BAND_US) ? HOLD_BLOCK_STEERING
-                  : HOLD_BLOCK_NONE;
-    if (block != HOLD_BLOCK_NONE) { heading_off(control); return block; }
-    if (control->heading_state == HEADING_OFF || control->heading_state == HEADING_AUTO) {
-        HeadingController_Reset(&control->heading);
-        control->heading_state = HEADING_HOLD_WAIT;
-        control->hold_wait_ms = now_ms;
-    }
-    if (control->heading_state == HEADING_HOLD_WAIT) {
-        /* Locking mid-turn would make the boat swing back past where the
-           driver let go; wait for it to settle, but not forever. */
-        if (fabsf(imu->yaw_rate_dps) > RC_HOLD_LOCK_RATE_DPS &&
-            (uint32_t)(now_ms - control->hold_wait_ms) < RC_HOLD_LOCK_TIMEOUT_MS) return HOLD_BLOCK_NONE;
-        control->heading_target_deg = imu->heading_deg;
-        control->heading_target_valid = true;
-        control->heading_state = HEADING_HOLD;
-    }
-    heading_steer(control, imu, cmd);
-    return HOLD_BLOCK_NONE;
-}
-#endif
-
-static void publish_debug(const controller_t *control, const ibus_state_t *rc, const bno055_euler_t *imu,
-                          bool imu_fresh, const actuator_cmd_t *cmd, uint8_t block) {
-    heading_debug.ch_steer = rc->channel[RC_CH_STEER];
-    heading_debug.ch_speed = rc->channel[RC_CH_SPEED];
-    heading_debug.ch_power = rc->channel[RC_CH_POWER];
-    heading_debug.ch_mode = rc->channel[RC_CH_MODE];
-    heading_debug.ch_arm = rc->channel[RC_CH_ARM];
+static void publish_debug(const controller_t *control, const bno055_euler_t *imu, bool imu_fresh,
+                          const actuator_cmd_t *cmd, drive_block_t block) {
     heading_debug.roll_deg = imu->roll_deg;
     heading_debug.pitch_deg = imu->pitch_deg;
-    heading_debug.block = block;
+    heading_debug.block = (uint8_t)block;
     heading_debug.armed = control->armed ? 1U : 0U;
     heading_debug.target_deg = control->heading_target_valid ? control->heading_target_deg : -1.0f;
     heading_debug.yaw_deg = imu->heading_deg;
@@ -124,99 +84,35 @@ void Camera_Tick(const pi_command_t *pi, uint32_t now_ms) {
     Actuators_WriteServo(SERVO_CAMERA, (uint32_t)us);
 }
 
-void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_state_t *rc, const bno055_euler_t *imu, uint32_t now_ms) {
-    bool rc_fresh = rc->valid && fresh(now_ms, rc->last_rx_ms, RC_TIMEOUT_MS);
+/* There is no RC transmitter: the boat is armed whenever it is safe, and AUTO is the only mode. The
+   motors turn only while the Pi drives (a fresh NAV AUTO within its TTL and a fresh HBT). The Pi
+   sends STOP with no route from the dashboard; a Pi that goes silent stops them within the NAV TTL
+   (300 ms) or HBT_TIMEOUT_MS. */
+void Control_Tick(controller_t *control, const pi_command_t *pi, const bno055_euler_t *imu, uint32_t now_ms) {
     /* Fresh = a good read within IMU_TIMEOUT_MS. A single failed I2C read only
        clears imu->valid for one tick and must not disarm the boat; the angles
        in imu are still the last good ones. */
     bool imu_fresh = control->last_imu_ms != 0U && fresh(now_ms, control->last_imu_ms, IMU_TIMEOUT_MS);
     if (!imu->valid && heading_debug.imu_fail < 0xFFFFU) heading_debug.imu_fail++;
-    /* PE4 is the victim's confirm button now, not an E-stop: it is counted for the Pi and stops nothing. */
+    /* PE4 is the victim's confirm button, not an E-stop: it is counted for the Pi and stops nothing. */
     control->estop = false;
     ConfirmButton_Update(&control->confirm, HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == GPIO_PIN_RESET, now_ms);
     control->overturned = imu_fresh && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
-#if BENCH_PE4_ARM
-    /* On the stand without a transmitter: each press of PE4 flips the arm switch, off at boot.
-       The presses still go to the Pi in $SYS. */
-    static bool bench_switch;
-    static uint16_t bench_presses;
-    static bool bench_primed;
-    if (!bench_primed) { bench_presses = control->confirm.presses; bench_primed = true; }
-    if (control->confirm.presses != bench_presses) {
-        bench_presses = control->confirm.presses;
-        bench_switch = !bench_switch;
-    }
-    bool auto_requested = bench_switch;
-    bool arm_switch = bench_switch;
-    bool link_ok = true;
-#else
-    bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
-    bool arm_switch = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD;
-    bool link_ok = rc_fresh;
-#endif
-    control->auto_requested = auto_requested;
+
     bool was_armed = control->armed;
-    bool safe = link_ok && (imu_fresh || !ARM_REQUIRES_IMU || BENCH_IGNORE_IMU) && !control->estop && !control->overturned;
-    /* Each arming needs the switch seen off first, so a link that comes back,
-       a cleared E-stop or a reset never re-arms with the switch left on. */
-    if (rc_fresh && !arm_switch) control->arm_switch_released = true;
-    if (!arm_switch || !safe) control->armed = false;
-    else if (!control->armed && (BENCH_PE4_ARM || (control->arm_switch_released && !auto_requested &&
-             rc->channel[RC_CH_POWER] <= RC_POWER_MIN_US && Manual_SpeedCentred(rc)))) {
-        control->armed = true;
-        control->arm_switch_released = false;
-        control->manual_ready = true;
-    }
+    control->armed = (imu_fresh || !ARM_REQUIRES_IMU || BENCH_IGNORE_IMU) && !control->overturned;
+    arm_block_t arm_block = control->armed ? ARM_BLOCK_NONE : control->overturned ? ARM_BLOCK_OVERTURNED : ARM_BLOCK_IMU;
     if (control->armed != was_armed) Buzzer_Beep(control->armed ? 1U : 2U);
-    if (was_armed && !control->armed) {
-        heading_debug.last_disarm = !rc_fresh ? ARM_BLOCK_RC_LOST
-            : (!imu_fresh && ARM_REQUIRES_IMU) ? ARM_BLOCK_IMU
-            : control->estop ? ARM_BLOCK_ESTOP
-            : control->overturned ? ARM_BLOCK_OVERTURNED
-            : ARM_BLOCK_SWITCH_OFF;
-    }
-    heading_debug.arm_block = control->armed ? ARM_BLOCK_NONE
-        : !rc_fresh ? ARM_BLOCK_RC_LOST
-        : (!imu_fresh && ARM_REQUIRES_IMU) ? ARM_BLOCK_IMU
-        : control->estop ? ARM_BLOCK_ESTOP
-        : control->overturned ? ARM_BLOCK_OVERTURNED
-        : !arm_switch ? ARM_BLOCK_SWITCH_OFF
-        : !control->arm_switch_released ? ARM_BLOCK_SWITCH_NOT_CYCLED
-        : auto_requested ? ARM_BLOCK_MODE_AUTO
-        : rc->channel[RC_CH_POWER] > RC_POWER_MIN_US ? ARM_BLOCK_POWER
-        : ARM_BLOCK_SPEED;
-    heading_debug.estop = control->estop ? 1U : 0U;
-    if (!control->armed) { stop_heading(control); publish_debug(control, rc, imu, imu_fresh, NULL, HOLD_BLOCK_DISARMED); return; }
-    actuator_cmd_t cmd;
-    if (!auto_requested) {
-        control->operating_mode = 'M';
-        /* Back from AUTO, wait for the speed stick to be centred once, or a
-           stick held forward would launch the boat on the switch flip. */
-        if (!control->manual_ready) control->manual_ready = Manual_SpeedCentred(rc);
-        if (!control->manual_ready) {
-            heading_off(control);
-            Actuators_Stop();
-            publish_debug(control, rc, imu, imu_fresh, NULL, HOLD_BLOCK_SPEED_RESET);
-            return;
-        }
-        Manual_Mix(rc, &cmd);
-#if RC_HEADING_HOLD_ENABLED
-        uint8_t block = rc_heading_hold(control, rc, imu, imu_fresh, &cmd, now_ms);
-#else
-        uint8_t block = HOLD_BLOCK_DISABLED;
-        heading_off(control);
-#endif
-        Actuators_Apply(&cmd, now_ms);
-        publish_debug(control, rc, imu, imu_fresh, &cmd, block);
-        return;
-    }
-    control->manual_ready = false;
+    if (was_armed && !control->armed) heading_debug.last_disarm = (uint8_t)arm_block;
+    heading_debug.arm_block = (uint8_t)arm_block;
+    if (!control->armed) { stop_heading(control); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_DISARMED); return; }
+
     bool nav_fresh = pi->mode == NAV_AUTO && pi->ttl_ms > 0U && fresh(now_ms, pi->last_nav_ms, pi->ttl_ms);
     bool hbt_fresh = pi->pi_link_ok && fresh(now_ms, pi->last_hbt_ms, HBT_TIMEOUT_MS);
-    /* AUTO requires a fresh IMU, even when the bench-only arming override is
-       enabled: a stale heading must never drive a motor on the water. Only
-       BENCH_IGNORE_IMU, for the boat on its stand, lets it run on the held one. */
-    if ((!imu_fresh && !BENCH_IGNORE_IMU) || !nav_fresh || !hbt_fresh) { stop_heading(control); publish_debug(control, rc, imu, imu_fresh, NULL, HOLD_BLOCK_AUTO); return; }
+    if (!nav_fresh || !hbt_fresh) { stop_heading(control); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_PI); return; }
+    /* A stale heading must never drive a motor on the water. Only BENCH_IGNORE_IMU, for the boat
+       on its stand, lets it run on the held one. */
+    if (!imu_fresh && !BENCH_IGNORE_IMU) { stop_heading(control); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_IMU); return; }
     bno055_euler_t held = *imu;
     if (!imu_fresh) held.yaw_rate_dps = 0.0f;     /* the last rate read would brake for ever */
     imu = &held;
@@ -227,7 +123,7 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
     control->operating_mode = 'A';
     /* Pi speed in m/s is deliberately mapped conservatively; tune only on water after dry tests. */
     float throttle = clamp(pi->speed_mps / 1.0f, 0.0f, 0.50f);
-    cmd = (actuator_cmd_t){ throttle, throttle, 0.0f, 0.0f };
+    actuator_cmd_t cmd = { throttle, throttle, 0.0f, 0.0f };
     if (throttle <= 0.0f) {
         /* Speed 0 (e.g. holding standoff from a person): no pivoting next to
            the victim, motors rest and the rudders centre. */
@@ -237,5 +133,5 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
         heading_steer(control, imu, &cmd);
     }
     Actuators_Apply(&cmd, now_ms);
-    publish_debug(control, rc, imu, imu_fresh, &cmd, HOLD_BLOCK_AUTO);
+    publish_debug(control, imu, imu_fresh, &cmd, DRIVE_BLOCK_NONE);
 }

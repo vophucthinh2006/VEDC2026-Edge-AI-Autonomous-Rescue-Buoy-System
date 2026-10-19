@@ -32,7 +32,6 @@
 #include "app_config.h"
 #include "control.h"
 #include "gps_nmea.h"
-#include "ibus.h"
 #include "imu.h"
 #include "hw_test.h"
 #include "lora_beacon.h"
@@ -58,9 +57,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-static uint8_t pi_rx_byte, gps_rx_byte, ibus_rx_byte;
+static uint8_t pi_rx_byte, gps_rx_byte;
 static pi_command_t pi_command;
-static ibus_state_t ibus;
 static gps_state_t gps;
 static bno055_euler_t imu;
 static controller_t control;
@@ -85,10 +83,10 @@ static void send_telemetry(uint16_t sequence)
   Protocol_Send(&huart4, "IMU", payload);
   snprintf(payload, sizeof(payload), "%u,%.6f,%.6f,%u,%.1f,%.2f,%.1f", sequence, gps.latitude_deg, gps.longitude_deg, gps.fix, gps.hdop, gps.speed_mps, gps.course_deg);
   Protocol_Send(&huart4, "GPS", payload);
-  /* armed and auto let the Pi sweep its camera while the boat waits in AUTO; the last field counts
-     presses of the victim's confirm button (PE4) since boot. */
-  snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u,%u,%u,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U,
-           control.armed ? 1U : 0U, control.auto_requested ? 1U : 0U, (unsigned)control.confirm.presses);
+  /* armed and auto let the Pi sweep its camera while the boat waits; with no RC transmitter auto is
+     always 1. The last field counts presses of the victim's confirm button (PE4) since boot. */
+  snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u,%u,1,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U,
+           control.armed ? 1U : 0U, (unsigned)control.confirm.presses);
   Protocol_Send(&huart4, "SYS", payload);
 }
 #endif
@@ -135,7 +133,6 @@ int main(void)
   MX_UART4_Init();
   /* USER CODE BEGIN 2 */
   Protocol_Init(&pi_command);
-  IBUS_Init(&ibus);
   GPS_Init(&gps);
   Control_Init(&control);
   LoraBeacon_Init(&hspi2, &gps, &imu, &control); /* SPI2 + NSS PB12 + RST PC4, non-blocking */
@@ -151,8 +148,8 @@ int main(void)
 
   HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
   HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
-  HAL_HalfDuplex_EnableReceiver(&huart2);
-  HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
+  /* USART2 (PA2, half duplex) was the FS-iA6B's iBUS: there is no RC transmitter any more, nothing
+     reads it. CubeMX still sets it up; remove it in STM32F4.ioc to free the pin. */
 
   uint32_t last_control = 0U, last_telemetry = 0U;
   uint16_t sequence = 0U;
@@ -175,7 +172,7 @@ int main(void)
 #if HW_TEST_ENABLED
       HwTest_Tick(now);
 #else
-      Control_Tick(&control, &pi_command, &ibus, &imu, now);
+      Control_Tick(&control, &pi_command, &imu, now);
       Camera_Tick(&pi_command, now);
       Buzzer_Tick(now);
 #endif
@@ -272,11 +269,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     GPS_FeedByte(&gps, gps_rx_byte, now);
     HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
   }
-  else if (huart == &huart2)
-  {
-    IBUS_FeedByte(&ibus, ibus_rx_byte, now);
-    HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
-  }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
@@ -291,8 +283,6 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   if (huart == &huart3) (void)HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
   /* Same for the Pi link: without this one overrun leaves UART4 deaf until reset. */
   else if (huart == &huart4) (void)HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
-  /* And iBUS: a framing error while the receiver powers up would leave the RC dead. */
-  else if (huart == &huart2) (void)HAL_UART_Receive_IT(&huart2, &ibus_rx_byte, 1U);
 }
 /* USER CODE END 4 */
 
