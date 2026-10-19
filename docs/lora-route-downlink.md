@@ -15,11 +15,15 @@ Mỗi khâu xác nhận cho khâu trước, nên dashboard biết lộ trình đ
 | Đường dẫn | Ai | Việc |
 |---|---|---|
 | `POST /api/mission/send` | admin | chụp `waypoints` của lộ trình đang lưu thành bản gửi `downlink = {rev, id, loop, pts, by, at}`. `rev` tăng mỗi lần gửi (1..65535, quay vòng bỏ số 0). Body `{id?, loop?, clear?}`: `id` là phao nhận (mặc định `PHAO-01`), `clear: true` gửi lộ trình rỗng để phao bỏ lộ trình cũ. |
-| `GET /api/downlink` | trạm (Bearer `INGEST_TOKEN`) | `{rev, id, loop, pts: [[lat, lon], ...]}`, hoặc `{rev: 0}` khi chưa gửi gì |
+| `GET /api/downlink` | trạm (Bearer `INGEST_TOKEN`) | `{rev, id, loop, pts: [[lat, lon], ...]}`, hoặc `{rev: 0}` khi chưa gửi gì hay bản gửi đã giao xong |
 | `POST /api/ingest` | trạm | thêm nhóm tùy chọn `route: {rev, have, pi}` lấy từ trường `w=` của beacon |
 
-Hub phát `{"type": "downlink", rev, id, loop, n, by, at}` cho trình duyệt khi admin gửi. Trạng thái nhận của phao
-đi trong bản tin phao thường (`route`).
+Hub phát `{"type": "downlink", rev, id, loop, n, by, at, delivered}` cho trình duyệt khi admin gửi và khi bản gửi
+được giao. Trạng thái nhận của phao đi trong bản tin phao thường (`route`).
+
+**Giao xong:** khi phao đích báo `route` có `rev` bằng bản gửi, `have` bằng số điểm và `pi = 1`, Hub ghi
+`delivered` (thời điểm) vào bản gửi trong kho. Từ đó `GET /api/downlink` trả `{rev: 0}` tới lần gửi sau, nên trạm
+thôi phát. Lần gửi mới (kể cả `clear: true`) bắt đầu lại ở trạng thái chưa giao.
 
 Bản gửi là **bản chụp**: admin sửa lộ trình sau khi gửi không làm đổi thứ đang truyền.
 
@@ -85,11 +89,26 @@ Khi đủ mọi điểm của một `rev`, lộ trình LoRa **thay** lộ trình
 đầu. Geofence của file (thành hồ bơi) vẫn giữ: giao thức không gửi geofence. Pi không lưu lộ trình LoRa xuống đĩa:
 khởi động lại thì F407 gửi lại, vì `$HBT` báo `route_rev = 0`.
 
-## 5. Mã nguồn
+## 5. Chạy và dừng
+
+Thuyền STM32F407 không còn tay điều khiển RC: không có công tắc ARM, không có nút dừng cầm tay. Chỉ dashboard ra lệnh.
+
+- **Gửi lộ trình = chạy.** Pi nhận đủ điểm thì thuyền chạy theo lộ trình đó ngay.
+- **Gửi lộ trình rỗng = dừng.** Lộ trình đang trống thì nút **Gửi tới phao** gửi bản rỗng (`clear: true`). Lệnh tới
+  thuyền trong khoảng 5–10 s qua LoRa (tối đa 5 s trạm hỏi Worker, tối đa 5 s chờ beacon, rồi một lượt hỏi-đáp).
+- **Chưa có lộ trình = đứng yên.**
+- **Bản đã giao không bị gửi lại sau khi khởi động lại.** Khi Pi báo nhận đủ, Worker thôi mời trạm phát bản đó
+  (mục 1). F407 vừa bật báo `rev` 0, nhưng trạm không còn gì để gửi, nên thuyền không tự chạy trên bờ.
+- **Pi khởi động lại giữa chừng:** F407 vẫn giữ lộ trình và gửi lại `$RTE` (`$HBT` của Pi báo `route_rev = 0`),
+  thuyền chạy tiếp (Pi bắt đầu lại từ điểm đầu, mục 4).
+- **F407 reset:** mất lộ trình, thuyền đứng yên tới khi admin bấm **Gửi tới phao** lần nữa. Dashboard báo
+  "Pi đã nhận bản này ... nay phao không còn giữ nó".
+
+## 6. Mã nguồn
 
 | Khâu | File |
 |---|---|
-| Cloud | `cloud/src/worker.js`, `hub.js`, `telemetry.js` |
+| Cloud | `cloud/src/worker.js`, `hub.js` (bản gửi, giao xong), `telemetry.js`; test `cloud/test/hub.test.mjs` (`npm test`) |
 | Dashboard | `web/index.html`, `web/js/app.js` (nút Gửi tới phao, trạng thái nhận) |
 | ESP32 | `main/route_downlink.c` (dựng khung, C thuần, có test), `main/main.c` (lấy bản gửi, trả lời beacon) |
 | F407 | `App/route_link.c` (nhận khung, ráp lộ trình, dòng `$RTE`, C thuần, có test), `Modules/LoRa/sx127x.c` (RX), `App/lora_beacon.c` (cửa sổ nhận, `w=`), `Core/Src/main.c` (gửi `$RTE`, đọc `$HBT`) |
