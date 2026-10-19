@@ -60,6 +60,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/imu.c
     App/hw_test.c
     App/lora_beacon.c
+    App/route_link.c
 )
 
 # Add include paths

@@ -20,6 +20,10 @@ typedef struct {
     uint32_t sequence;
     bool has_victims;         /* v= present and in range; older buoy firmware does not send it */
     uint8_t victims;          /* people the buoy has reported since it booted */
+    bool has_route;           /* w=rev:have:pi present and valid (docs/lora-route-downlink.md) */
+    uint16_t route_rev;       /* route the buoy holds or is receiving */
+    uint16_t route_have;      /* points received in order from the first */
+    uint8_t route_pi;         /* 1: the Pi confirmed route_rev */
 } lora_payload_t;
 
 /* Parses both the legacy GPS-only frame and the attitude-extended frame.

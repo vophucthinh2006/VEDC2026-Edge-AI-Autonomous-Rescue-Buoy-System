@@ -32,6 +32,8 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
         command->mode = mode; command->speed_mps = speed; command->heading_deg = heading; command->ttl_ms = ttl; command->sequence = seq; command->last_nav_ms = now_ms;
     } else if (strcmp(fields[0], "HBT") == 0 && count >= 3U) {
         command->last_hbt_ms = now_ms; command->pi_link_ok = true;
+        /* Optional 4th field: revision of the LoRa route the Pi runs (docs/lora-route-downlink.md). */
+        command->route_rev = count >= 4U ? (uint16_t)strtoul(fields[3], NULL, 10) : 0U;
     } else if (strcmp(fields[0], "CAM") == 0 && count >= 3U) {
         float pan = strtof(fields[2], NULL);
         if (pan < -90.0f || pan > 90.0f) return;

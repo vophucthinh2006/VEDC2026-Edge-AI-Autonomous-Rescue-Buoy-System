@@ -41,6 +41,7 @@ void sx127x_set_sync_word(sx127x_t *dev, uint8_t sync_word);
 void sx127x_set_spreading_factor(sx127x_t *dev, uint8_t sf);   // 6-12
 void sx127x_set_bandwidth(sx127x_t *dev, long bandwidth_hz);   // vd 125000
 void sx127x_set_coding_rate(sx127x_t *dev, uint8_t denominator); // 5-8 (4/5 .. 4/8)
+void sx127x_set_crc(sx127x_t *dev, bool on);                    // CRC trên gói phát đi (phao bật sẵn)
 void sx127x_set_tx_power(sx127x_t *dev, uint8_t level_dbm);    // 2-20
 
 /*

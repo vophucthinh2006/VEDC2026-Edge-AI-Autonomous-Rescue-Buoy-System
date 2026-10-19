@@ -44,6 +44,16 @@ function sanitizeMission(m) {
   return { waypoints: cleanPts(m.waypoints), poly: cleanPts(poly), spacing, angle, speed, cid };
 }
 
+// Yêu cầu gửi lộ trình xuống phao: { id?: tên phao, loop?: đi vòng, clear?: gửi lộ trình rỗng }
+function sanitizeSend(m) {
+  if (!m || typeof m !== "object") return null;
+  const id = m.id === undefined ? "PHAO-01" : typeof m.id === "string" ? m.id.replace(/[^\w.\-]/g, "").slice(0, 31) : "";
+  if (!id) return null;
+  if (m.loop !== undefined && typeof m.loop !== "boolean") return null;
+  if (m.clear !== undefined && typeof m.clear !== "boolean") return null;
+  return { id, loop: m.loop === true, clear: m.clear === true };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -80,6 +90,16 @@ export default {
       return hub().fetch("https://hub/station", { method: "POST", body: JSON.stringify(msg) });
     }
 
+    // Trạm bờ lấy lộ trình admin đã bấm "Gửi tới phao" để phát LoRa (docs/lora-route-downlink.md)
+    if (path === "/api/downlink") {
+      if (request.method !== "GET") return json({ error: "method" }, 405);
+      const auth = request.headers.get("Authorization") || "";
+      if (!env.INGEST_TOKEN || !(await secretEquals(auth, "Bearer " + env.INGEST_TOKEN))) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      return hub().fetch("https://hub/downlink");
+    }
+
     // ---- API công khai: cấu hình, trạng thái phiên, đăng nhập/đăng xuất ----
     if (path === "/api/config") return json({ googleClientId: env.GOOGLE_CLIENT_ID || "" });
 
@@ -109,6 +129,20 @@ export default {
         return json({ ok: true }, 200, { "Set-Cookie": sessionCookie(request, "", 0) });
       }
       return json({ error: "not found" }, 404);
+    }
+
+    // ---- Gửi lộ trình đang lưu xuống phao qua trạm bờ: chỉ admin ----
+    if (path === "/api/mission/send") {
+      if (!session) return json({ error: "unauthenticated" }, 401);
+      if (request.method !== "POST") return json({ error: "method" }, 405);
+      if (session.role !== "admin") return json({ error: "Chỉ admin được gửi lộ trình" }, 403);
+      if (!originOk(request)) return json({ error: "forbidden origin" }, 403);
+      const body = await request.text();
+      if (body.length > MAX_BODY) return json({ error: "too large" }, 413);
+      let req = null;
+      try { req = sanitizeSend(body ? JSON.parse(body) : {}); } catch { /* báo lỗi bên dưới */ }
+      if (!req) return json({ error: "bad request" }, 400);
+      return hub().fetch("https://hub/downlink", { method: "PUT", body: JSON.stringify({ ...req, by: session.email }) });
     }
 
     // ---- Dữ liệu: cần phiên (khách hoặc admin) ----

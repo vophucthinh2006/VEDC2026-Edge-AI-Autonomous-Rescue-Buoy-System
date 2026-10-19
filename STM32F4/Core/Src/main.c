@@ -200,6 +200,11 @@ int main(void)
       Protocol_Send(&huart4, "TST", payload);
 #else
       send_telemetry(++sequence);
+      /* Route from the dashboard over LoRa: one $RTE line a period until the Pi's $HBT confirms it. */
+      char route_line[180];
+      LoraBeacon_SetPiRouteRev(pi_command.route_rev);
+      if (LoraBeacon_NextPiRouteLine(sequence, now, route_line, sizeof(route_line)))
+        Protocol_Send(&huart4, "RTE", route_line);
 #endif
     }
   }

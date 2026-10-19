@@ -386,7 +386,7 @@ Raspberry Pi → STM32:
 
 ```
 $NAV,seq,AUTO|STOP|MANUAL,speed_mps,heading_deg,ttl_ms*CS\n
-$HBT,seq,state*CS\n
+$HBT,seq,state[,route_rev]*CS\n
 $SOS,seq,0|1*CS\n
 $TXD,seq,event,lat,lon,confidence*CS\n
 $CAM,seq,pan_deg*CS\n
@@ -399,7 +399,13 @@ $IMU,seq,pitch,roll,yaw,imu_ok,overturned*CS\n
 $GPS,seq,lat,lon,fix,hdop,speed,course*CS\n
 $SYS,seq,battery,motor_fault,estop,link_ok,armed,auto,confirm_presses*CS\n
 $ACK,seq,TXD,ACCEPTED*CS\n
+$RTE,seq,rev,first,total,loop,lat;lon,...*CS\n
 ```
+
+`$RTE` là lộ trình admin gửi từ dashboard qua trạm bờ LoRa (`App/route_link.c`, đặc tả ở
+[docs/lora-route-downlink.md](../docs/lora-route-downlink.md)): mỗi chu kỳ telemetry một dòng tối đa 7 điểm, gửi lại
+tới khi `$HBT` của Pi mang `route_rev` bằng `rev`. Sau mỗi beacon LoRa phao nghe 1.5 s để nhận khung `RTE` của trạm;
+đang nhận dở thì beacon 1.5 s một lần, và cuối beacon có `w=rev:have:pi`.
 
 `armed` và `auto` (công tắc SwB đang ở AUTO) để Pi biết lúc nào cho camera quét tìm. `estop` luôn 0
 (PE4 giờ là nút xác nhận); `confirm_presses` là số lần nhấn nút đó từ lúc khởi động. Mỗi gói

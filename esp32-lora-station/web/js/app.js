@@ -198,6 +198,7 @@ let missionRev = 0;
 let saveTimer = null;
 let dragging = false;
 let missionLoaded = false;
+let downlink = null;   // { rev, id, loop, n, mission_rev, by, at }: lần gửi xuống phao gần nhất
 
 function applyMission(m) {
   wps = (m.waypoints || []).filter(validPt).slice(0, MAX_WP);
@@ -326,6 +327,7 @@ function renderMissionPanel() {
   $('m-undo').disabled = !undoStack.length;
   $('m-clear').disabled = !wps.length;
   $('m-export').disabled = !wps.length;
+  renderSendStatus();
   $('m-hint').textContent = isAdmin()
     ? 'Chạm lên bản đồ để đặt điểm đến, kéo điểm để dời vị trí. Hoặc vẽ vùng quét để tự tạo tuyến.'
     : 'Bạn đang xem với tư cách khách: chỉ xem, không sửa được lộ trình.';
@@ -426,6 +428,44 @@ $('m-clear').addEventListener('click', () => {
 });
 $('m-speed').addEventListener('input', () => { if (!isAdmin()) return; saveMission(); renderMissionPanel(); });
 
+// ---- Gửi lộ trình đang lưu xuống phao qua trạm bờ LoRa (docs/lora-route-downlink.md) ----
+
+function renderSendStatus() {
+  const el = $('m-sendstat');
+  el.replaceChildren();
+  if (!downlink || !downlink.rev) return;
+  const line = (text, cls) => { const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls; el.appendChild(d); };
+  const at = new Date(downlink.at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  line(`Bản gửi #${downlink.rev}: ${downlink.n} điểm${downlink.loop ? ', đi vòng' : ''} tới ${downlink.id}, lúc ${at}`);
+  const r = state.buoys.get(downlink.id)?.route;
+  if (!r || r.rev !== downlink.rev) line('Đang chờ phao nhận (phao trả lời sau mỗi gói beacon)', 'warn');
+  else if (r.have < downlink.n) line(`Phao đang nhận: ${r.have}/${downlink.n} điểm`, 'warn');
+  else if (!r.pi) line(`Phao đã nhận đủ ${downlink.n} điểm, đang chuyển cho Pi`, 'warn');
+  else line('Pi đã nhận lộ trình và đang chạy theo nó', 'ok');
+  if (downlink.mission_rev !== missionRev) line('Lộ trình đã sửa sau lần gửi này: bấm Gửi tới phao để gửi bản mới', 'warn');
+}
+
+function onDownlinkMessage(m) {
+  downlink = m;
+  renderSendStatus();
+}
+
+$('m-send').addEventListener('click', async () => {
+  if (!isAdmin()) return;
+  const id = state.selected || 'PHAO-01';
+  const clear = !wps.length;
+  if (clear && !confirm(`Lộ trình đang trống. Gửi lộ trình rỗng để ${id} bỏ lộ trình cũ?`)) return;
+  if (!clear && !confirm(`Gửi ${wps.length} điểm tới ${id} qua trạm bờ?`)) return;
+  if (MOCK) { toast('Chế độ mock: không gửi'); return; }
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await pushMission(); }   // gửi đúng bản đang thấy
+  try {
+    const res = await jsonPost('/api/mission/send', { id, loop: $('m-loop').checked, clear });
+    if (!res.ok) { toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không gửi được lộ trình'); return; }
+    onDownlinkMessage(await res.json());
+    toast(clear ? `Đã yêu cầu ${id} bỏ lộ trình` : `Đã gửi ${wps.length} điểm, chờ trạm bờ phát xuống phao`);
+  } catch { toast('Mất kết nối, chưa gửi được'); }
+});
+
 $('m-export').addEventListener('click', () => {
   const round = p => ({ lat: +p.lat.toFixed(7), lon: +p.lon.toFixed(7) });
   const data = {
@@ -522,6 +562,8 @@ function onBuoyMessage(m) {
   b.nav = m.nav && typeof m.nav === 'object' ? m.nav : null;
   // Số người phao đã báo phát hiện (bản STM32, qua LoRa); gói không có trường này thì giữ số cũ
   if (Number.isInteger(m.victims)) b.victims = m.victims;
+  // Tiến độ nhận lộ trình gửi qua LoRa (bản STM32); gói không có nhóm này thì giữ trạng thái cũ
+  if (m.route && Number.isInteger(m.route.rev)) b.route = { rev: m.route.rev, have: m.route.have, pi: m.route.pi };
   const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S'].includes(m.mode);
   if (attitudeValid) {
     b.hasAttitude = true;
@@ -534,6 +576,7 @@ function onBuoyMessage(m) {
   if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { b.lat = m.lat; b.lon = m.lon; b.hasPos = true; }
   state.buoys.set(id, b);
   if (!state.selected) state.selected = id;
+  if (downlink && downlink.id === id) renderSendStatus();
   state.lastRx = Math.max(state.lastRx, b.lastSeen);
 
   // MAVLink đến 1-2 gói/giây: lấy mẫu lịch sử mỗi 2 giây để 300 mẫu phủ được 10 phút vệt đi
@@ -605,6 +648,7 @@ function connect() {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === 'mission') onMissionMessage(m);
+    else if (m.type === 'downlink') onDownlinkMessage(m);
     else if (m.type === 'history') onHistoryMessage(m);
     else if (m.type === 'station') onStationMessage(m);
     else onBuoyMessage(m);

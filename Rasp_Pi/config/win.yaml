@@ -1,0 +1,112 @@
+# config/win.yaml - Cấu hình chạy RedgeSCUE trên Windows
+
+logging:
+  level: INFO
+  directory: logs
+
+serial:
+  stm32_port: "COM7"          # Thay bằng cổng COM của USB STM32 (ví dụ: COM3)
+  stm32_baud: 115200
+  lidar_port: "COM5"          # Thay bằng cổng COM của LiDAR (ví dụ: COM4)
+  lidar_baud: 115200
+  lidar_model: lds008
+
+vehicle:
+  lidar_yaw_offset_deg: 0.0
+  lidar_anticlockwise: false
+  boat_radius_m: 0.35
+  safety_margin_m: 0.40
+  max_speed_mps: 0.50
+  approach_speed_mps: 0.20
+  stop_distance_m: 1.00
+  slow_distance_m: 2.00
+  influence_distance_m: 3.00
+  arrive_radius_m: 4.0
+  target_standoff_m: 2.0
+  target_timeout_s: 2.0
+  max_turn_rate_deg_s: 35.0
+  max_pitch_deg: 35.0
+  max_roll_deg: 35.0
+  nav_ttl_ms: 300
+  lidar_stale_s: 0.50
+  lidar_required: false
+  imu_stale_s: 0.30
+  gps_stale_s: 2.0
+
+planner:
+  attractive_gain: 1.0
+  repulsive_gain: 0.75
+  bias_gain: 0.22
+  preferred_side: starboard
+  front_fov_deg: 110.0
+  cluster_gap_m: 0.25
+
+camera:
+  enabled: true               # Tránh lỗi KeyError: 'enabled'
+  source: device
+  device: 0
+  horizontal_fov_deg: 60.0
+  model_path: "models/detect.tflite"
+  label_path: "models/labelmap.txt"
+  confidence_threshold: 0.60
+  detection_hold_s: 0.40
+  report_cooldown_s: 10.0
+  lidar_association_half_angle_deg: 8.0
+  min_target_distance_m: 1.0
+  max_target_distance_m: 8.0
+  distance_source: bbox
+  vertical_fov_deg: 47.0
+  person_height_m: 1.7
+  standing_height_m: 1.7
+  standing_score_min: 2.5
+  pan_gain: 0.25
+  pan_deadband_deg: 2.0
+  pan_limit_deg: 80.0
+  recenter_after_s: 1.5
+  recenter_step_deg: 3.0
+  scan:
+    enabled: true
+    mode: sweep
+    angles_deg: [0, -60, 0, 60]
+    settle_s: 0.25
+    dwell_frames: 3
+    sweep_limit_deg: 60
+    sweep_rate_deg_s: 30
+    modes: ["AUTO"]
+
+mavlink:
+  url: "COM3"
+  baud: 921600
+
+rescue:
+  search_mode: AUTO
+  hold_mode: LOITER
+  after_hold: AUTO
+  confirm_s: 1.0
+  confirm_frames: 3
+  confirm_gap_s: 1.0
+  hold_s: 20.0
+  lost_s: 5.0
+  arrive_m: 0.5
+  revisit_radius_m: 2.0
+  same_person_range_m: 3.0
+  goto_period_s: 1.0
+  stall_s: 10.0
+  hold_clear_m: 1.5
+  hold_clear_within_m: 3.0
+  hold_min_m: 0.9
+  blocked_s: 20.0
+  blocked_within_m: 6.0
+  blocked_obstacle_m: 4.0
+  blocked_clear_m: 1.5
+  blocked_clear_s: 3.0
+  blocked_far_s: 120.0
+  blocked_arrived_m: 2.5
+  blocked_last_mode: HOLD
+  detector: camera
+
+avoidance:
+  rate_hz: 5.0
+  min_range_m: 0.15
+  max_range_m: 8.0
+  keep_out_radius_m: 0.4
