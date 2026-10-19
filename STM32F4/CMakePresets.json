@@ -23,6 +23,14 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "HwTest",
+            "inherits": "default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "VEDC_DEFINES": "HW_TEST_ENABLED=1;HW_TEST_ESC_MAX_US=1800U;HW_TEST_ESC_FRONT_SPAN_US=300U"
+            }
         }
     ],
     "buildPresets": [
@@ -33,6 +41,10 @@
         {
             "name": "Release",
             "configurePreset": "Release"
+        },
+        {
+            "name": "HwTest",
+            "configurePreset": "HwTest"
         }
     ]
 }

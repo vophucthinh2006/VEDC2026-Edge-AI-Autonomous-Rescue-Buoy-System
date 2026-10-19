@@ -122,10 +122,17 @@
 #define ESC_FRONT_REVERSE_DELAY_MS 200U
 
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
-   instead of the control loop. ESC output is capped and time-limited. */
+   instead of the control loop. ESC output is capped and time-limited. The first three
+   can be set from the build: the HwTest preset (motor_test.bat) does. */
+#ifndef HW_TEST_ENABLED
 #define HW_TEST_ENABLED            0
+#endif
+#ifndef HW_TEST_ESC_MAX_US
 #define HW_TEST_ESC_MAX_US         1500U   /* props stay on: half throttle */
+#endif
+#ifndef HW_TEST_ESC_FRONT_SPAN_US
 #define HW_TEST_ESC_FRONT_SPAN_US  150U    /* front ESC: neutral +/- this, about 30 % each way; water-cooled, keep runs short */
+#endif
 #define HW_TEST_ESC_MAX_RUN_MS     60000U  /* motors on a stand; a lost debugger still stops them */
 #define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (1000 us rear, neutral front) so the ESCs arm */
 #define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */

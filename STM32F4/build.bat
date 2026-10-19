@@ -2,9 +2,11 @@
 rem ============================================================
 rem  Build STM32F4 firmware (CMake + Ninja + arm-none-eabi-gcc)
 rem
-rem  Usage: build.bat [Debug|Release] [clean]
+rem  Usage: build.bat [Debug|Release|HwTest] [clean]
 rem    Debug   : -O0 -g3 (default)
 rem    Release : -Os
+rem    HwTest  : Debug with the bench motor test instead of the control loop
+rem              (App/hw_test.c, driven by ..\motor_test.bat)
 rem    clean   : delete build\<type> before building
 rem
 rem  Output : build\<type>\STM32F4.elf / .hex / .bin
@@ -17,6 +19,7 @@ set "CLEAN="
 for %%A in (%*) do (
     if /I "%%~A"=="Debug"   set "BUILD_TYPE=Debug"
     if /I "%%~A"=="Release" set "BUILD_TYPE=Release"
+    if /I "%%~A"=="HwTest"  set "BUILD_TYPE=HwTest"
     if /I "%%~A"=="clean"   set "CLEAN=1"
 )
 
