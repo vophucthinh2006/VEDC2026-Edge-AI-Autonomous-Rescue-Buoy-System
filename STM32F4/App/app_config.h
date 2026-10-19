@@ -24,6 +24,22 @@
 #if ACTUATORS_ENABLED && !ARM_REQUIRES_IMU
 #warning "Arming without the IMU: no overturn stop. Bench only."
 #endif
+/* Boat on its stand only: 1 arms and runs AUTO with a failed or stale BNO055. The heading then
+   stays where the IMU last read it and the turn rate counts as 0, so the PID turns the boat by
+   the camera's bearing to the person (the Pi's target is that heading plus the bearing). No
+   overturn stop. Set back to 0 before any water run. */
+#define BENCH_IGNORE_IMU           0
+#if ACTUATORS_ENABLED && BENCH_IGNORE_IMU
+#warning "AUTO runs without a fresh IMU: boat on the stand only."
+#endif
+/* Boat on its stand only, no RC transmitter: 1 makes the PE4 button the arm switch, in AUTO.
+   Off at boot; one press arms, the next disarms and stops the motors at once. Armed, the motors
+   still run only while the Pi sends NAV and HBT. The RC is not read for arming. Set back to 0
+   before any water run. */
+#define BENCH_PE4_ARM              0
+#if ACTUATORS_ENABLED && BENCH_PE4_ARM
+#warning "PE4 arms the boat in AUTO instead of the RC: boat on the stand only."
+#endif
 #define MAX_PITCH_DEG              35.0f
 #define MAX_ROLL_DEG               35.0f
 

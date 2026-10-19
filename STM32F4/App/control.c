@@ -135,17 +135,34 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
     control->estop = false;
     ConfirmButton_Update(&control->confirm, HAL_GPIO_ReadPin(ESTOP_GPIO_Port, ESTOP_Pin) == GPIO_PIN_RESET, now_ms);
     control->overturned = imu_fresh && (fabsf(imu->pitch_deg) > MAX_PITCH_DEG || fabsf(imu->roll_deg) > MAX_ROLL_DEG);
+#if BENCH_PE4_ARM
+    /* On the stand without a transmitter: each press of PE4 flips the arm switch, off at boot.
+       The presses still go to the Pi in $SYS. */
+    static bool bench_switch;
+    static uint16_t bench_presses;
+    static bool bench_primed;
+    if (!bench_primed) { bench_presses = control->confirm.presses; bench_primed = true; }
+    if (control->confirm.presses != bench_presses) {
+        bench_presses = control->confirm.presses;
+        bench_switch = !bench_switch;
+    }
+    bool auto_requested = bench_switch;
+    bool arm_switch = bench_switch;
+    bool link_ok = true;
+#else
     bool auto_requested = rc_fresh && rc->channel[RC_CH_MODE] >= RC_MODE_AUTO_THRESHOLD;
+    bool arm_switch = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD;
+    bool link_ok = rc_fresh;
+#endif
     control->auto_requested = auto_requested;
     bool was_armed = control->armed;
-    bool arm_switch = rc_fresh && rc->channel[RC_CH_ARM] >= RC_ARM_THRESHOLD;
-    bool safe = rc_fresh && (imu_fresh || !ARM_REQUIRES_IMU) && !control->estop && !control->overturned;
+    bool safe = link_ok && (imu_fresh || !ARM_REQUIRES_IMU || BENCH_IGNORE_IMU) && !control->estop && !control->overturned;
     /* Each arming needs the switch seen off first, so a link that comes back,
        a cleared E-stop or a reset never re-arms with the switch left on. */
     if (rc_fresh && !arm_switch) control->arm_switch_released = true;
     if (!arm_switch || !safe) control->armed = false;
-    else if (!control->armed && control->arm_switch_released && !auto_requested &&
-             rc->channel[RC_CH_POWER] <= RC_POWER_MIN_US && Manual_SpeedCentred(rc)) {
+    else if (!control->armed && (BENCH_PE4_ARM || (control->arm_switch_released && !auto_requested &&
+             rc->channel[RC_CH_POWER] <= RC_POWER_MIN_US && Manual_SpeedCentred(rc)))) {
         control->armed = true;
         control->arm_switch_released = false;
         control->manual_ready = true;
@@ -196,9 +213,13 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const ibus_stat
     control->manual_ready = false;
     bool nav_fresh = pi->mode == NAV_AUTO && pi->ttl_ms > 0U && fresh(now_ms, pi->last_nav_ms, pi->ttl_ms);
     bool hbt_fresh = pi->pi_link_ok && fresh(now_ms, pi->last_hbt_ms, HBT_TIMEOUT_MS);
-    /* AUTO always requires a fresh IMU, even when the bench-only arming
-       override is enabled. A stale heading must never drive a motor. */
-    if (!imu_fresh || !nav_fresh || !hbt_fresh) { stop_heading(control); publish_debug(control, rc, imu, imu_fresh, NULL, HOLD_BLOCK_AUTO); return; }
+    /* AUTO requires a fresh IMU, even when the bench-only arming override is
+       enabled: a stale heading must never drive a motor on the water. Only
+       BENCH_IGNORE_IMU, for the boat on its stand, lets it run on the held one. */
+    if ((!imu_fresh && !BENCH_IGNORE_IMU) || !nav_fresh || !hbt_fresh) { stop_heading(control); publish_debug(control, rc, imu, imu_fresh, NULL, HOLD_BLOCK_AUTO); return; }
+    bno055_euler_t held = *imu;
+    if (!imu_fresh) held.yaw_rate_dps = 0.0f;     /* the last rate read would brake for ever */
+    imu = &held;
     if (control->heading_state != HEADING_AUTO) HeadingController_Reset(&control->heading);
     control->heading_state = HEADING_AUTO;
     control->heading_target_deg = Heading_Wrap360(pi->heading_deg);
