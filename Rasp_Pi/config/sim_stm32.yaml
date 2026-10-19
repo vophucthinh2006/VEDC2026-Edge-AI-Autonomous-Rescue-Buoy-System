@@ -1,0 +1,18 @@
+# On top of sim.yaml: the STM32F407 boat (main.py) in the simulator (sim/tools/stm32_central_test.sh).
+# The F407 and the LD14 are stand-ins behind pseudo-terminals (sim/tools/f407_board_sim.py,
+# ld14_emulator.py); the launcher writes their paths into a second overlay:
+#   serial: {stm32_port: ..., lidar_port: ...}
+serial:
+  lidar_model: ld14
+vehicle:
+  # The emulated LD14 has its zero at the bow and the Gazebo LiDAR does not see the hull:
+  # none of the bench calibration of settings.yaml applies.
+  lidar_yaw_offset_deg: 0.0
+  lidar_mask: []
+  # The F407 cannot brake in AUTO (rear ESCs one way, front motor unused): told speed 0 at the
+  # stand-off, the boat coasts about 1 m further on. Stopping at 3 m leaves it about 2 m from the person.
+  target_standoff_m: 3.0
+mission:
+  file: config/mission_sim_central.yaml
+audio:
+  device: default

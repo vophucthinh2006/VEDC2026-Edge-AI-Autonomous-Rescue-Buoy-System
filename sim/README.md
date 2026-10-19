@@ -152,6 +152,30 @@ cả những góc "không thấy gì" để một vòng quét rỗng vẫn là m
 Trình thế chỗ LD14 phát đúng định dạng gói mà `Rasp_Pi/modules/lidar_ld14.py` giải mã (`encode_scan` của
 chính module đó). Muốn chạy lại với LDS-008 cũ: `VEDC_LIDAR_MODEL=lds008`. Cảm biến iBus, INA226, SPI của LoRa không có trong giả lập.
 
+### Thuyền STM32 (Pi + STM32F407) trong giả lập
+
+Đường này không có ArduPilot: `Rasp_Pi/main.py` chạy như trên thuyền STM32, và bo F407 được thay bằng
+`tools/f407_board_sim.py` sau một cổng nối tiếp ảo. Bo ảo nhận `$NAV $HBT $CAM $TXD`, trả `$IMU $GPS $SYS $ACK`
+(lấy từ odometry của phao Gazebo), và tự đẩy thruster, xoay pod, xoay camera. Bộ PID giữ hướng, phần trộn
+motor/bánh lái và chuyển động mượt của camera là **chính** `STM32F4/App/heading_controller.c` và
+`camera_pan.c` biên dịch cho máy tính; nhánh AUTO của `control.c` và độ dốc ESC của `actuators.c` được chép
+sang Python. Bộ điều khiển RC không giả lập: bo báo đã arm và đang ở AUTO.
+
+```bash
+bash sim/tools/stm32_central_test.sh                                   # cảnh miền Trung, khoảng 2.5 phút
+MEDIA=$HOME/vedc_sim/stm32_media bash sim/tools/stm32_central_test.sh  # kèm 10 ảnh và video 30 s
+```
+
+Bài test dùng bản sao của `vedc_central.sdf` bỏ người đứng ở cửa nhà, thêm hai camera cố định để ghi hình,
+và lộ trình `Rasp_Pi/config/mission_sim_central.yaml` chạy thẳng xuống kênh qua người dưới nước (x 14, y −1).
+Cấu hình Pi là `sim.yaml` + `boat_stm32.yaml` + `sim_stm32.yaml`. Đạt khi Pi gửi `VICTIM_FOUND` và phao dừng
+cách người 1.2–4 m. Lần đo đầu (2026-10-18): thấy người ở 11 s, dừng và giữ cách người 1.74 m.
+
+Bo F407 ở AUTO không phanh được (hai ESC sau một chiều, motor trước không dùng), nên được lệnh dừng ở điểm
+cách người 2 m thì phao còn trôi thêm khoảng 1 m: lần chạy như vậy dừng cách người 1.06 m. `sim_stm32.yaml`
+vì thế đặt điểm dừng 3 m. Ghi hình: `tools/record_media.py` (`record` lưu khung hình các camera Gazebo và
+viewer của Pi, `compose` chọn các mốc từ log của bo ảo rồi dựng ảnh có chú thích và video ghép đôi).
+
 **Camera trong giả lập**: 640 × 480, 15 khung/giây, góc nhìn ngang 60° (dọc 46.8°), cao 0.295 m trên mặt
 nước. Bộ phát hiện bị giữ ở 8 khung hình/giây (`camera.max_fps` trong `sim.yaml`), tốc độ đội báo cho Pi 4.
 Các số đo trong tài liệu này được lấy khi còn giả định 5 khung hình/giây.
