@@ -95,11 +95,12 @@ def main() -> int:
 
         vision = VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, float(config["vehicle"]["target_standoff_m"]))
         workers.append(vision)
-    status = {"text": ""}
+    status = {"text": "", "lines": []}
     if args.viewer:
         from modules.viewer import Viewer   # needs OpenCV; only loaded when asked for
         workers.append(Viewer(args.viewer, state, stop_event, config["avoidance"], config["camera"],
-                              vision.view if vision else (lambda: None), lambda: [], lambda: None, lambda: status["text"]))
+                              vision.view if vision else (lambda: None), lambda: [], lambda: None, lambda: follow.phase,
+                              decision=lambda: {"lines": status["lines"]}))
     for worker in workers:
         worker.start()
 
@@ -153,6 +154,13 @@ def main() -> int:
             target_bearing = bearing_deg(snapshot.gps.lat_deg, snapshot.gps.lon_deg, *goal) if goal else command.heading_deg
             state.update_steering(command.heading_deg, target_bearing)
             status["text"] = f"{follow.describe()}  {route.describe()}  NAV {command.mode} {command.speed_mps:.2f} m/s {command.heading_deg:.0f} ({command.reason})"
+            # The viewer's words: what the boat is doing, the command the STM32 gets, and why.
+            status["lines"] = [f"FOLLOW: person {planned.human_target.distance_m:.1f} m away" if planned.human_target
+                               else f"SEARCH: {route.describe()}",
+                               "going to them along the camera's bearing" if planned.human_target else "the camera sweeps for people",
+                               f"NAV {command.mode} {command.speed_mps:.2f} m/s, heading {command.heading_deg:03.0f}",
+                               f"reason: {command.reason}",
+                               "the STM32F407 holds that heading (PID)"]
             text = f"{follow.phase} {command.reason}"
             if text != last_text:
                 log.info("%s", status["text"])

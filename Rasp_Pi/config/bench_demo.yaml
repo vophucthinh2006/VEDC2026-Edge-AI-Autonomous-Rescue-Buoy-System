@@ -1,0 +1,28 @@
+# Bench demo of the STM32 boat on its stand, after config/cam_rapoo.yaml: the camera servo follows
+# a person again (cam_rapoo.yaml holds it ahead) and sweeps while the boat is armed in AUTO.
+#   ./run.sh stm32 --overlay config/cam_rapoo.yaml --overlay config/bench_demo.yaml --viewer
+camera:
+  pan_limit_deg: 45           # following a person, too: the servo stays within +-45 deg
+  scan:
+    enabled: true
+    sweep_limit_deg: 45
+    sweep_rate_deg_s: 15      # half the settings.yaml rate: a calmer sweep to film
+follow:
+  # With the viewer on the HDMI screen the Pi 4 looks about once every 1.2 s: three sightings in
+  # 2.5 s (settings.yaml) never happened on the stand, and the boat never left SEARCH.
+  confirm_frames: 2
+  confirm_s: 5.0
+  lost_s: 6.0
+vehicle:
+  # On the stand the LiDAR sees the table, the stand and the people round it within 0.6-0.8 m:
+  # with the water values (hull 0.35 + margin 0.40, stop at 1 m) the boat flipped between creeping
+  # and STOP obstacle_too_close. Here the hull counts as a point and nothing slows or stops it;
+  # the LiDAR and its blocked sectors still show in the viewer.
+  boat_radius_m: 0.0
+  safety_margin_m: 0.0
+  stop_distance_m: 0.02
+  slow_distance_m: 0.05
+  influence_distance_m: 0.05
+  # The BNO055 drops out on the stand: drive on the last heading it read. Needs the STM32F407
+  # built with BENCH_IGNORE_IMU 1 (App/app_config.h). Never on the water.
+  imu_required: false

@@ -20,7 +20,9 @@ class SafetyArbiter:
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "stm32_fault_or_estop")
         if snapshot.imu.overturned or abs(snapshot.imu.pitch_deg) > self.v["max_pitch_deg"] or abs(snapshot.imu.roll_deg) > self.v["max_roll_deg"]:
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "attitude_fault")
-        if not snapshot.imu.imu_ok or now - snapshot.imu.timestamp > self.v["imu_stale_s"]:
+        # vehicle.imu_required: false only for the boat on its stand (config/bench_demo.yaml), with
+        # the STM32F407 built with BENCH_IGNORE_IMU: the heading is then the last one the IMU read.
+        if self.v.get("imu_required", True) and (not snapshot.imu.imu_ok or now - snapshot.imu.timestamp > self.v["imu_stale_s"]):
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "imu_stale")
         if proposed.mode == "AUTO" and self.v.get("lidar_required", True) and now - snapshot.scan_timestamp > self.v["lidar_stale_s"]:
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "lidar_stale")

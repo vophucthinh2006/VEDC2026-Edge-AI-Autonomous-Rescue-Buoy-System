@@ -1,0 +1,9 @@
+# Search route of the STM32 boat in the central scene (sim/worlds/vedc_central.sdf), for
+# sim/tools/stm32_central_test.sh. Gazebo x east, y north from the buoy's start (10.883438,
+# 106.796019): x 6, y -0.5 then x 24, y -0.5, straight down the channel past the person in the water
+# at x 14, y -1. Nothing on the way: the basket boat is at y +1.6, the wrecked boat at y -4.3.
+loop: false
+waypoints:
+  - [10.8834335, 106.7960739]
+  - [10.8834335, 106.7962386]
+geofence: []

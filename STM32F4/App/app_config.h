@@ -24,6 +24,22 @@
 #if ACTUATORS_ENABLED && !ARM_REQUIRES_IMU
 #warning "Arming without the IMU: no overturn stop. Bench only."
 #endif
+/* Boat on its stand only: 1 arms and runs AUTO with a failed or stale BNO055. The heading then
+   stays where the IMU last read it and the turn rate counts as 0, so the PID turns the boat by
+   the camera's bearing to the person (the Pi's target is that heading plus the bearing). No
+   overturn stop. Set back to 0 before any water run. */
+#define BENCH_IGNORE_IMU           0
+#if ACTUATORS_ENABLED && BENCH_IGNORE_IMU
+#warning "AUTO runs without a fresh IMU: boat on the stand only."
+#endif
+/* Boat on its stand only, no RC transmitter: 1 makes the PE4 button the arm switch, in AUTO.
+   Off at boot; one press arms, the next disarms and stops the motors at once. Armed, the motors
+   still run only while the Pi sends NAV and HBT. The RC is not read for arming. Set back to 0
+   before any water run. */
+#define BENCH_PE4_ARM              0
+#if ACTUATORS_ENABLED && BENCH_PE4_ARM
+#warning "PE4 arms the boat in AUTO instead of the RC: boat on the stand only."
+#endif
 #define MAX_PITCH_DEG              35.0f
 #define MAX_ROLL_DEG               35.0f
 
@@ -106,10 +122,17 @@
 #define ESC_FRONT_REVERSE_DELAY_MS 200U
 
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
-   instead of the control loop. ESC output is capped and time-limited. */
+   instead of the control loop. ESC output is capped and time-limited. The first three
+   can be set from the build: the HwTest preset (motor_test.bat) does. */
+#ifndef HW_TEST_ENABLED
 #define HW_TEST_ENABLED            0
+#endif
+#ifndef HW_TEST_ESC_MAX_US
 #define HW_TEST_ESC_MAX_US         1500U   /* props stay on: half throttle */
+#endif
+#ifndef HW_TEST_ESC_FRONT_SPAN_US
 #define HW_TEST_ESC_FRONT_SPAN_US  150U    /* front ESC: neutral +/- this, about 30 % each way; water-cooled, keep runs short */
+#endif
 #define HW_TEST_ESC_MAX_RUN_MS     60000U  /* motors on a stand; a lost debugger still stops them */
 #define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (1000 us rear, neutral front) so the ESCs arm */
 #define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */

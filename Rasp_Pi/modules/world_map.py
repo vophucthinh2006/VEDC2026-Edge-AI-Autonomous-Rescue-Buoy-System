@@ -2,11 +2,12 @@
 
     route and current waypoint   where the mission wants the boat (blue)
     thin blue arrow              the straight bearing to that waypoint
-    thick yellow arrow           where the autopilot is steering right now. When the two differ,
-                                 the autopilot's avoidance is bending the path round what the LiDAR
-                                 sees: that difference is the decision this map is there to show.
+    thick yellow arrow           where the boat is steered right now (by the autopilot, or by the
+                                 Pi's navigator on the STM32 boat). When the two differ, avoidance
+                                 is bending the path round what the LiDAR sees: that difference is
+                                 the decision this map is there to show.
     white dots                   LiDAR returns, remembered where they were seen
-    red arcs                     the sectors the Pi reports to the autopilot as blocked
+    red arcs                     the sectors the Pi reports as blocked
     people                       grey: seen, not confirmed. yellow: confirmed, waiting. green: the
                                  one being gone to (with the stand-off ring and the point aimed at).
                                  blue: attended, with the ring nobody inside is gone to again.
@@ -25,14 +26,13 @@ import numpy as np
 
 from modules.obstacle_feed import SECTOR_DEG
 from modules.state_store import Snapshot
+from modules.ui_draw import BLUE, CARD, CARD_EDGE, CYAN, GREEN, GRID, MUTED, ORANGE, RED, ROUTE, STRIP, TEXT, WHITE, YELLOW, put
 from utils.geometry import signed_angle_deg
 
-WORLD_W, WORLD_H = 1120, 560
-PANEL_W = 400                  # the words, on the right
+WORLD_W, WORLD_H = 1096, 480   # as wide as the camera and LiDAR cards above it, with their gap
+PANEL_W = 380                  # the words, on the right
 MAP_W = WORLD_W - PANEL_W
-FONT = cv2.FONT_HERSHEY_SIMPLEX
-WHITE, GREY, DIM, DARK = (235, 235, 235), (150, 150, 150), (70, 70, 70), (40, 40, 40)
-GREEN, YELLOW, RED, BLUE, ORANGE, ROUTE = (90, 220, 90), (60, 220, 240), (70, 70, 240), (240, 160, 60), (40, 150, 250), (230, 170, 90)
+GREY, DARK = MUTED, GRID
 HIT_KEEP_S = 180.0             # a LiDAR return stays on the map this long after it was last seen
 HIT_CELL_M = 0.25
 MAX_HITS = 8000
@@ -76,11 +76,11 @@ class WorldMemory:
 
 
 def steering_words(snap: Snapshot, now: float) -> list[tuple[str, tuple[int, int, int]]]:
-    """In words: is the autopilot going straight for its waypoint, or round something?"""
+    """In words: is the boat going straight for its waypoint, or round something?"""
     nav, vehicle = snap.nav, snap.vehicle
     if nav.steer_bearing_deg is None or now - nav.timestamp > 3.0:
-        return [("autopilot: no steering report yet", GREY)]
-    lines = [(f"autopilot steers {nav.steer_bearing_deg:03.0f} deg", YELLOW)]
+        return [("no steering report yet", GREY)]
+    lines = [(f"steering {nav.steer_bearing_deg:03.0f} deg", YELLOW)]
     if vehicle.wp_dist_m >= 0.0 and vehicle.mode in ("AUTO", "GUIDED", "RTL"):
         off = signed_angle_deg(nav.steer_bearing_deg - vehicle.wp_bearing_deg)
         if abs(off) < 8.0:
@@ -100,21 +100,15 @@ def draw_world(snap: Snapshot, memory: WorldMemory, decision: dict | None, secto
                view: dict | None, fov_deg: float) -> np.ndarray:
     """decision: RescueMission.describe() plus "goto" (lat, lon) or None; None without rescue logic."""
     now = monotonic()
-    panel = np.full((WORLD_H, WORLD_W, 3), 18, np.uint8)
-    cv2.rectangle(panel, (MAP_W, 0), (WORLD_W - 1, WORLD_H - 1), (26, 26, 26), -1)
+    panel = np.full((WORLD_H, WORLD_W, 3), CARD, np.uint8)
     boat = memory.update(snap, now)
     decision = decision or {}
+    clear = int(max_m * 100) + 1
+    blocked = [index for index, cm in enumerate(sector_cm) if cm < clear]
 
-    def words(lines: list[tuple[str, tuple[int, int, int]]], y: int) -> int:
-        for text, colour in lines:
-            cv2.putText(panel, text, (MAP_W + 14, y), FONT, 0.47, colour, 1, cv2.LINE_AA)
-            y += 21
-        return y + 8
-
-    y = words([("WHAT THE BOAT IS DECIDING", GREY)], 26)
     if boat is None:
-        words([("no position yet", GREY)], y)
-        cv2.putText(panel, "waiting for a GPS fix", (20, WORLD_H // 2), FONT, 0.7, GREY, 1, cv2.LINE_AA)
+        words_column(panel, snap, decision, blocked, now)
+        put(panel, "waiting for a GPS fix", (MAP_W // 2, WORLD_H // 2), 18, GREY, align="centre")
         return panel
 
     people = [(memory.to_local(lat, lon), status) for lat, lon, status in decision.get("people", [])]
@@ -147,9 +141,9 @@ def draw_world(snap: Snapshot, memory: WorldMemory, decision: dict | None, secto
         cv2.line(panel, px((centre[0] - half_x, gy)), px((centre[0] + half_x, gy)), DARK, 1)
         gy += step
     cv2.line(panel, (16, WORLD_H - 18), (16 + int(step * scale), WORLD_H - 18), GREY, 2)
-    cv2.putText(panel, f"{step:.0f} m", (16, WORLD_H - 26), FONT, 0.42, GREY, 1, cv2.LINE_AA)
-    cv2.arrowedLine(panel, (MAP_W - 26, 46), (MAP_W - 26, 16), GREY, 2, cv2.LINE_AA, tipLength=0.4)
-    cv2.putText(panel, "N", (MAP_W - 32, 62), FONT, 0.45, GREY, 1, cv2.LINE_AA)
+    put(panel, f"{step:.0f} m", (16, WORLD_H - 26), 12, GREY)
+    cv2.arrowedLine(panel, (MAP_W - 28, 48), (MAP_W - 28, 16), GREY, 2, cv2.LINE_AA, tipLength=0.35)
+    put(panel, "N", (MAP_W - 28, 66), 13, GREY, bold=True, align="centre")
 
     # What the LiDAR has seen, where it saw it: fresh white, older grey.
     for (cx, cy), seen in memory.hits.items():
@@ -166,11 +160,11 @@ def draw_world(snap: Snapshot, memory: WorldMemory, decision: dict | None, secto
         for seq, point in route:
             current = seq == snap.vehicle.mission_seq
             cv2.circle(panel, px(point), 7 if current else 4, ROUTE, -1 if current else 1, cv2.LINE_AA)
-            cv2.putText(panel, str(seq), (px(point)[0] + 9, px(point)[1] - 6), FONT, 0.42, ROUTE, 1, cv2.LINE_AA)
+            put(panel, str(seq), (px(point)[0] + 9, px(point)[1] - 7), 13, ROUTE, bold=True)
 
     # Where the boat has been.
     if len(memory.trail) > 1:
-        cv2.polylines(panel, [np.array([px(p) for p in memory.trail], np.int32)], False, (120, 120, 60), 1, cv2.LINE_AA)
+        cv2.polylines(panel, [np.array([px(p) for p in memory.trail], np.int32)], False, CYAN, 2, cv2.LINE_AA)
 
     # People, as the rescue logic has them.
     group_radius, standoff = float(decision.get("group_radius_m", 0.0)), float(decision.get("standoff_m", 0.0))
@@ -193,7 +187,6 @@ def draw_world(snap: Snapshot, memory: WorldMemory, decision: dict | None, secto
         overlay = panel.copy()
         cv2.fillPoly(overlay, [wedge], YELLOW if view.get("scanning") else GREEN)
         panel = cv2.addWeighted(overlay, 0.12, panel, 0.88, 0)
-    clear = int(max_m * 100) + 1
     for index, cm in enumerate(sector_cm):
         if cm < clear:
             a0, a1 = yaw + index * SECTOR_DEG - SECTOR_DEG / 2.0, yaw + index * SECTOR_DEG + SECTOR_DEG / 2.0
@@ -210,25 +203,47 @@ def draw_world(snap: Snapshot, memory: WorldMemory, decision: dict | None, secto
     # The boat itself, bow first.
     b = px(boat)
     nose, left, right = px(ahead(boat, yaw, 1.0)), px(ahead(boat, yaw + 140.0, 0.8)), px(ahead(boat, yaw - 140.0, 0.8))
-    cv2.fillPoly(panel, [np.array([nose, left, b, right], np.int32)], WHITE)
-    cv2.rectangle(panel, (MAP_W, 0), (WORLD_W - 1, WORLD_H - 1), (26, 26, 26), -1)     # the words' column, over whatever ran into it
-
-    # The words.
-    y = words([("WHAT THE BOAT IS DECIDING", GREY)], 26)
-    vehicle = snap.vehicle
-    y = words([(f"{vehicle.mode or '?'}  {'armed' if vehicle.armed else 'DISARMED'}   item {vehicle.mission_seq}"
-                + (f"   waypoint {vehicle.wp_dist_m:.0f} m" if vehicle.wp_dist_m >= 0 else ""), WHITE)], y)
-    y = words([(line, GREEN if index == 0 else WHITE) for index, line in enumerate(decision.get("lines", ["no rescue logic here"]))], y)
-    y = words(steering_words(snap, now), y)
-    blocked = [index for index, cm in enumerate(sector_cm) if cm < clear]
-    nearest = min((o.distance_m for o in snap.obstacles), default=None)
-    y = words([(f"LiDAR: {len(blocked)} of 72 sectors blocked" + (f", nearest {nearest:.1f} m" if nearest is not None else ""), RED if blocked else GREY)], y)
-    legend = (("white", WHITE, "boat, LiDAR returns"), ("blue", ROUTE, "mission route, bearing to waypoint"),
-              ("yellow", YELLOW, "autopilot's steering, waiting people"), ("green", GREEN, "person gone to, point aimed at"),
-              ("blue ring", BLUE, "attended: nobody inside is gone to again"), ("red", RED, "sectors reported blocked"))
-    y = max(y, WORLD_H - 21 * len(legend) - 6)
-    for _name, colour, meaning in legend:
-        cv2.circle(panel, (MAP_W + 20, y - 4), 4, colour, -1, cv2.LINE_AA)
-        cv2.putText(panel, meaning, (MAP_W + 34, y), FONT, 0.4, GREY, 1, cv2.LINE_AA)
-        y += 21
+    if math.dist(nose, b) < 9:              # zoomed out: keep the arrow big enough to see
+        nose, left, right = px(ahead(boat, yaw, 9 / scale)), px(ahead(boat, yaw + 140.0, 7 / scale)), px(ahead(boat, yaw - 140.0, 7 / scale))
+    cv2.fillPoly(panel, [np.array([nose, left, b, right], np.int32)], WHITE, cv2.LINE_AA)
+    words_column(panel, snap, decision, blocked, now)
     return panel
+
+
+def words_column(panel: np.ndarray, snap: Snapshot, decision: dict, blocked: list[int], now: float) -> None:
+    """The right-hand column: what the boat is doing and why, how it steers, the legend."""
+    cv2.rectangle(panel, (MAP_W, 0), (WORLD_W - 1, WORLD_H - 1), STRIP, -1)        # over whatever ran into it
+    cv2.line(panel, (MAP_W, 0), (MAP_W, WORLD_H - 1), CARD_EDGE, 1)
+    x, y = MAP_W + 18, 30
+
+    def heading(text: str) -> None:
+        nonlocal y
+        put(panel, text, (x, y), 11, GREY, bold=True)
+        y += 22
+
+    def line(text: str, colour, size: int = 14, bold: bool = False) -> None:
+        nonlocal y
+        put(panel, text, (x, y), size, colour, bold=bold)
+        y += size + 8
+
+    heading("WHAT THE BOAT IS DOING")
+    lines = decision.get("lines") or ["no rescue logic here"]
+    for index, text in enumerate(lines[:5]):
+        line(text, GREEN if index == 0 else TEXT, 15 if index == 0 else 13, bold=index == 0)
+    y += 8
+    heading("STEERING")
+    for text, colour in steering_words(snap, now):
+        line(text.strip(), colour, 13)
+    nearest = min((o.distance_m for o in snap.obstacles), default=None)
+    line(f"LiDAR: {len(blocked)} of 72 sectors blocked" + (f", nearest {nearest:.1f} m" if nearest is not None else ""),
+         RED if blocked else GREY, 13)
+    legend = ((WHITE, "boat, LiDAR returns"), (CYAN, "where the boat has been"), (ROUTE, "route, bearing to waypoint"),
+              (YELLOW, "steering, waiting people"), (GREEN, "person gone to"), (BLUE, "attended person"), (RED, "blocked sectors"))
+    y = max(y + 6, WORLD_H - 20 * ((len(legend) + 1) // 2) - 30)
+    put(panel, "LEGEND", (x, y), 11, GREY, bold=True)
+    y += 20
+    column = (WORLD_W - MAP_W - 36) // 2
+    for index, (colour, meaning) in enumerate(legend):
+        lx, ly = x + (index % 2) * column, y + (index // 2) * 20
+        cv2.circle(panel, (lx + 4, ly - 4), 4, colour, -1, cv2.LINE_AA)
+        put(panel, meaning, (lx + 14, ly), 11, GREY)

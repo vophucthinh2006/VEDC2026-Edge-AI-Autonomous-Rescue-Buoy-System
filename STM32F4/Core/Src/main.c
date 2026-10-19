@@ -281,6 +281,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
+  /* Clear the error flags first (SR read, then DR read). HAL only reads DR when RXNE is set: an
+     overrun caught with RXNE already clear left ORE set, and re-arming RXNEIE on it fired the
+     interrupt again at once, for ever. Seen on the stand (2026-10-18): stuck in USART3, the GPS,
+     with SR 0xD8; the main loop never ran again, no telemetry, no PE4. */
+  __HAL_UART_CLEAR_OREFLAG(huart);
   /* An overrun makes HAL abort the interrupt reception. Re-arm the GPS byte so the
      fix source does not stay silent until the next reset (BUSY if HAL kept it armed). */
   if (huart == &huart3) (void)HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);

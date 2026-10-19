@@ -2,7 +2,7 @@
 rem ============================================================
 rem  Flash STM32F4 firmware via ST-LINK + OpenOCD
 rem
-rem  Usage: flash.bat [Debug|Release]
+rem  Usage: flash.bat [Debug|Release|HwTest]
 rem    Flashes build\<type>\STM32F4.elf (run build.bat first),
 rem    verifies, then resets the MCU.
 rem
@@ -12,6 +12,7 @@ setlocal EnableExtensions
 
 set "BUILD_TYPE=Debug"
 if /I "%~1"=="Release" set "BUILD_TYPE=Release"
+if /I "%~1"=="HwTest" set "BUILD_TYPE=HwTest"
 
 cd /d "%~dp0"
 
