@@ -435,13 +435,15 @@ function renderSendStatus() {
   el.replaceChildren();
   if (!downlink || !downlink.rev) return;
   const line = (text, cls) => { const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls; el.appendChild(d); };
-  const at = new Date(downlink.at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-  line(`Bản gửi #${downlink.rev}: ${downlink.n} điểm${downlink.loop ? ', đi vòng' : ''} tới ${downlink.id}, lúc ${at}`);
+  const hhmm = t => new Date(t).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  line(`Bản gửi #${downlink.rev}: ${downlink.n} điểm${downlink.loop ? ', đi vòng' : ''} tới ${downlink.id}, lúc ${hhmm(downlink.at)}`);
   const r = state.buoys.get(downlink.id)?.route;
-  if (!r || r.rev !== downlink.rev) line('Đang chờ phao nhận (phao trả lời sau mỗi gói beacon)', 'warn');
+  // delivered: Worker thôi mời trạm gửi bản này, phao khởi động lại cũng không nhận lại
+  if ((!r || r.rev !== downlink.rev) && downlink.delivered) line(`Pi đã nhận bản này lúc ${hhmm(downlink.delivered)}, nay phao không còn giữ nó (khởi động lại?). Trạm không gửi lại: bấm Gửi tới phao để chạy lại`, 'warn');
+  else if (!r || r.rev !== downlink.rev) line('Đang chờ phao nhận (phao trả lời sau mỗi gói beacon)', 'warn');
   else if (r.have < downlink.n) line(`Phao đang nhận: ${r.have}/${downlink.n} điểm`, 'warn');
   else if (!r.pi) line(`Phao đã nhận đủ ${downlink.n} điểm, đang chuyển cho Pi`, 'warn');
-  else line('Pi đã nhận lộ trình và đang chạy theo nó', 'ok');
+  else line(downlink.n ? 'Pi đã nhận lộ trình và đang chạy theo nó' : 'Pi đã nhận lộ trình rỗng: phao dừng', 'ok');
   if (downlink.mission_rev !== missionRev) line('Lộ trình đã sửa sau lần gửi này: bấm Gửi tới phao để gửi bản mới', 'warn');
 }
 
@@ -562,8 +564,10 @@ function onBuoyMessage(m) {
   b.nav = m.nav && typeof m.nav === 'object' ? m.nav : null;
   // Số người phao đã báo phát hiện (bản STM32, qua LoRa); gói không có trường này thì giữ số cũ
   if (Number.isInteger(m.victims)) b.victims = m.victims;
-  // Tiến độ nhận lộ trình gửi qua LoRa (bản STM32); gói không có nhóm này thì giữ trạng thái cũ
+  // Tiến độ nhận lộ trình gửi qua LoRa (bản STM32). Beacon LoRa không có w= là phao không giữ lộ trình
+  // nào (F407 vừa khởi động lại); bản tin MAVLink không bao giờ có nhóm này nên giữ trạng thái cũ
   if (m.route && Number.isInteger(m.route.rev)) b.route = { rev: m.route.rev, have: m.route.have, pi: m.route.pi };
+  else if (b.link === 'lora') b.route = null;
   const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S'].includes(m.mode);
   if (attitudeValid) {
     b.hasAttitude = true;

@@ -11,7 +11,11 @@ const PERSIST_MS = 5000;
 const EMPTY_MISSION = { rev: 0, waypoints: [], poly: [], spacing: 10, angle: null, speed: 1.5 };
 
 // Bản tin cho trình duyệt: không kèm tọa độ (đã có trong bản tin mission)
-const downlinkSummary = d => ({ type: "downlink", rev: d.rev, id: d.id, loop: d.loop, n: d.pts.length, mission_rev: d.mission_rev, by: d.by, at: d.at });
+const downlinkSummary = d => ({ type: "downlink", rev: d.rev, id: d.id, loop: d.loop, n: d.pts.length, mission_rev: d.mission_rev, by: d.by, at: d.at, delivered: d.delivered || null });
+
+// Phao đích báo Pi đã nhận đủ bản gửi này: cùng rev, đủ điểm, pi = 1
+const routeDelivered = (d, msg) => !!d.rev && !d.delivered && msg.id === d.id && !!msg.route &&
+  msg.route.rev === d.rev && msg.route.have === d.pts.length && msg.route.pi === 1;
 
 // Một Durable Object duy nhất giữ vị trí mới nhất của từng phao, lộ trình chung,
 // và phát cả hai cho mọi trình duyệt đang mở.
@@ -32,7 +36,8 @@ export class Hub extends DurableObject {
     return this.mission;
   }
 
-  // Bản chụp lộ trình admin đã bấm "Gửi tới phao": { rev, id, loop, pts: [[lat, lon]], by, at }
+  // Bản chụp lộ trình admin đã bấm "Gửi tới phao": { rev, id, loop, pts: [[lat, lon]], by, at, delivered? }
+  // delivered: lúc phao báo Pi đã nhận đủ; từ đó trạm không được mời gửi lại bản này
   async loadDownlink() {
     if (!this.downlink) this.downlink = (await this.ctx.storage.get("downlink")) || { rev: 0 };
     return this.downlink;
@@ -82,7 +87,11 @@ export class Hub extends DurableObject {
     }
 
     if (url.pathname === "/downlink") {
-      if (request.method === "GET") return json(await this.loadDownlink());
+      if (request.method === "GET") {
+        // Đã giao thì trả {rev: 0}: F407 khởi động lại báo rev 0, gửi lại bản cũ là thuyền tự chạy trên bờ
+        const dl = await this.loadDownlink();
+        return json(dl.delivered ? { rev: 0 } : dl);
+      }
       if (request.method === "PUT") {
         const { id, loop, clear, by } = await request.json();
         const mission = await this.loadMission();
@@ -147,6 +156,12 @@ export class Hub extends DurableObject {
         await this.ctx.storage.put({ buoys, ["h:" + msg.id]: points });
       }
       this.broadcast({ ...msg, age_s: 0 });
+      const dl = await this.loadDownlink();
+      if (routeDelivered(dl, msg)) {
+        this.downlink = { ...dl, delivered: now };
+        await this.ctx.storage.put("downlink", this.downlink);
+        this.broadcast(downlinkSummary(this.downlink));
+      }
       return json({ ok: true, clients: this.ctx.getWebSockets().length });
     }
 
