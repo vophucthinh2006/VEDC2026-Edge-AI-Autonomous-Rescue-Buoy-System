@@ -8,6 +8,8 @@ camera:
     sweep_limit_deg: 45
     sweep_rate_deg_s: 15      # half the settings.yaml rate: a calmer sweep to film
 follow:
+  # On the stand there is no GPS fix and no route: follow people anyway (boat_stm32.yaml waits for a route).
+  only_on_route: false
   # With the viewer on the HDMI screen the Pi 4 looks about once every 1.2 s: three sightings in
   # 2.5 s (settings.yaml) never happened on the stand, and the boat never left SEARCH.
   confirm_frames: 2

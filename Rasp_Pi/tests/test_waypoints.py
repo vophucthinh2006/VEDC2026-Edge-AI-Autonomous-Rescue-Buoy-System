@@ -6,7 +6,7 @@ from time import monotonic
 from modules.navigation import NavCommand
 from modules.safety import SafetyArbiter
 from modules.state_store import GpsState, ImuState, Snapshot, SysState
-from modules.waypoints import Route, load_route, read_qgc_wpl
+from modules.waypoints import Route, load_route, read_qgc_wpl, start_route
 from utils.geometry import offset_latlon
 
 A = (10.762600, 106.660100)
@@ -39,6 +39,21 @@ class RouteTest(unittest.TestCase):
 
     def test_reads_the_waypoints_of_a_mission_planner_file_and_leaves_home_out(self):
         self.assertEqual(read_qgc_wpl(WPL), [(10.7626, 106.6601), (10.7627, 106.6602)])
+
+    def test_start_route_keeps_only_the_fence_when_waypoints_come_from_the_dashboard(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "mission.yaml"
+            path.write_text(f"loop: false\nwaypoints:\n  - [{A[0]}, {A[1]}]\n  - [{B[0]}, {B[1]}]\ngeofence:\n"
+                            + "".join(f"  - [{lat}, {lon}]\n" for lat, lon in FENCE))
+            full = start_route(path, 3.0)
+            self.assertEqual(len(full.waypoints), 2)
+            fence_only = start_route(path, 3.0, waypoints_from_file=False)
+            self.assertEqual(fence_only.waypoints, [])
+            self.assertIsNone(fence_only.current)
+            self.assertEqual(len(fence_only.geofence), 4)
+            self.assertTrue(fence_only.inside_fence(*A))
+        self.assertIsNone(start_route(None, 3.0, waypoints_from_file=False).current)
+        self.assertIsNone(start_route(Path("no/such/file.yaml"), 3.0).current)
 
     def test_loads_yaml_with_a_fence(self):
         with tempfile.TemporaryDirectory() as folder:

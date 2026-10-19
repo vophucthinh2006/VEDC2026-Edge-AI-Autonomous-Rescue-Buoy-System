@@ -17,6 +17,13 @@ vehicle:
   approach_speed_mps: 0.15
   face_speed_mps: 0.10
   arrive_radius_m: 3.0
+# No RC transmitter: the boat runs only a route sent from the dashboard ("Gửi tới phao"), and an
+# empty route stops it (docs/lora-route-downlink.md). Until one arrives, and once it is done, the
+# boat stays still: mission_stm32.yaml gives the pool's geofence only.
+mission:
+  waypoints_from_file: false
+follow:
+  only_on_route: true
 camera:
   # The Suyin USB camera by its serial number: /dev/video0, 1, ... change with the plugging order.
   device: /dev/v4l/by-id/usb-Suyin_HD_Camera_200910120001-video-index0

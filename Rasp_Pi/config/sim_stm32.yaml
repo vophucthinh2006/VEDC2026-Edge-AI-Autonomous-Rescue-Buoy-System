@@ -14,5 +14,6 @@ vehicle:
   target_standoff_m: 3.0
 mission:
   file: config/mission_sim_central.yaml
+  waypoints_from_file: true   # the test drives the file's route, not one from the dashboard
 audio:
   device: default

@@ -11,7 +11,6 @@ import argparse
 import logging
 import signal
 import threading
-from dataclasses import replace
 from pathlib import Path
 from time import monotonic, sleep
 
@@ -24,7 +23,7 @@ from modules.perception import cluster_scan
 from modules.safety import SafetyArbiter
 from modules.state_store import HumanTarget, StateStore
 from modules.uart_comm import Stm32Uart
-from modules.waypoints import Route, load_route
+from modules.waypoints import Route, start_route
 from utils.config import load_config
 from utils.geometry import bearing_deg
 
@@ -57,9 +56,15 @@ def main() -> int:
 
     mission_file = args.mission or (Path(config["mission"]["file"]) if config.get("mission", {}).get("file") else None)
     arrive_m = float(config["vehicle"]["arrive_radius_m"])
-    route = load_route(mission_file, arrive_m) if mission_file and mission_file.exists() else Route([], arrive_m)
+    # mission.waypoints_from_file false (the STM32 boat, no RC): the file gives the geofence only and
+    # the boat waits for a route from the dashboard; follow.only_on_route keeps it still meanwhile.
+    from_file = bool(config.get("mission", {}).get("waypoints_from_file", True))
+    only_on_route = bool(config.get("follow", {}).get("only_on_route", False))
+    route = start_route(mission_file, arrive_m, from_file)
     if mission_file and not mission_file.exists():
-        log.warning("mission file %s not found: no route, the boat only follows people it sees", mission_file)
+        log.warning("mission file %s not found: no route, no geofence", mission_file)
+    if not from_file:
+        log.info("waiting for a route from the dashboard%s", "; the boat stays still until then" if only_on_route else "")
     log.info("route: %d waypoints%s, geofence %s", len(route.waypoints), " (loop)" if route.loop and route.waypoints else "",
              f"{len(route.geofence)} corners" if len(route.geofence) >= 3 else "off")
     state.update_route(tuple((i + 1, lat, lon) for i, (lat, lon) in enumerate(route.waypoints)))
@@ -95,11 +100,11 @@ def main() -> int:
 
         vision = VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, float(config["vehicle"]["target_standoff_m"]))
         workers.append(vision)
-    status = {"text": "", "lines": []}
+    status = {"text": "", "lines": [], "phase": ""}
     if args.viewer:
         from modules.viewer import Viewer   # needs OpenCV; only loaded when asked for
         workers.append(Viewer(args.viewer, state, stop_event, config["avoidance"], config["camera"],
-                              vision.view if vision else (lambda: None), lambda: [], lambda: None, lambda: follow.phase,
+                              vision.view if vision else (lambda: None), lambda: [], lambda: None, lambda: status["phase"],
                               decision=lambda: {"lines": status["lines"]}))
     for worker in workers:
         worker.start()
@@ -136,7 +141,9 @@ def main() -> int:
                 log.warning("route from the dashboard (rev %d): %s", lora_rev, route.describe())
             if snapshot.gps.fix >= 2 and route.update(snapshot.gps.lat_deg, snapshot.gps.lon_deg):
                 log.info("waypoint reached, now %s", route.describe())
-            planned, events = follow.step(replace(snapshot, waypoint=route.current), now)
+            planned, events = follow.plan(snapshot, route.current, now, only_on_route)
+            waiting = only_on_route and route.current is None
+            status["phase"] = "WAITING" if waiting else follow.phase
             for event in events:
                 if event.kind == "found":
                     # Reckoned from the boat's GPS, the camera's bearing and the box's range; 0, 0 without a fix.
@@ -155,9 +162,11 @@ def main() -> int:
             state.update_steering(command.heading_deg, target_bearing)
             status["text"] = f"{follow.describe()}  {route.describe()}  NAV {command.mode} {command.speed_mps:.2f} m/s {command.heading_deg:.0f} ({command.reason})"
             # The viewer's words: what the boat is doing, the command the STM32 gets, and why.
-            status["lines"] = [f"FOLLOW: person {planned.human_target.distance_m:.1f} m away" if planned.human_target
+            status["lines"] = [f"WAITING: {route.describe()}" if waiting
+                               else f"FOLLOW: person {planned.human_target.distance_m:.1f} m away" if planned.human_target
                                else f"SEARCH: {route.describe()}",
-                               "going to them along the camera's bearing" if planned.human_target else "the camera sweeps for people",
+                               "send a route from the dashboard to start" if waiting
+                               else "going to them along the camera's bearing" if planned.human_target else "the camera sweeps for people",
                                f"NAV {command.mode} {command.speed_mps:.2f} m/s, heading {command.heading_deg:03.0f}",
                                f"reason: {command.reason}",
                                "the STM32F407 holds that heading (PID)"]
