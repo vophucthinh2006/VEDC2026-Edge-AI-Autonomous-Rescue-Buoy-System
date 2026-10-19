@@ -2,8 +2,12 @@ import unittest
 
 try:
     import numpy as np
-    from modules.viewer import BAR, CAMERA_H, CAMERA_W, MAP, render
+    from modules.ui_draw import GUTTER, STRIP_H
+    from modules.viewer import CAMERA_H, CAMERA_W, HEADER, MAP, render
     from modules.world_map import WORLD_H, WORLD_W, WorldMemory, draw_world, steering_words
+    # Header, then a gutter round each row of cards (a title strip over its content).
+    TOP_H = HEADER + GUTTER + STRIP_H + CAMERA_H + GUTTER
+    FRAME_W = CAMERA_W + MAP + 3 * GUTTER
 except ImportError:          # OpenCV or numpy missing: the viewer is optional
     render = None
 
@@ -19,14 +23,14 @@ class ViewerRenderTest(unittest.TestCase):
 
     def test_renders_without_a_camera_frame(self):
         image = render(self._snap(), None, [801] * 72, 8.0, [], 60.0, "search")
-        self.assertEqual(image.shape, (CAMERA_H + BAR, CAMERA_W + MAP, 3))
+        self.assertEqual(image.shape, (TOP_H, FRAME_W, 3))
 
     def test_renders_a_frame_with_a_detection_sectors_and_a_keep_out(self):
         view = {"frame": np.zeros((480, 640, 3), np.uint8), "box": (0.3, 0.4, 0.7, 0.6), "confidence": 0.71,
                 "distance_m": 4.2, "pan_deg": -60.0, "scanning": False, "age_s": 0.1}
         sector_cm = [300] * 3 + [801] * 69
         image = render(self._snap(HumanTarget(-55.0, 4.2, 0.71, 0.0)), view, sector_cm, 8.0, [(120.0, 5.0, 0.4)], 60.0, "approach")
-        self.assertEqual(image.shape, (CAMERA_H + BAR, CAMERA_W + MAP, 3))
+        self.assertEqual(image.shape, (TOP_H, FRAME_W, 3))
         self.assertGreater(int(image[:CAMERA_H, :CAMERA_W].max()), 0)        # the box and labels were drawn on the black frame
 
 
@@ -39,11 +43,11 @@ class DecisionMapTest(unittest.TestCase):
                         0.0, None, None, VehicleState("AUTO", True, 1, 0.0, 2, 22.0, wp_bearing), (), None, nav)
 
     def test_the_map_is_as_wide_as_the_two_panels_above_it(self):
-        self.assertEqual(WORLD_W, CAMERA_W + MAP)
+        self.assertEqual(WORLD_W, CAMERA_W + GUTTER + MAP)
         world = draw_world(self._snap(), WorldMemory(), None, [801] * 72, 8.0, None, 60.0)
         self.assertEqual(world.shape, (WORLD_H, WORLD_W, 3))
         whole = render(self._snap(), None, [801] * 72, 8.0, [], 60.0, "search", world)
-        self.assertEqual(whole.shape, (CAMERA_H + WORLD_H + BAR, WORLD_W, 3))
+        self.assertEqual(whole.shape, (TOP_H + STRIP_H + WORLD_H + GUTTER, FRAME_W, 3))
 
     def test_draws_the_people_the_route_and_what_the_lidar_remembers(self):
         memory = WorldMemory()
