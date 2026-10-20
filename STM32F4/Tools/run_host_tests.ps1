@@ -54,3 +54,47 @@ $routeExe = Join-Path $testDir 'route_link_test.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Failed to compile route_link_test' }
 & $routeExe
 if ($LASTEXITCODE -ne 0) { throw 'route_link_test failed' }
+
+$shoreExe = Join-Path $testDir 'shore_link_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'STM32F4/App') `
+  -I (Join-Path $repo 'esp32-lora-station/main') `
+  (Join-Path $repo 'STM32F4/Tests/shore_link_test.c') `
+  (Join-Path $repo 'STM32F4/App/shore_link.c') `
+  (Join-Path $repo 'esp32-lora-station/main/route_downlink.c') `
+  -lm -o $shoreExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile shore_link_test' }
+& $shoreExe
+if ($LASTEXITCODE -ne 0) { throw 'shore_link_test failed' }
+
+$eventExe = Join-Path $testDir 'event_queue_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'STM32F4/App') `
+  -I (Join-Path $repo 'esp32-lora-station/main') `
+  (Join-Path $repo 'STM32F4/Tests/event_queue_test.c') `
+  (Join-Path $repo 'STM32F4/App/event_queue.c') `
+  (Join-Path $repo 'esp32-lora-station/main/lora_payload.c') `
+  -lm -o $eventExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile event_queue_test' }
+& $eventExe
+if ($LASTEXITCODE -ne 0) { throw 'event_queue_test failed' }
+
+$gpsExe = Join-Path $testDir 'gps_nmea_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'STM32F4/Modules/GPS') `
+  (Join-Path $repo 'STM32F4/Tests/gps_nmea_test.c') `
+  (Join-Path $repo 'STM32F4/Modules/GPS/gps_nmea.c') `
+  -lm -o $gpsExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile gps_nmea_test' }
+& $gpsExe
+if ($LASTEXITCODE -ne 0) { throw 'gps_nmea_test failed' }
+
+$frontExe = Join-Path $testDir 'front_motor_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror -Wno-error=cpp `
+  -I (Join-Path $repo 'STM32F4/App') `
+  (Join-Path $repo 'STM32F4/Tests/front_motor_test.c') `
+  (Join-Path $repo 'STM32F4/App/front_motor.c') `
+  -lm -o $frontExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile front_motor_test' }
+& $frontExe
+if ($LASTEXITCODE -ne 0) { throw 'front_motor_test failed' }

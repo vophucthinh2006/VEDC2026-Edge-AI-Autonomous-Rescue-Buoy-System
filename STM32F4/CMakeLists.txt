@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/PiLink/uart_protocol.c
     Modules/Buzzer/buzzer.c
     Modules/LoRa/sx127x.c
+    Modules/INA226/ina226.c
     App/control.c
     App/heading_controller.c
     App/camera_pan.c
@@ -59,6 +60,11 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/hw_test.c
     App/lora_beacon.c
     App/route_link.c
+    App/shore_link.c
+    App/event_queue.c
+    App/battery.c
+    App/lights.c
+    App/front_motor.c
 )
 
 # Add include paths
@@ -70,6 +76,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/PiLink
     Modules/Buzzer
     Modules/LoRa
+    Modules/INA226
     App
 )
 

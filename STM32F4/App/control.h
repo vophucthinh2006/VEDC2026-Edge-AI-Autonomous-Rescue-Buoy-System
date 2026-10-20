@@ -6,6 +6,7 @@
 #include "uart_protocol.h"
 #include "heading_controller.h"
 #include "confirm_button.h"
+#include "front_motor.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -27,6 +28,8 @@ typedef struct {
     bool heading_target_valid;
     uint8_t heading_state;        /* heading_state_t */
     char operating_mode;          /* 'S' stopped, 'A' the Pi is driving */
+    bool hold;                    /* STOP from the dashboard, set by main.c from the LoRa ACK */
+    front_motor_t front;          /* the front motor: pushes with the rear ones, brakes (App/front_motor.c) */
     uint32_t last_imu_ms;
 } controller_t;
 
@@ -63,7 +66,8 @@ typedef enum {
     DRIVE_BLOCK_NONE = 0,       /* the Pi is driving */
     DRIVE_BLOCK_DISARMED = 1,
     DRIVE_BLOCK_PI = 2,         /* no fresh NAV AUTO or HBT: no route, STOP, or the Pi is silent */
-    DRIVE_BLOCK_IMU = 3         /* IMU stale while armed (ARM_REQUIRES_IMU 0 only) */
+    DRIVE_BLOCK_IMU = 3,        /* IMU stale while armed (ARM_REQUIRES_IMU 0 only) */
+    DRIVE_BLOCK_HOLD = 4        /* STOP from the dashboard (App/shore_link.h): motors off until released */
 } drive_block_t;
 
 extern volatile heading_debug_t heading_debug;

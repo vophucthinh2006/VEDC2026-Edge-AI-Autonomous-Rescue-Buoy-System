@@ -1,5 +1,6 @@
 #include "uart_protocol.h"
 #include "app_config.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,8 +42,23 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
     } else if (strcmp(fields[0], "SOS") == 0 && count >= 3U) {
         command->sos_on = strtoul(fields[2], NULL, 10) != 0U;
     } else if (strcmp(fields[0], "TXD") == 0 && count >= 6U) {
-        /* Acknowledged by the main loop, which also hands the victim count to the LoRa beacon. */
-        if (strcmp(fields[2], "VICTIM_FOUND") == 0 && command->victim_count < 0xFFU) command->victim_count++;
+        /* Acknowledged by the main loop, which also hands the victim count and the event to the LoRa beacon. */
+        /* VICTIM_FOUND is a new person, counted; VICTIM_UPDATE a new risk or position of one already
+           reported: the same LoRa event, not counted again. */
+        bool found = strcmp(fields[2], "VICTIM_FOUND") == 0;
+        command->victim_report = found || strcmp(fields[2], "VICTIM_UPDATE") == 0;
+        if (command->victim_report) {
+            if (found && command->victim_count < 0xFFU) command->victim_count++;
+            double lat = strtod(fields[3], NULL), lon = strtod(fields[4], NULL);
+            float confidence = strtof(fields[5], NULL);
+            unsigned long risk = count >= 7U ? strtoul(fields[6], NULL, 10) : 2UL;
+            bool in_range = lat >= -90.0 && lat <= 90.0 && lon >= -180.0 && lon <= 180.0;
+            command->victim_has_pos = in_range && (lat != 0.0 || lon != 0.0);
+            command->victim_lat_e6 = command->victim_has_pos ? (int32_t)lround(lat * 1e6) : 0;
+            command->victim_lon_e6 = command->victim_has_pos ? (int32_t)lround(lon * 1e6) : 0;
+            command->victim_confidence_pct = confidence <= 0.0f ? 0U : (confidence >= 1.0f ? 100U : (uint8_t)lroundf(confidence * 100.0f));
+            command->victim_risk = (uint8_t)(risk > 3UL ? 3UL : risk);
+        }
         command->txd_sequence = (uint16_t)strtoul(fields[1], NULL, 10);
         command->txd_pending = true;
     }

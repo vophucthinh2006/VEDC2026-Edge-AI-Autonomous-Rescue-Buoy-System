@@ -17,12 +17,15 @@ STM32F4/
 ├── STM32F4.ioc            cấu hình CubeMX — NGUỒN SỰ THẬT cho pinout và clock
 ├── STM32F4.pdf            báo cáo cấu hình do CubeMX sinh (sơ đồ + clock tree)
 ├── STM32F4.txt            bảng chân dạng văn bản, cùng báo cáo
-├── Core/                  code CubeMX sinh ra (main.c, gpio.c, i2c.c, tim.c, usart.c, adc.c)
+├── Core/                  code CubeMX sinh ra (main.c, gpio.c, i2c.c, spi.c, tim.c, usart.c, dma.c)
 ├── Drivers/               CMSIS + STM32F4xx HAL
 ├── Modules/               mỗi thư mục con là MỘT ngoại vi / thiết bị
 │   ├── Actuators/         ESC (PWM trên TIM2) + servo bánh lái, ramp và đảo chiều
 │   ├── BNO055/            driver IMU (I2C) + calibration profile
 │   ├── GPS/               bộ phân tích NMEA
+│   ├── INA226/            cảm biến áp / dòng pin (I2C, chung bus với BNO055)
+│   ├── LoRa/              SX1278 (RA-02) qua SPI2
+│   ├── Buzzer/            còi PWM
 │   └── PiLink/            mã hoá / giải mã khung với Raspberry Pi
 ├── App/                   tầng ứng dụng
 │   ├── control.c/.h       vòng điều khiển + watchdog an toàn, arm khi an toàn, chỉ có AUTO
@@ -30,6 +33,12 @@ STM32F4/
 │   ├── camera_pan.c/.h    servo camera trượt mượt tới góc CAM (bộ P giới hạn tốc độ, như khớp Gazebo)
 │   ├── confirm_button.c/.h đếm số lần nhấn nút xác nhận PE4 (chống dội) để báo lên Pi
 │   ├── imu.c/.h           lớp đệm trên driver BNO055
+│   ├── lora_beacon.c/.h   beacon, khung sự kiện, cửa sổ nhận sau mỗi khung (mục 14)
+│   ├── route_link.c/.h    ráp lộ trình từ dashboard, chuyển cho Pi (`$RTE`)
+│   ├── shore_link.c/.h    ACK của trạm: còn liên lạc không, điểm về, lệnh đèn (C thuần)
+│   ├── event_queue.c/.h   sự kiện người / lật / nút xác nhận, gửi lại tới khi có ACK (C thuần)
+│   ├── battery.c/.h       % pin từ INA226
+│   ├── lights.c/.h        hai đèn trên relay PC3 / PC2, chỉ theo lệnh dashboard
 │   └── app_config.h       ngưỡng, timeout, hằng số PWM
 ├── Tools/                 dump calibration, dashboard STM32CubeMonitor
 ├── docs/                  ảnh pinout trích từ STM32F4.pdf
@@ -98,6 +107,7 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 | GPS Holybro M10 V2 | USART3 | PB10 TX, PB11 RX | 9600 8N1, RX interrupt | GPS TX → PB11; GPS RX ← PB10 |
 | (không dùng) USART2 | USART2 | PA2 (single-wire half-duplex) | 115200 8N1 | từng là iBUS của receiver FS-iA6B; đã bỏ tay cầm, firmware không đọc nữa (CubeMX vẫn khởi tạo) |
 | IMU BNO055 | I2C1 | PB8 SCL, PB9 SDA | Fast Mode 400 kHz | địa chỉ 0x29 (ADR thả nổi) |
+| Pin INA226 | I2C1 (chung với BNO055) | PB8 SCL, PB9 SDA | 0x40 (A0 = A1 = GND) | IN+ / IN− nối tiếp đường pin; đo shunt của module rồi đặt `INA226_SHUNT_OHM` |
 | Reset BNO055 | GPIO_Output | PB5 | mức cao khi chạy | chân nRESET của module |
 | ESC sau trái | TIM2_CH1 | PA5 | PWM 50 Hz, một chiều, dừng = 1000 µs, chạy 1500–2000 µs | chỉ dây signal + GND |
 | ESC sau phải | TIM2_CH4 | PA3 | PWM 50 Hz, một chiều, dừng = 1000 µs, chạy 1500–2000 µs | chỉ dây signal + GND |
@@ -108,7 +118,8 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 | Bánh lái phải | TIM3_CH4 | PB1 | PWM 50 Hz, tâm `SERVO_CENTER_RIGHT_US` | cấp nguồn servo độc lập |
 | Còi | TIM8_CH3 | PC8 | PWM 4 kHz | qua transistor |
 | Nút xác nhận "đã lấy đồ" | GPIO_EXTI (nhãn CubeMX `ESTOP`) | PE4 | **pull-up**, nhấn = mức thấp | nút thường mở → GND |
-| SOS / relay | GPIO_Output | PD13 | khởi tạo mức thấp | qua transistor, không nối tải trực tiếp |
+| Đèn 1 (RELAY1) | GPIO_Output | PC3 | khởi tạo mức thấp | module relay; **chỉ bật theo lệnh admin trên dashboard** (mục 14) |
+| Đèn 2 (RELAY2) | GPIO_Output | PC2 | khởi tạo mức thấp | như trên; relay đóng ở mức thấp thì đặt `RELAY_ON_LEVEL 0` |
 | Chip select accelerometer | GPIO_Output | PE3 | **giữ mức cao** | không nối gì — xem mục 3 |
 | Battery sense | ADC1_IN4 | PA4 | rank 1, 3 cycles — **chưa dùng trong code** | qua cầu chia áp |
 | LoRa RA-02 (SX1278) | SPI2 | PB13 SCK, PB14 MISO, PB15 MOSI | mode 0, ~2.6 Mbit/s | NSS → PB12, RST → PC4, DIO0/1/2 → PE11/PE12/PE13 (DIO chưa dùng), 3.3 V, GND, **anten 433 MHz** |
@@ -158,6 +169,8 @@ PE4 (nhãn CubeMX vẫn là `ESTOP`) là nút người được cứu nhấn khi
 nội, nút thường mở nối xuống GND: nhấn là mức thấp. `App/confirm_button.c` chống dội
 (`CONFIRM_DEBOUNCE_MS`) và đếm số lần nhấn; số đếm đi lên Pi ở trường thứ 8 của `$SYS`, Pi
 phát loa "Đã xác nhận lấy đồ" mỗi khi số đếm tăng. Nút **không dừng gì cả**.
+
+Mỗi lần nhấn, F407 còn gửi sự kiện `C` qua LoRa (mục 14): dashboard báo "đã lấy đồ" kèm vị trí phao.
 
 Xuồng không có đầu vào E-stop riêng và không còn tay cầm. Motor dừng khi: admin gửi **lộ trình rỗng** từ
 dashboard (tới phao sau khoảng 5–10 s qua LoRa), thuyền đi hết lộ trình, Pi im hoặc gửi STOP, xuồng lật,
@@ -371,7 +384,7 @@ Triệu chứng khác:
 - **Pixhawk 4 không được nối PWM điều khiển song song với STM32.** Firmware này giả định
   STM32 là **nguồn phát PWM duy nhất**. Giữ Pixhawk tách khỏi đường signal, hoặc chuyển
   toàn bộ quyền điều khiển sang Pixhawk. Không chạy hai autopilot song song.
-- **`ACTUATORS_ENABLED` mặc định bằng 0.** Ở trạng thái này ESC luôn nhận tín hiệu dừng,
+- **`ACTUATORS_ENABLED` đang là 1** (đã thử chiều motor trên gá). Đặt về 0 thì ESC luôn nhận tín hiệu dừng,
   còn bánh lái vẫn chạy theo lệnh; giá trị ESC lẽ ra được phát nằm trong `actuator_debug`
   để kiểm tra bằng debugger. Chỉ đổi sang 1 sau khi đã xác nhận chiều quay motor và chiều servo
   trên giá đỡ, và **không tháo chân vịt khi kiểm thử bàn**.
@@ -388,7 +401,7 @@ Raspberry Pi → STM32:
 $NAV,seq,AUTO|STOP|MANUAL,speed_mps,heading_deg,ttl_ms*CS\n
 $HBT,seq,state[,route_rev]*CS\n
 $SOS,seq,0|1*CS\n
-$TXD,seq,event,lat,lon,confidence*CS\n
+$TXD,seq,event,lat,lon,confidence[,risk]*CS\n
 $CAM,seq,pan_deg*CS\n
 ```
 
@@ -397,7 +410,8 @@ STM32 → Raspberry Pi:
 ```
 $IMU,seq,pitch,roll,yaw,imu_ok,overturned*CS\n
 $GPS,seq,lat,lon,fix,hdop,speed,course*CS\n
-$SYS,seq,battery,motor_fault,estop,link_ok,armed,auto,confirm_presses*CS\n
+$SYS,seq,battery_v,motor_fault,estop,link_ok,armed,auto,confirm_presses,battery_pct*CS\n
+$LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon,hold*CS\n     (mỗi giây)
 $ACK,seq,TXD,ACCEPTED*CS\n
 $RTE,seq,rev,first,total,loop,lat;lon,...*CS\n
 ```
@@ -414,6 +428,15 @@ camera quét tìm. `estop` luôn 0
 
 `CAM` là góc quay camera, dương sang phải, giới hạn `CAM_PAN_LIMIT_DEG`. `App/camera_pan.c` cho servo
 trượt tới góc đó (`CAM_PAN_SMOOTH_KP`, tối đa `CAM_PAN_MAX_RATE_DPS`); Pi gửi 20 lần/s khi quét hoặc bám người.
+
+`$TXD,...,VICTIM_FOUND|VICTIM_UPDATE,lat,lon,confidence,risk`: vị trí người Pi ước tính (0, 0 = không có), `risk` 0
+an toàn, 1 trung bình, 2 cao, 3 nguy kịch (Pi cũ không gửi: coi là 2). `VICTIM_FOUND` là người mới (tăng số người
+`v`), `VICTIM_UPDATE` là mức rủi ro hoặc vị trí mới của người đang bám (không đếm lại). Cả hai thành sự kiện `V` qua
+LoRa (mục 14).
+
+`$SYS`: `battery_v` là điện áp INA226 (0 khi chưa đọc được), `battery_pct` 0..100 (−1 chưa biết).
+`$LNK`: `shore_ok` = 0 khi trạm bờ đã từng nghe mà im quá 60 s (`SHORE_LINK_TIMEOUT_MS`); Pi đưa thuyền về
+`home` = vị trí GPS của trạm (lấy từ ACK). `heard_ago_s` −1 khi chưa từng nghe; lat/lon trống khi chưa có điểm về.
 
 Checksum là XOR của các ký tự ASCII giữa `$` và `*`, giống `Rasp_Pi/utils/nmea_packet.py`.
 
@@ -473,14 +496,24 @@ Thuyền **không còn tay cầm RC** (FS-i6 / FS-iA6B, chế độ MANUAL đã 
 | Muốn | Làm |
 |---|---|
 | Chạy | dashboard: vẽ lộ trình, **Gửi tới phao** (tới phao sau khoảng 5–40 s tùy số điểm) |
-| Dừng | dashboard: xóa lộ trình rồi **Gửi tới phao** (lộ trình rỗng, tới phao sau khoảng 5–10 s) |
+| Dừng tại chỗ, giữ lộ trình | dashboard: nút **DỪNG PHAO** (F407 khóa motor sau khoảng 5–10 s); **CHẠY TIẾP** để đi tiếp |
+| Bỏ lộ trình | dashboard: xóa lộ trình rồi **Gửi tới phao** (lộ trình rỗng, tới phao sau khoảng 5–10 s) |
 | Dừng ngay tại chỗ | tắt nguồn ESC / thuyền: **không còn công tắc ngắt cầm tay** |
 
 Chi tiết đường đi của lộ trình và việc phao không tự chạy lại lộ trình cũ sau khi bật nguồn:
 [docs/lora-route-downlink.md](../docs/lora-route-downlink.md).
 
-Tăng ga bị giới hạn tốc độ (`ESC_RAMP_PER_S`), giảm ga có hiệu lực ngay. Ở AUTO motor trước không
-dùng. Chiều bánh lái `RUDDER_DIR_*` nằm trong `App/app_config.h`.
+Tăng ga bị giới hạn tốc độ (`ESC_RAMP_PER_S`), giảm ga có hiệu lực ngay. Chiều bánh lái `RUDDER_DIR_*` nằm trong
+`App/app_config.h`.
+
+**Motor trước** (hai chiều, `App/front_motor.c`):
+- **Đẩy tới cùng hai motor sau:** ga trước = ga sau × `FRONT_THRUST_GAIN`.
+- **Hãm** mỗi khi ga giảm ít nhất `FRONT_BRAKE_MIN_DROP`, gồm cả lúc Pi giảm tốc, gửi tốc độ 0 / STOP, Pi im, hay DỪNG từ
+  dashboard. Motor trước đảo chiều ở `FRONT_BRAKE_LEVEL` trong `FRONT_BRAKE_MS_PER_THROTTLE` ms cho mỗi đơn vị ga giảm
+  (0.3 → 600 ms), tối đa `FRONT_BRAKE_MAX_MS`, cộng thêm `ESC_FRONT_REVERSE_DELAY_MS` để ESC nghỉ ở neutral trước khi đảo.
+- **Không hãm** khi lật, mất IMU hay disarm: mọi motor tắt ngay.
+- Hai ESC sau chạy một chiều nên không tự phanh được. Muốn tắt motor trước như cũ: đặt `GAIN` và `LEVEL` bằng 0.
+- Chỉnh trên nước: phao phải dừng trong khoảng một thân mà không lùi lại.
 
 **Trước khi bật `ACTUATORS_ENABLED`**, thử từng motor và bánh lái trên gá bằng `..\motor_test.bat`
 (preset `HwTest`, `App/hw_test.c`): đúng chiều quay, đúng chân PA1 / PA3 / PA5. Sau đó với Pi chạy
@@ -498,12 +531,32 @@ trên không được theo dõi bằng máy trạng thái nên `Control_Tick` (1
 Tham số radio (`App/app_config.h`) **phải khớp trạm** (`esp32-lora-station/main/main.c`):
 433 MHz, SF9, BW 125 kHz, CR 4/5, sync word `0xF3`, PA_BOOST 17 dBm, CRC payload bật.
 
-Khung gửi, một dòng text dưới 100 ký tự:
+Khung gửi, một dòng text tối đa 120 ký tự:
 
 ```
-id=PHAO-01,10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=280.0,m=A,i=1,c=3,q=12,v=0
-id=PHAO-01,NO_FIX,r=2.1,p=-1.4,y=278.5,t=-1.0,m=S,i=0,c=0,q=13,v=1
+id=PHAO-01,10.762622,106.660172,r=2.1,p=-1.4,y=278.5,t=280.0,m=A,i=1,c=3,q=12,v=0,w=7:12:1,L=1,b=87,g=276.0,s=0.25
+id=PHAO-01,NO_FIX,r=2.1,p=-1.4,y=278.5,t=-1.0,m=S,i=0,c=0,q=13,v=1,L=0,b=87
 ```
+
+Sau `v` là các trường tùy chọn, mỗi trường chỉ thêm khi còn chỗ, theo thứ tự ưu tiên: `w` tiến độ lộ trình,
+`H` đang bị dừng từ dashboard (1/0), `L` đèn đang bật (bit 0 PC3, bit 1 PC2), `b` % pin, `g` hướng đi thật theo GPS (course over ground), `s` tốc độ m/s.
+`m=R`: đang tự chạy về trạm vì mất liên lạc.
+
+**Sự kiện** đi trong khung riêng, phát ngay và phát lại mỗi 1.5 s tới khi trạm ACK (tối đa 10 lần,
+`App/event_queue.c`):
+
+```
+ev=PHAO-01,<eseq>,V,<lat>,<lon>,<risk>,<conf>,<n>     người (vị trí Pi ước tính, mức rủi ro, độ tin cậy)
+ev=PHAO-01,<eseq>,T,<lat>,<lon>,<roll>,<pitch>         lật / nghiêng quá 35°, GPS của phao; lặp lại sau 30 s nếu vẫn lật
+ev=PHAO-01,<eseq>,C,<lat>,<lon>,<presses>              nút PE4: người đã lấy đồ tiếp tế
+```
+
+**Trạm trả lời mọi khung** trong cửa sổ 1.5 s: khung `RTE` khi phao còn thiếu lộ trình, ngược lại
+`ACK,<id>,<eseq>,<lệnh>,<lat trạm>,<lon trạm>*CS` (`App/shore_link.c`). `<lệnh>` 0..7: bit 0–1 hai đèn, **bit 2 DỪNG**
+(nút "DỪNG PHAO" trên dashboard: F407 khóa motor, `heading_debug.block` = 4, tới khi admin bấm "Chạy tiếp"; lộ trình
+giữ nguyên). Beacon báo lại `H=1` khi đang dừng. Phao bật relay đúng theo lệnh, lấy vị trí trạm làm điểm về, và coi mọi
+khung của trạm là còn liên lạc. Im quá 60 s: `$LNK` báo mất, Pi đưa thuyền về. Đèn giữ
+nguyên trạng thái lúc mất liên lạc; F407 khởi động lại thì đèn tắt tới ACK kế tiếp.
 
 `v` là số người Pi đã báo phát hiện từ lúc khởi động (dừng ở 255). Khung nào cũng mang số này
 nên mất một gói không mất cảnh báo; khi số tăng, khung mới được phát ngay, không chờ đủ chu kỳ.
@@ -524,6 +577,8 @@ Không có UART log ra máy tính, nên đọc RAM qua ST-LINK (firmware vẫn c
 python Tools/lora_monitor.py --once
 ```
 
-Kết quả mong đợi: `chip 0x12 OK`, `tx` tăng đều mỗi 5 giây, `fail 0`. Nếu `chip 0x00`/`0xFF` là sai dây SPI/NSS,
+Kết quả mong đợi: `chip 0x12 OK`, `tx` tăng đều mỗi 5 giây, `fail 0`; có trạm thì `station OK`, `ACK` tăng theo
+beacon, `home` là GPS của trạm. Pin: `python Tools/battery_monitor.py`. Thứ tự thử từng chức năng trên phần cứng:
+[docs/stm32-system.md](../docs/stm32-system.md) (`scripts\stm32\test_*.bat`). Nếu `chip 0x00`/`0xFF` là sai dây SPI/NSS,
 thiếu nguồn 3.3 V hoặc chưa cắm module. Nếu `GPS ... last sentence never` là USART3 không nhận được câu GGA,
 thường do sai baud (xem bảng lỗi ở mục 9).

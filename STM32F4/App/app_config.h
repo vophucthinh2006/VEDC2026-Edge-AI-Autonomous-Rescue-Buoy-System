@@ -40,7 +40,11 @@
 /* Heading reference. East magnetic declination and a clockwise sensor
    mounting correction are positive. Calibrate both values on the finished
    boat before a water run. */
-#define IMU_MOUNTING_OFFSET_DEG    0.0f
+/* The bow is the BNO055's -x axis. Measured 2026-10-20 with the bow pointed north by a phone
+   compass, indoors: the sensor read 191.2 deg (180 for -x, the rest the indoor field and the phone).
+   Measure again on the water, away from steel: point the bow north, read Tools/heading_monitor.py,
+   set this to 360 - yaw. */
+#define IMU_MOUNTING_OFFSET_DEG    168.8f
 #define MAGNETIC_DECLINATION_DEG   0.0f
 /* Gyro Z to a clockwise turn rate. BNO055 flat, Z up: gyro Z is positive
    anticlockwise, hence -1. Check on the desk: turn the sensor clockwise
@@ -107,6 +111,17 @@
 #define ESC_RAMP_PER_S             2.0f
 #define ESC_FRONT_REVERSE_DELAY_MS 200U
 
+/* Front motor in AUTO (App/front_motor.c): it pushes with the rear ones (front = throttle * GAIN)
+   and brakes when the Pi slows the boat or stops it: backwards at BRAKE_LEVEL for
+   MS_PER_THROTTLE per unit of throttle shed (0.3 -> 600 ms), at most BRAKE_MAX_MS. Tune on water:
+   the boat should stop within its own length without moving backwards. GAIN 0 and LEVEL 0: the
+   front motor stays off as before. */
+#define FRONT_THRUST_GAIN          1.0f
+#define FRONT_BRAKE_LEVEL          0.40f
+#define FRONT_BRAKE_MIN_DROP       0.05f
+#define FRONT_BRAKE_MS_PER_THROTTLE 2000U
+#define FRONT_BRAKE_MAX_MS         1000U
+
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
    instead of the control loop. ESC output is capped and time-limited. The first three
    can be set from the build: the HwTest preset (motor_test.bat) does. */
@@ -150,3 +165,23 @@
 #define LORA_TX_POWER_DBM          17U         /* PA_BOOST; 17 dBm is the most that needs no PA_DAC */
 #define LORA_BEACON_PERIOD_MS      5000U
 #define LORA_GPS_STALE_MS          3000U       /* GPS silent for this long: send NO_FIX */
+/* Events (App/event_queue.h): an event frame waiting for the station's ACK goes out again this soon.
+   The station silent for SHORE_LINK_TIMEOUT_MS (60 s, App/shore_link.h): the Pi takes the boat home. */
+#define LORA_EVENT_RETRY_MS        1500U
+/* Overturned for this long after the first tilt event: report it once more, with the boat's GPS then. */
+#define TILT_REPEAT_MS             30000U
+
+/* Battery: INA226 on I2C1 next to the BNO055 (0x44 on this boat; any of 0x40..0x4F is found), IN+/IN- in series with the pack.
+   Many INA226 modules carry a 0.1 ohm shunt (R100), which reads up to 0.8 A only: measure the shunt on
+   yours and set it here before trusting the current. The charge needs the voltage only. */
+#define INA226_ENABLED             1
+#define INA226_ADDRESS             0x44U   /* this boat's module: A0 or A1 strapped (found by the scan, 2026-10-20) */
+#define INA226_SHUNT_OHM           0.1f
+#define INA226_MAX_A               0.8f
+#define BATTERY_CELLS              3U          /* LiPo cells in series: 3S = 12.6 V full */
+#define BATTERY_READ_PERIOD_MS     500U
+
+/* Lights on RELAY1 PC3 and RELAY2 PC2, switched only from the dashboard (App/lights.h).
+   1: the relay module closes on a high input. If the lights come on at boot, the module closes on
+   low: set 0. */
+#define RELAY_ON_LEVEL             1
