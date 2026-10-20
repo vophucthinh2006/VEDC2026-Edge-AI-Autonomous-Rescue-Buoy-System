@@ -190,6 +190,14 @@ export default {
       return hub().fetch(hold ? "https://hub/hold" : "https://hub/lights", { method: "PUT", body: JSON.stringify({ ...req, by: caller.by }) });
     }
 
+    // ---- Address search for the map: guest or admin session, answered by Nominatim through the Hub ----
+    if (path === "/api/geocode") {
+      if (!session) return json({ error: "unauthenticated" }, 401);
+      if (request.method !== "GET") return json({ error: "method" }, 405);
+      const q = (url.searchParams.get("q") || "").slice(0, 400);
+      return hub().fetch("https://hub/geocode?" + new URLSearchParams({ q, sid: session.sid }));
+    }
+
     // ---- Dữ liệu: cần phiên (khách hoặc admin) ----
     if (path === "/ws" || path === "/api/state" || path === "/api/mission" || path === "/api/victims") {
       if (!session) return json({ error: "unauthenticated" }, 401);

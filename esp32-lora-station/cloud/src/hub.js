@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { json } from "./util.js";
+import { Geocoder } from "./geocode.js";
 
 const MAX_BUOYS = 50;
 const MAX_HISTORY = 300;   // số mẫu RSSI/SNR/vị trí giữ cho mỗi phao
@@ -33,6 +34,10 @@ const downlinkSummary = d => ({ type: "downlink", rev: d.rev, id: d.id, loop: d.
 const routeDelivered = (d, msg) => !!d.rev && !d.delivered && msg.id === d.id && !!msg.route &&
   msg.route.rev === d.rev && msg.route.have === d.pts.length && msg.route.pi === 1;
 
+// Nominatim asks for an identifying User-Agent; GEOCODE_CONTACT (an email or URL) is optional
+const geocodeUserAgent = env =>
+  `mliot-redgescue/1.0 (rescue buoy shore station dashboard${env?.GEOCODE_CONTACT ? "; " + env.GEOCODE_CONTACT : ""})`;
+
 // Một Durable Object duy nhất giữ vị trí mới nhất của từng phao, lộ trình chung,
 // và phát cả hai cho mọi trình duyệt đang mở.
 export class Hub extends DurableObject {
@@ -47,6 +52,7 @@ export class Hub extends DurableObject {
   events = null;
   lights = null;    // id -> { want, by, at }: lệnh đèn của admin, tách khỏi bản gửi lộ trình
   hold = null;      // id -> { want, by, at }: lệnh DỪNG của admin (want true = F407 khóa motor), như đèn
+  geocoder = null;  // address search cache and rate limits (memory only, rebuilt after eviction)
 
   async loadBuoys() {
     if (!this.buoys) this.buoys = (await this.ctx.storage.get("buoys")) || {};
@@ -171,6 +177,13 @@ export class Hub extends DurableObject {
       for (const id of Object.keys(await this.loadLights())) server.send(JSON.stringify(await this.lightsMessage(id)));
       for (const id of Object.keys(await this.loadHold())) server.send(JSON.stringify(await this.holdMessage(id)));
       return new Response(null, { status: 101, webSocket: client });
+    }
+
+    // Address search (dashboard search box); one Geocoder here keeps Nominatim at 1 request/s overall
+    if (url.pathname === "/geocode" && request.method === "GET") {
+      this.geocoder ??= new Geocoder({ userAgent: geocodeUserAgent(this.env) });
+      const r = await this.geocoder.search(url.searchParams.get("q"), url.searchParams.get("sid"));
+      return json(r.body, r.status);
     }
 
     if (url.pathname === "/downlink") {
