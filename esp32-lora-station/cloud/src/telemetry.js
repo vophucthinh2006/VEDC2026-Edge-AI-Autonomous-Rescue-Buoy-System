@@ -37,6 +37,40 @@ function sanitizeNav(n) {
   };
 }
 
+const EVENT_TYPES = ["V", "T", "C"];
+
+// Sự kiện phao gửi lặp tới khi trạm ACK: V = phát hiện người, T = lật/nghiêng lớn, C = nút xác nhận.
+// lat/lon là null khi phao chưa có GPS. Hỏng thì bỏ cả sự kiện (event_bad).
+function sanitizeEvent(e) {
+  if (!e || typeof e !== "object") return null;
+  if (!Number.isInteger(e.seq) || !inRange(e.seq, 1, 65535) || !EVENT_TYPES.includes(e.type)) return null;
+  const out = { seq: e.seq, type: e.type, lat: null, lon: null };
+  if ((e.lat ?? null) !== null || (e.lon ?? null) !== null) {
+    const lat = num(e.lat), lon = num(e.lon);
+    if (!inRange(lat, -90, 90) || !inRange(lon, -180, 180)) return null;
+    out.lat = lat; out.lon = lon;
+  }
+  if (e.type === "V") {
+    const conf = num(e.conf);
+    if (!Number.isInteger(e.risk) || !inRange(e.risk, 0, 3) || !inRange(conf, 0, 1)) return null;
+    out.risk = e.risk;
+    out.conf = round(conf, 2);
+    if (e.count !== undefined) {
+      if (!Number.isInteger(e.count) || !inRange(e.count, 0, 255)) return null;
+      out.count = e.count;
+    }
+  } else if (e.type === "T") {
+    const roll = num(e.roll), pitch = num(e.pitch);
+    if (!inRange(roll, -180, 180) || !inRange(pitch, -90, 90)) return null;
+    out.roll = round(roll, 1);
+    out.pitch = round(pitch, 1);
+  } else {
+    if (!Number.isInteger(e.presses) || !inRange(e.presses, 1, 65535)) return null;
+    out.presses = e.presses;
+  }
+  return out;
+}
+
 // Chuẩn hóa và kiểm tra bản tin từ trạm; trả về null nếu không hợp lệ.
 // Gói GPS-only cũ vẫn hợp lệ. Nhóm attitude chỉ được giữ khi đầy đủ và đúng
 // miền; hỏng thì chỉ bỏ nhóm đó (đánh dấu attitude_bad), vị trí và RSSI vẫn giữ.
@@ -78,6 +112,21 @@ export function sanitizeBuoy(m) {
     out.route = { rev: r.rev, have: r.have, pi: r.pi };
   }
 
+  // Hướng đi thực (course over ground) và tốc độ từ GPS, % pin, trạng thái thật của hai relay đèn
+  // (bit0 = đèn 1 PC3, bit1 = đèn 2 PC2). Mỗi trường hỏng thì chỉ bỏ trường đó.
+  const course = num(m.course), speed = num(m.speed);
+  if (inRange(course, 0, 360)) out.course = heading01(course);
+  if (inRange(speed, 0, 50)) out.speed = round(speed, 2);
+  if (Number.isInteger(m.battery_pct) && inRange(m.battery_pct, 0, 100)) out.battery_pct = m.battery_pct;
+  if (Number.isInteger(m.lights) && inRange(m.lights, 0, 3)) out.lights = m.lights;
+  // Phao đang dừng theo lệnh DỪNG của dashboard (beacon H=1): F407 khóa motor
+  if (m.hold === 0 || m.hold === 1) out.hold = m.hold;
+
+  if (m.event !== undefined) {
+    const event = sanitizeEvent(m.event);
+    if (event) out.event = event; else out.event_bad = 1;
+  }
+
   const attitudeKeys =["roll", "pitch", "yaw", "target_yaw", "mode", "imu_ok", "calib", "seq"];
   const hasAttitude = attitudeKeys.some(key => Object.hasOwn(m, key));
   if (!hasAttitude) return out;
@@ -87,7 +136,8 @@ export function sanitizeBuoy(m) {
   if (!inRange(roll, -180, 180) || !inRange(pitch, -90, 90) ||
       !inRange(yaw, 0, 359.9999) ||
       !(target === -1 || inRange(target, 0, 359.9999)) ||
-      !["A", "M", "S"].includes(m.mode) ||
+      // R: phao mất trạm bờ quá 60 giây, tự chạy về trạm
+      !["A", "M", "S", "R"].includes(m.mode) ||
       ![0, 1].includes(m.imu_ok) || !Number.isInteger(m.calib) || !inRange(m.calib, 0, 3) ||
       !Number.isInteger(sequence) || !inRange(sequence, 0, 0xFFFFFFFF)) {
     out.attitude_bad = 1;

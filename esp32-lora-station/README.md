@@ -13,9 +13,10 @@ Node phao ──LoRa──► ESP32-S3 ──HTTPS POST /api/ingest──► Clo
 | | Khách | Admin |
 |---|---|---|
 | Vào bằng | nút "Xem với tư cách khách" (không cần gì) | Đăng nhập Google, email phải nằm trong `ADMIN_EMAILS` |
-| Xem vị trí phao, RSSI/SNR, bản đồ | có | có |
-| Xem lộ trình và vùng quét (realtime) | có | có |
-| Tạo/sửa/xóa điểm, vẽ vùng quét, nhập file | không | có |
+| Xem vị trí phao, trạng thái, người cần cứu, bản đồ | có | có |
+| Tìm địa chỉ, xem phao nào ở gần | có | có |
+| Xem lộ trình (realtime) | có | có |
+| Đặt/dời/xoá điểm, gửi lộ trình, dừng phao, bật đèn, xoá chấm | không | có |
 
 Quyền được kiểm tra **ở server** (giao diện chỉ ẩn nút cho gọn): `PUT /api/mission` trả 403 với khách, 401 khi không có phiên.
 Lộ trình là **một bản chung lưu trên server** (Durable Object). Admin lưu thì mọi người đang xem thấy ngay.
@@ -37,17 +38,20 @@ esp32-lora-station/
 │   ├── css/                 tokens.css (biến), layout.css, components.css, login.css
 │   ├── js/app.js            khởi động, bản đồ, phao, lộ trình, đăng nhập, WebSocket
 │   ├── js/state.js          trạng thái dùng chung + bus sự kiện
-│   ├── js/util/             geo.js (khoảng cách, phương vị, tuyến quét), format.js
-│   ├── js/features/         statusbar, telemetry (đồ thị RSSI/SNR), hud (HUD kiểu Mission Planner),
-│   │                        eventlog, mapfx (thang tỷ lệ, tọa độ, thước đo, vệt)
+│   ├── js/util/             geo.js (khoảng cách, phương vị, hướng 8 chữ), format.js
+│   ├── js/features/         telemetry (thẻ phao), victims (người cần cứu, chú giải), timeline (dòng sự kiện),
+│   │                        search (tìm địa chỉ), hold, lights, mapfx (thang tỷ lệ, vệt),
+│   │                        hud (HUD Pixhawk, giữ code nhưng đang ẩn)
 │   └── dev/mock.js          Phao giả chuyển động cho ?mock, không được deploy (.assetsignore)
 ├── tools/mavlink_bridge.py  Cầu nối MAVLink -> /api/ingest (giả lập ArduPilot, sau này Pixhawk thật)
 └── cloud/                   Cloudflare Worker
     ├── src/worker.js        Định tuyến, phân quyền, kiểm tra dữ liệu
     ├── src/auth.js          Xác minh ID token Google, phiên cookie ký HMAC
     ├── src/hub.js           Durable Object: phao, lộ trình, phát WebSocket
+    ├── src/geocode.js       Tìm địa chỉ qua Nominatim: cache 1 ngày, 1 yêu cầu/giây
     ├── src/util.js
     ├── test/auth.test.mjs   50 kiểm thử đăng nhập/phân quyền/realtime/lịch sử
+    ├── test/geocode.test.mjs  tìm địa chỉ với fetch và đồng hồ giả (chạy trong `npm test`)
     ├── test/dev-idp.mjs     IdP giả để thử đăng nhập admin trên trình duyệt khi phát triển
     ├── wrangler.jsonc
     └── package.json
@@ -65,13 +69,23 @@ esp32-lora-station/
 | `POST /api/auth/guest` | công khai | phiên khách |
 | `POST /api/auth/logout` | — | xóa phiên |
 | `GET /ws`, `GET /api/state`, `GET /api/mission` | khách/admin | dữ liệu |
-| `PUT /api/mission` | **admin** | lưu lộ trình `{waypoints, poly, spacing, angle, speed}` (≤ 300 điểm) |
+| `PUT /api/mission` | **admin** | lưu lộ trình `{waypoints}` (≤ 300 điểm; `poly`, `spacing`, `angle`, `speed` vẫn nhận nhưng giao diện không còn dùng) |
+| `GET /api/geocode?q=` | khách/admin | tìm địa chỉ: tối đa 5 `{name, lat, lon}` trong Việt Nam. 400 câu tìm sai, 429 `{retry_after_ms}` khi quá 1 lần/giây/phiên, 502 khi Nominatim lỗi |
 | `POST /api/mission/send` `{id?, loop?, clear?}` | **admin** | nút "Gửi tới phao": chụp lộ trình đang lưu thành bản gửi xuống phao `id` (mặc định `PHAO-01`) |
-| `GET /api/downlink` | token ESP32 | trạm lấy bản gửi `{rev, id, loop, pts: [[lat, lon]]}` để phát LoRa (`{rev: 0}`: chưa gửi gì) |
+| `GET /api/downlink` | token ESP32 | trạm lấy bản gửi `{rev, id, loop, pts: [[lat, lon]]}` để phát LoRa (`{rev: 0}`: chưa gửi gì). Có lệnh đèn thì thêm `lights: {"<id phao>": mask}` cho mọi phao có lệnh, kể cả khi `rev: 0` |
+| `GET /api/victims` | khách/admin | `{victims: [...], alerts: [...]}`: người phát hiện và cảnh báo (mục "Người phát hiện, cảnh báo, đèn") |
+| `POST /api/victims/clear` | **admin** hoặc `ADMIN_API_TOKEN` | nút "Xoá chấm": xóa mọi chấm người và cảnh báo trên bản đồ |
+| `POST /api/lights` `{id, lights}` | **admin** hoặc `ADMIN_API_TOKEN` | lệnh hai đèn của phao `id`: `lights` 0..3, bit0 = đèn 1 (PC3), bit1 = đèn 2 (PC2) |
 
 Mọi POST/PUT từ trình duyệt phải có header `Origin` trùng chính trang (chống CSRF). Phiên là cookie
 `HttpOnly; Secure; SameSite=Lax` ký HMAC; admin sống 7 ngày, khách 1 ngày. Mỗi request admin kiểm tra lại
 email còn trong `ADMIN_EMAILS`, gỡ email khỏi danh sách là mất quyền ngay.
+
+`/api/lights` và `/api/victims/clear` còn nhận header `Authorization: Bearer <ADMIN_API_TOKEN>` thay cho phiên admin,
+để script thử bật/tắt đèn không cần đăng nhập Google. Không đặt secret `ADMIN_API_TOKEN` thì chỉ phiên admin dùng được.
+```powershell
+curl -X POST http://localhost:8787/api/lights -H "Authorization: Bearer dev-admin-token" -H "Content-Type: application/json" -d "{\"id\":\"PHAO-01\",\"lights\":1}"
+```
 
 ## 1. Tạo Google OAuth Client ID (làm một lần)
 
@@ -94,6 +108,7 @@ npx wrangler login
 npx wrangler secret put INGEST_TOKEN     # chuỗi bí mật dài ngẫu nhiên, ESP32 dùng để gửi dữ liệu
 npx wrangler secret put SESSION_SECRET   # chuỗi ngẫu nhiên >= 32 ký tự, dùng ký cookie phiên
 npx wrangler secret put ADMIN_EMAILS     # email admin, nhiều email thì phân cách bằng dấu phẩy
+npx wrangler secret put ADMIN_API_TOKEN  # tùy chọn: chuỗi bí mật cho script gọi /api/lights, /api/victims/clear
 npx wrangler deploy
 ```
 
@@ -120,8 +135,11 @@ Hành vi firmware:
 
 ## Chạy thử trên máy
 
-Giao diện với phao giả, không cần backend: `?mock` (admin giả) hoặc `?mock=guest` (khách giả).
-Bản giả có thêm `SIM-01` báo qua MAVLink để xem HUD, đổi chế độ HOLD → GUIDED → AUTO → RTL mỗi 20 giây.
+Giao diện với phao giả, không cần backend: `?mock` (admin giả) hoặc `?mock=guest` (khách giả). Bản giả có đủ nhãn
+trạng thái: PHAO-01 đang tuần tra (có hướng đi GPS, pin, đèn, gửi lộ trình thì thấy "đang nhận k/n" rồi "đã nhận"),
+PHAO-02 quay về trạm từng đợt và bị lật sau khoảng 18 giây, PHAO-03 chờ lộ trình rồi mất tín hiệu sau khoảng 36 giây,
+PHAO-04 đã dừng (tín hiệu yếu, pin 17 %), SIM-01 báo qua MAVLink. Trong 35 giây đầu có người đủ bốn mức nguy hiểm và
+một lần bấm xác nhận. Tìm địa chỉ trả kết quả giả (thử "chợ lớn", "lê thị riêng", "ninh kiều" để thấy trường hợp không có phao).
 ```powershell
 cd web
 python -m http.server 8766        # mở http://localhost:8766/?mock
@@ -134,6 +152,7 @@ SESSION_SECRET=<chuỗi ngẫu nhiên>
 ADMIN_EMAILS=admin@example.com
 GOOGLE_CLIENT_ID=test-client-id
 GOOGLE_JWKS_URL=http://127.0.0.1:8799/jwks.json
+ADMIN_API_TOKEN=dev-admin-token
 ```
 ```powershell
 cd cloud
@@ -164,6 +183,31 @@ dữ liệu tư thế. ESP32 và cloud kiểm tra miền Roll `[-180,180]`, Pitc
 (cloud gắn `attitude_bad:1`), vị trí và RSSI/SNR vẫn được lưu và phát.
 Gói GPS-only cũ vẫn được chấp nhận; lịch sử server chỉ tiếp tục lưu RSSI/SNR và vị trí.
 
+### Người phát hiện, cảnh báo, đèn (bản STM32)
+
+Beacon có thể thêm (đều tùy chọn, trường nào sai miền thì chỉ bỏ trường đó):
+- `course` 0..360 độ: hướng đi thực theo GPS (course over ground), `speed` m/s theo GPS,
+- `battery_pct` 0..100, `lights` 0..3: trạng thái **thật** của hai relay (bit0 = đèn 1 PC3, bit1 = đèn 2 PC2),
+- `mode` có thêm `R`: phao không nghe thấy trạm bờ quá 60 giây, tự chạy về trạm.
+
+Bản tin sự kiện có `id/rssi/snr/raw` và nhóm `event`, không có nhóm tư thế; nó **không** đổi vị trí hay trạng thái phao:
+```json
+{"id":"PHAO-01","rssi":-90,"snr":6.5,"raw":"...","event":{"seq":12,"type":"V","lat":10.7651,"lon":106.6612,"risk":3,"conf":0.88,"count":2}}
+```
+- `seq` 1..65535. Phao gửi lặp tới khi trạm ACK, nên cùng `(id, seq, type)` trong 10 phút chỉ được ghi một lần
+  (`/api/ingest` trả `"event":"new"` hoặc `"dup"`).
+- `type` `V` = phát hiện người: `risk` 0 an toàn, 1 trung bình, 2 cao, 3 nguy kịch; `conf` 0..1; `count` tổng số người phao đã báo.
+  Một `V` cách chấm cũ của cùng phao dưới 5 m thì cập nhật chấm đó (`risk`, `conf`, `last_at`), xa hơn thì thêm chấm.
+  `V` có `lat/lon` null (phao chưa có GPS) chỉ thành cảnh báo.
+- `type` `T` = lật/nghiêng lớn: `lat/lon` là GPS phao lúc đó, thêm `roll`, `pitch`. `type` `C` = người gặp nạn bấm nút
+  xác nhận đã nhận đồ cứu hộ, thêm `presses`.
+- Server giữ tối đa 200 chấm người `{vid, buoy, lat, lon, risk, conf, first_at, last_at}` và 50 cảnh báo gần nhất
+  `{type, buoy, seq, at, lat, lon, ...}` (khóa `events` trong Durable Object).
+
+Lệnh đèn (`POST /api/lights`) lưu riêng cho từng phao (khóa `lights`), không đụng tới bản gửi lộ trình: đổi đèn không làm
+trạm gửi lại lộ trình đã giao. Trạm đọc lệnh trong `GET /api/downlink` (trường `lights`) và phát xuống phao; phao báo
+trạng thái thật trong `lights` của beacon. Lệnh giữ nguyên tới khi admin đổi, nên phao khởi động lại vẫn được bật lại đèn.
+
 ### Nguồn MAVLink (cầu nối, giả lập)
 
 `tools/mavlink_bridge.py` đọc MAVLink của ArduPilot và gửi cùng định dạng, với `"link":"mavlink"`,
@@ -191,36 +235,57 @@ python3 tools/mavlink_bridge.py --url http://127.0.0.1:8787/api/ingest --id SIM-
 Server → trình duyệt (`/ws`): cùng định dạng, thêm `age_s` (giây kể từ lúc server nhận). Khi mở trang,
 server phát lại vị trí cuối của từng phao rồi bản tin lộ trình `{"type":"mission","rev":N,...}`.
 Mỗi lần admin lưu, mọi trình duyệt nhận lại bản tin `mission` mới (bản của chính tab vừa lưu bị bỏ qua nhờ `cid`).
+Thêm các bản tin: `{"type":"victims","victims":[...],"alerts":[...]}` (lúc mở trang và sau khi xóa chấm),
+`{"type":"victim","victim":{...},"new":true|false}`, `{"type":"alert","alert":{...}}`, và
+`{"type":"lights","id","want","have","by","at"}` (khi admin ra lệnh và khi đèn thật của phao đổi; `have` = `lights` của beacon cuối).
 
 ## Giao diện
 
-Phong cách "trung tâm điều hành": nền tối, số liệu monospace, một màu nhấn cyan, icon Phosphor (tải từ CDN).
+Mục tiêu: giám khảo nhìn 5 giây là biết phao ở đâu, đang làm gì, có ai cần cứu không, ra lệnh gì được.
+Nền tối cố định, chữ Be Vietnam Pro, một màu nhấn cyan, icon Phosphor (tải từ CDN).
 
-- **Thanh trạng thái:** trạng thái máy chủ, số phao trực tuyến / mất tín hiệu / chưa GPS, tuổi gói LoRa cuối, đồng hồ UTC và giờ máy.
-- **Viễn trắc phao đang chọn:** tọa độ (thập phân hoặc độ phút giây), RSSI với thanh phân đoạn, SNR, tuổi gói,
-  chân trời nhân tạo Roll/Pitch, la bàn Yaw thực tế/hướng đích, sai số ngắn nhất, trạng thái
-  AUTO/IMU/calibration, đồ thị RSSI/SNR 5 phút / 15 phút / tất cả với vạch ngưỡng -95 và
-  -110 dBm, bản tin gốc. Sau 12 giây không có attitude mới, đồng hồ giữ giá trị cuối và
-  đánh dấu `Dữ liệu cũ`.
-- **HUD kiểu Mission Planner** (phao báo qua MAVLink): chân trời nhân tạo có thang pitch và cung roll,
-  thước hướng có vạch hướng đích (vàng), tốc độ, thanh ga (lùi màu vàng), ARMED/DISARMED, chế độ, GPS,
-  pin; dưới là 6 ô số lớn như tab "Quick": tốc độ, cách waypoint, hướng, ga, pin, vệ tinh. Phao LoRa
-  vẫn dùng thẻ tư thế và đồ thị RSSI/SNR. Trên bản đồ mỗi phao có mũi tên chỉ hướng mũi.
-- **Nhật ký sự kiện:** kết nối, phao mới, gói tin, mất/có lại tín hiệu (quá 30 giây), mất/có lại GPS, admin cập nhật lộ trình. Lọc "Cảnh báo".
-- **Bản đồ:** thang tỷ lệ, tọa độ con trỏ, la bàn (Bắc luôn ở trên), vệt di chuyển của phao, thước đo nhiều điểm (Esc để thoát), nền sáng/tối.
+- **Thanh trên:** logo, "Trạm bờ cứu hộ", chấm kết nối máy chủ (xanh/đỏ), vai trò và Đăng xuất.
+- **Người cần cứu** (đầu cột trái): mỗi người một dòng, chấm màu theo mức rủi ro, tên mức, độ tin cậy, phao báo,
+  "x phút trước". Sắp theo mức rủi ro rồi thời gian; bấm là bản đồ bay tới chấm. Admin có nút "Xoá hết".
+- **Thẻ phao đang chọn:** tên và một nhãn trạng thái lớn suy ra từ dữ liệu, theo thứ tự ưu tiên:
+  "Mất tín hiệu" (quá 30 giây không có gói), "Bị lật" (cảnh báo `T` trong 60 giây), "ĐÃ DỪNG" (`hold`),
+  "Đang quay về trạm" (`mode` = `R`), "Đang tuần tra" (`mode` = `A`: Pi đang lái phao), "Chờ lộ trình" (`mode` = `S`: không có lộ trình, hoặc `main.py` trên Pi chưa chạy).
+  Phao chuyển từ đứng yên sang được lái thì hiện popup "PHAO-01 bắt đầu chạy lộ trình" (ghi cả vào Sự kiện); lái xong hoặc bị bỏ lộ trình thì "đứng yên, chờ lộ trình mới".
+  Dưới đó: tín hiệu bằng 4 vạch và một chữ Mạnh/Khá/Yếu/Mất (mạnh: RSSI ≥ -90 dBm và SNR ≥ 5; yếu: RSSI < -110
+  hoặc SNR < 0; trễ quá 12 giây thì tụt một mức; không hiện số), pin (thanh + %, đỏ dưới 20 %), một câu tốc độ và
+  khoảng cách tới trạm, nút lớn **DỪNG PHAO / CHẠY TIẾP**, hai công tắc đèn, một dòng tiến độ gửi lộ trình,
+  nút "Sao chép toạ độ".
+- **Danh sách phao:** tên, nhãn trạng thái, 4 vạch tín hiệu, pin. Phao cần chú ý (lật, dừng, mất tín hiệu) lên đầu.
+- **Sự kiện:** dòng thời gian chỉ gồm việc quan trọng: phát hiện người, lật, xác nhận nhận đồ, dừng/chạy, gửi và nhận
+  lộ trình, mất/có tín hiệu, tự quay về trạm. Không còn log kỹ thuật (gói tin, kết nối).
+- **Bản đồ:** ghim phao màu theo trạng thái, mũi tên liền là mũi tàu (yaw IMU), mũi tên nét đứt là hướng đi GPS (ẩn khi
+  dưới 0.2 m/s); vệt di chuyển luôn bật; trạm bờ màu đỏ, nhãn ghi trạng thái GPS của trạm, đường nét đứt tới phao đang chọn;
+  chấm người 4 màu; dấu cảnh báo lật. Chú giải thu gọn được (thu sẵn trên điện thoại). Công cụ: Xem tất cả, Bám theo phao, zoom.
+- **Lộ trình:** chỉ đặt waypoint. Chạm bản đồ để thêm, kéo để dời, danh sách điểm có nút xoá, Hoàn tác, Xoá hết,
+  ô "Đi vòng", nút lớn **Gửi tới phao** (sửa sau khi gửi thì nút thành "Gửi bản mới tới phao"), dòng "n điểm · x m".
+- **Tìm địa chỉ** (khách và admin): ô "Nhập địa chỉ hoặc nơi bạn đang ở…" trên bản đồ và nút "Vị trí của tôi" (định vị
+  của trình duyệt, cần https hoặc localhost). Tìm qua `GET /api/geocode` (Worker gọi Nominatim, không gọi thẳng từ trình duyệt).
+  Chọn một kết quả: ghim "Vị trí tìm kiếm", vòng bán kính 1/2/5 km (mặc định 2 km), danh sách phao trong vòng, gần nhất
+  trước, kèm khoảng cách và hướng ("1.2 km về hướng Đông Bắc"), nhãn trạng thái, nút "Xem trên bản đồ", và số người cần
+  cứu gần đó. Không có phao nào thì báo "Chưa có phao trong bán kính x km. Phao gần nhất: … (y km)". Khoảng cách tính
+  trong trình duyệt từ dữ liệu phao mà khách vốn đã thấy.
+- **Pixhawk/MAVLink:** HUD kiểu Mission Planner (`js/features/hud.js`) vẫn giữ trong code nhưng đang ẩn
+  (`SHOW_MAV_HUD` trong `telemetry.js`). Thuyền Pixhawk vẫn có nhãn trạng thái theo chế độ autopilot (RTL, HOLD, armed).
 - **Lịch sử ở server:** mỗi phao lưu 300 mẫu gần nhất `{t, rssi, snr, lat?, lon?}` (khóa `h:<id>` trong Durable Object).
-  Khi mở WebSocket server gửi `{"type":"history","id":...,"points":[...]}` trước bản tin `mission`, nên khách mở trang vẫn thấy vệt và đồ thị.
-- **Trạm bờ (màu đỏ):** trạm có GPS riêng (ATK-S1216 ở UART1, GPIO17 TX / GPIO18 RX, 38400 baud), báo vị trí lên `/api/station`.
-  Dashboard vẽ marker đỏ "TRẠM BỜ", chip "Trạm bờ" trên thanh trạng thái (số vệ tinh, chưa có GPS, mất tín hiệu quá 60 giây),
-  đường nét đứt tới phao đang chọn, và "Cách trạm bờ" (khoảng cách + phương vị) trong thẻ viễn trắc. Mất fix thì giữ vị trí cuối.
-- Chỉ hiển thị dữ liệu thật của hệ thống; không nội suy chuyển động của IMU khi mất gói.
+  Khi mở WebSocket server gửi `{"type":"history","id":...,"points":[...]}` trước bản tin `mission`, nên khách mở trang vẫn thấy vệt.
+- Chỉ hiển thị dữ liệu thật của hệ thống; không nội suy chuyển động khi mất gói.
+
+**Tìm địa chỉ và chính sách Nominatim:** Worker gửi `User-Agent` riêng (`mliot-redgescue/1.0`, thêm secret/biến
+`GEOCODE_CONTACT` là email hoặc URL liên hệ nếu muốn), `countrycodes=vn`, `accept-language=vi`, `limit=5`. Một Geocoder duy
+nhất trong Durable Object giữ khoảng cách 1 giây giữa hai lần gọi Nominatim cho cả hệ thống, mỗi phiên tối đa 1 lần tìm
+mới mỗi giây (lấy từ cache thì không tính), kết quả cache 1 ngày trong bộ nhớ Hub (mất khi Durable Object bị gỡ khỏi bộ nhớ).
 
 ## Bố cục đáp ứng (responsive)
 
 | Màn hình | Bố cục |
 |---|---|
 | Laptop / tablet ngang (> 820 px), điện thoại xoay ngang | Hai cột: bảng điều khiển bên trái, bản đồ bên phải |
-| Điện thoại dọc, tablet dọc (≤ 820 px dọc, hoặc ≤ 600 px) | Bản đồ ở trên, bảng điều khiển là ngăn kéo phía dưới, có nút thu gọn |
+| Điện thoại dọc, tablet dọc (≤ 820 px dọc, hoặc ≤ 600 px) | Bản đồ ở trên, bảng điều khiển là ngăn kéo phía dưới, có nút thu gọn. Ô tìm địa chỉ là một hàng riêng trên bản đồ; mở kết quả tìm thì ngăn kéo tự thu gọn, bấm "Xem trên bản đồ" thì kết quả thu về một dòng và ngăn kéo mở thẻ phao |
 
 Điều kiện chuyển bố cục nằm ở hai nơi phải khớp: media query trong `web/css/layout.css` và `narrow` trong `web/js/app.js`.
 
@@ -235,10 +300,10 @@ RST->GPIO9       DIO0->GPIO8
 ## Lưu ý
 
 - Cấu hình LoRa (433 MHz, SF9, BW125 kHz, CR 4/5, sync word `0xF3`) phải khớp với node.
-- Bản đồ dùng Leaflet, tile OSM và nút đăng nhập Google tải từ internet, thiết bị mở web cần internet.
+- Bản đồ dùng Leaflet, tile OSM, font và nút đăng nhập Google tải từ internet, thiết bị mở web cần internet.
 - Chế độ Khách mở tự do: ai có link đều xem được vị trí phao (không sửa được gì).
 - Gửi lộ trình xuống phao STM32 qua LoRa: admin bấm "Gửi tới phao", trạm hỏi `GET /api/downlink` mỗi 5 giây và trả lời
   mỗi beacon của phao bằng một khung `RTE` (4 điểm). Phao báo tiến độ trong trường `w=` của beacon, dashboard hiện
-  "đang nhận k/n", "đã nhận đủ" rồi "Pi đã nhận". Chi tiết: [docs/lora-route-downlink.md](../docs/lora-route-downlink.md).
+  một dòng "đang chờ phao nhận", "đang nhận k/n", "đã nhận đủ, đang chuyển cho máy tính trên phao" rồi "Phao đã nhận lộ trình". Chi tiết: [docs/lora-route-downlink.md](../docs/lora-route-downlink.md).
   Phao Pixhawk không nhận qua đường này (lộ trình của nó nạp bằng Mission Planner).
 - WiFi và mật khẩu cũ (`khanh tran`) đã nằm trong lịch sử git; nếu là mạng thật thì nên đổi mật khẩu.

@@ -2,9 +2,10 @@
 """RedgeSCUE Pi runtime for the STM32 controller. Run from this directory: python3 main.py
 (or ./run.sh stm32). rescue_main.py is the runtime for the Pixhawk boat.
 
-The Pi keeps the search route (modules/waypoints.py, the file of mission.file or --mission) and
-follows a person it has seen in a few frames (modules/follow.py); the navigator turns either into
-a heading and a speed, which the STM32F407 holds ($NAV)."""
+The Pi keeps the search route (modules/waypoints.py, the file of mission.file or --mission, or the
+dashboard's over LoRa) and decides what the boat does (modules/mission.py: IDLE, PATROL, FOLLOW,
+RETURN, HOME_HOLD); the navigator turns that into a heading and a speed, which the STM32F407
+holds ($NAV), and the safety arbiter can always overrule it."""
 from __future__ import annotations
 
 import argparse
@@ -16,12 +17,12 @@ from time import monotonic, sleep
 
 from modules.ai_vision import VisionWorker
 from modules.announcer import Announcer
-from modules.follow import Follow
 from modules.lidar_serial import SerialLidar
-from modules.navigation import BapfNavigator
+from modules.mission import Mission
+from modules.navigation import BapfNavigator, NavCommand
 from modules.perception import cluster_scan
 from modules.safety import SafetyArbiter
-from modules.state_store import HumanTarget, StateStore
+from modules.state_store import RISK_NAMES, HumanTarget, StateStore
 from modules.uart_comm import Stm32Uart
 from modules.waypoints import Route, start_route
 from utils.config import load_config
@@ -68,15 +69,18 @@ def main() -> int:
     log.info("route: %d waypoints%s, geofence %s", len(route.waypoints), " (loop)" if route.loop and route.waypoints else "",
              f"{len(route.geofence)} corners" if len(route.geofence) >= 3 else "off")
     state.update_route(tuple((i + 1, lat, lon) for i, (lat, lon) in enumerate(route.waypoints)))
-    follow = Follow(config.get("follow", {}))
+    mission = Mission(config, route, only_on_route)
     navigator = BapfNavigator(config["vehicle"], config["planner"])
+    # The fence is the pool's: a route from the dashboard keeps it (Route(..., route.geofence) below).
     safety = SafetyArbiter(config["vehicle"], route.inside_fence)
     sequence = 0
+    txd_sequence = 0
     lora_rev = 0          # route sent from the dashboard over LoRa now running, 0 = the file's
 
     def person_confirmed(target: HumanTarget) -> None:
-        # The report to the shore is Follow's "found" event, with the person's reckoned position.
-        log.info("person seen: bearing=%.1f distance=%.2f confidence=%.2f", target.bearing_body_deg, target.distance_m, target.confidence)
+        # The reports to the shore are the mission's (modules/mission.py), with reckoned positions.
+        log.info("person seen: %s bearing=%.1f distance=%.2f confidence=%.2f", RISK_NAMES[target.risk], target.bearing_body_deg,
+                 target.distance_m, target.confidence)
 
     announcer = Announcer(config.get("audio", {}), stop_event)
     workers: list[threading.Thread] = [uart, announcer]
@@ -98,7 +102,8 @@ def main() -> int:
             cam_sequence = (cam_sequence + 1) & 0xFFFF
             uart.send("CAM", cam_sequence, f"{pan_deg:.1f}")
 
-        vision = VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, float(config["vehicle"]["target_standoff_m"]))
+        vision = VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, float(config["vehicle"]["target_standoff_m"]),
+                              lambda: mission.sweeping, lambda: mission.detecting)
         workers.append(vision)
     status = {"text": "", "lines": [], "phase": ""}
     if args.viewer:
@@ -115,7 +120,6 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
     log.info("RedgeSCUE started")
     last_text = ""
-    confirm_seen = -1        # presses of the confirm button (PE4) already announced; -1: none reported yet
     try:
         while not stop_event.is_set():
             sequence = (sequence + 1) & 0xFFFF
@@ -125,52 +129,47 @@ def main() -> int:
             if snapshot.human_target and now - snapshot.human_target.timestamp > config["vehicle"]["target_timeout_s"]:
                 state.update_human_target(None)
                 snapshot = state.snapshot()
-            presses = snapshot.system.confirm_presses
-            if presses >= 0:
-                # The first report (or one lower than before: the STM32 restarted) is only the starting count.
-                if presses > confirm_seen >= 0:
-                    announcer.say("supplies_confirmed")
-                    log.warning("confirm button pressed: the person reached the boat and took the supplies")
-                confirm_seen = presses
             lora = uart.lora_route
             if lora is not None and lora.rev != lora_rev:
                 # The dashboard's route replaces the file's, from its first point; the pool's geofence stays.
                 route = Route(list(lora.points), arrive_m, lora.loop, route.geofence)
+                mission.set_route(route)
                 lora_rev = lora.rev
                 state.update_route(tuple((i + 1, lat, lon) for i, (lat, lon) in enumerate(route.waypoints)))
                 log.warning("route from the dashboard (rev %d): %s", lora_rev, route.describe())
-            if snapshot.gps.fix >= 2 and route.update(snapshot.gps.lat_deg, snapshot.gps.lon_deg):
-                log.info("waypoint reached, now %s", route.describe())
-            planned, events = follow.plan(snapshot, route.current, now, only_on_route)
-            waiting = only_on_route and route.current is None
-            status["phase"] = "WAITING" if waiting else follow.phase
-            for event in events:
-                if event.kind == "found":
-                    # Reckoned from the boat's GPS, the camera's bearing and the box's range; 0, 0 without a fix.
-                    lat, lon = (event.lat, event.lon) if event.lat is not None else (0.0, 0.0)
-                    uart.send("TXD", sequence, "VICTIM_FOUND", f"{lat:.6f}", f"{lon:.6f}", f"{event.confidence:.2f}")
-                    log.warning("following a person: %s", f"reckoned at {lat:.6f} {lon:.6f}" if event.lat is not None else "no GPS fix, no position")
-                else:
-                    log.warning("person lost: back to the route (%s)", route.describe())
+            step = mission.step(snapshot, now)
+            status["phase"] = mission.state
+            if step.supplies_taken:
+                announcer.say("supplies_confirmed")
+                log.warning("confirm button pressed: the person reached the boat and took the supplies")
+            for report in step.reports:
+                # Reckoned from the boat's GPS, the camera's bearing and the box's range; 0, 0 without a fix.
+                # 7th field: the person's risk, 0 SAFE .. 3 CRITICAL. A new person is VICTIM_FOUND (the
+                # F407 counts it); a new risk or position of the one followed is VICTIM_UPDATE (not counted).
+                txd_sequence = (txd_sequence + 1) & 0xFFFF
+                kind = "VICTIM_FOUND" if report.why == "found" else "VICTIM_UPDATE"
+                uart.send("TXD", txd_sequence, kind, f"{report.lat:.6f}", f"{report.lon:.6f}", f"{report.confidence:.2f}", report.risk)
+                log.warning("report (%s): %s person %s", report.why, RISK_NAMES[report.risk],
+                            f"at {report.lat:.6f} {report.lon:.6f}" if (report.lat, report.lon) != (0.0, 0.0) else "with no position (no GPS fix)")
+            planned = step.planned
             proposed = navigator.plan(planned)
             command = safety.check(planned, proposed)
+            if snapshot.link.hold:
+                # The admin pressed DỪNG PHAO: the F407 keeps the motors off whatever comes; say so too, so
+                # the viewer and the log show why the boat stands. The route and the mission carry on.
+                command = NavCommand("STOP", 0.0, command.heading_deg, "dashboard_hold")
             uart.send("NAV", sequence, command.mode, f"{command.speed_mps:.2f}", f"{command.heading_deg:.1f}", config["vehicle"]["nav_ttl_ms"])
             # 4th field: the LoRa route revision running, so the STM32 stops resending it (docs/lora-route-downlink.md)
             uart.send("HBT", sequence, command.reason, lora_rev)
-            goal = route.current
+            goal = planned.waypoint
             target_bearing = bearing_deg(snapshot.gps.lat_deg, snapshot.gps.lon_deg, *goal) if goal else command.heading_deg
             state.update_steering(command.heading_deg, target_bearing)
-            status["text"] = f"{follow.describe()}  {route.describe()}  NAV {command.mode} {command.speed_mps:.2f} m/s {command.heading_deg:.0f} ({command.reason})"
+            status["text"] = f"{mission.describe()}  NAV {command.mode} {command.speed_mps:.2f} m/s {command.heading_deg:.0f} ({command.reason})"
             # The viewer's words: what the boat is doing, the command the STM32 gets, and why.
-            status["lines"] = [f"WAITING: {route.describe()}" if waiting
-                               else f"FOLLOW: person {planned.human_target.distance_m:.1f} m away" if planned.human_target
-                               else f"SEARCH: {route.describe()}",
-                               "send a route from the dashboard to start" if waiting
-                               else "going to them along the camera's bearing" if planned.human_target else "the camera sweeps for people",
-                               f"NAV {command.mode} {command.speed_mps:.2f} m/s, heading {command.heading_deg:03.0f}",
-                               f"reason: {command.reason}",
-                               "the STM32F407 holds that heading (PID)"]
-            text = f"{follow.phase} {command.reason}"
+            status["lines"] = mission.lines(snapshot) + [f"NAV {command.mode} {command.speed_mps:.2f} m/s, heading {command.heading_deg:03.0f}",
+                                                         f"reason: {command.reason}",
+                                                         "the STM32F407 holds that heading (PID)"]
+            text = f"{mission.state} {command.reason}"
             if text != last_text:
                 log.info("%s", status["text"])
                 last_text = text

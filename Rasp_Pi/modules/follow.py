@@ -30,6 +30,7 @@ class Event:
     lat: float | None = None  # found: where the person is reckoned to be (boat GPS + bearing + range);
     lon: float | None = None  # None without a GPS fix
     confidence: float = 0.0
+    risk: int = 1             # found: the person's risk level (modules/edge_model.py)
 
 
 class Follow:
@@ -66,7 +67,7 @@ class Follow:
             lat = lon = None
             if snap.gps.fix >= 2:
                 lat, lon = offset_latlon(snap.gps.lat_deg, snap.gps.lon_deg, self._last_world_deg, self._last.distance_m)
-            events.append(Event("found", lat, lon, self._last.confidence))
+            events.append(Event("found", lat, lon, self._last.confidence, self._last.risk))
         elif self.phase == FOLLOW and now - self._last_at > self.lost_s:
             self.phase = SEARCH
             self._sightings.clear()
@@ -74,8 +75,25 @@ class Follow:
         if self.phase == SEARCH or self._last is None:
             return replace(snap, human_target=None), events
         held = HumanTarget(signed_angle_deg(self._last_world_deg - snap.imu.yaw_deg), self._last.distance_m,
-                           self._last.confidence, self._last.timestamp)
+                           self._last.confidence, self._last.timestamp, self._last.risk)
         return replace(snap, human_target=held), events
+
+    @property
+    def target(self) -> HumanTarget | None:
+        """The last sighting of the person followed; None while searching."""
+        return self._last if self.phase == FOLLOW else None
+
+    @property
+    def world_deg(self) -> float:
+        """Compass bearing of the last sighting."""
+        return self._last_world_deg
+
+    def position(self, snap: Snapshot) -> tuple[float, float] | None:
+        """Where the person last seen is reckoned to be (boat GPS + compass bearing + range); None
+        without a sighting or a GPS fix."""
+        if self._last is None or snap.gps.fix < 2:
+            return None
+        return offset_latlon(snap.gps.lat_deg, snap.gps.lon_deg, self._last_world_deg, self._last.distance_m)
 
     def plan(self, snap: Snapshot, waypoint: tuple[float, float] | None, now: float,
              only_on_route: bool) -> tuple[Snapshot, list[Event]]:

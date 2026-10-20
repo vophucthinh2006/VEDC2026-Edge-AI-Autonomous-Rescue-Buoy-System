@@ -1,40 +1,41 @@
 // Điểm vào của dashboard: bản đồ, phao, lộ trình, đăng nhập, WebSocket.
-// Các panel phụ (thanh trạng thái, viễn trắc, nhật ký, tiện ích bản đồ) nằm trong js/features/.
-import { state, emit, statusOf, STATUS_TEXT, pushHistory } from './state.js';
-import { distM, bearingDeg, surveyPath } from './util/geo.js';
-import { fmtDist, fmtDur, fmtAgeSec, sigLevel } from './util/format.js';
-import { initStatusbar, refreshStatusbar } from './features/statusbar.js';
-import { initEventLog, clearUnseen } from './features/eventlog.js';
+// Các panel phụ (thẻ phao, người cần cứu, dòng sự kiện, tìm địa chỉ, tiện ích bản đồ) nằm trong js/features/.
+import { state, emit, pushHistory, isReturning, buoyStatus, STATUS, signalOf, SIGNAL, batteryOf, stationStatus } from './state.js';
+import { distM } from './util/geo.js';
+import { fmtDist } from './util/format.js';
+import { initTimeline, clearUnseen, log } from './features/timeline.js';
 import { initTelemetry, renderDetail } from './features/telemetry.js';
-import { initMapFx, updateTrail, fx, stopMeasuring } from './features/mapfx.js';
+import { initMapFx, updateTrail } from './features/mapfx.js';
+import { initVictims, onVictimsSnapshot, onVictimMessage, onAlertMessage } from './features/victims.js';
+import { initLights, onLightsMessage, revertLights } from './features/lights.js';
+import { initHold, onHoldMessage, revertHold, noteHold } from './features/hold.js';
+import { initSearch, renderPlace, minimizeSearch } from './features/search.js';
 
 const $ = id => document.getElementById(id);
 const DEFAULT_VIEW = [10.762622, 106.660172];
 const MAX_WP = 300;
-const ACCENT = '#22D3EE';
-const ACCENT_INK = '#04171C';
 
 // Tùy chọn giao diện: nhớ trên trình duyệt, không có thì dùng mặc định
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* bỏ qua */ } },
 };
-let darkMap = store.get('darkMap', '1') === '1';
 let follow = store.get('follow', '0') === '1';
 const isAdmin = () => state.role === 'admin';
 // ?mock (admin giả) hoặc ?mock=guest (khách giả): chạy không cần máy chủ
 const MOCK = (() => { const q = new URLSearchParams(location.search); return q.has('mock') ? (q.get('mock') || 'admin') : null; })();
 
-function toast(msg) {
-  const t = $('toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2400);
+// kind: 'bad' (đỏ, cảnh báo người/lật), 'ok' (xanh) hoặc 'info' (màu thường); có kind thì hiện lâu hơn
+function toast(msg, kind = '') {
+  const t = $('toast'); t.textContent = msg; t.dataset.kind = kind; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), kind ? 6000 : 2400);
 }
 
 // ================= BẢN ĐỒ =================
 const map = L.map('map', { zoomControl: false }).setView(DEFAULT_VIEW, 13);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
-initMapFx(map, store);
+initMapFx(map);
 
 // Bố cục đáp ứng: trên điện thoại/tablet dọc bảng điều khiển là ngăn kéo dưới bản đồ, có thể thu gọn.
 // Điều kiện phải khớp media query trong css/layout.css.
@@ -44,7 +45,7 @@ function setSheet(collapsed) {
   side.classList.toggle('collapsed', collapsed && narrow.matches);
   const open = !side.classList.contains('collapsed');
   $('sheet-handle').setAttribute('aria-expanded', String(open));
-  $('sheet-handle').textContent = open ? 'Thu gọn bảng điều khiển' : 'Mở bảng điều khiển';
+  $('sheet-handle').querySelector('span').textContent = open ? 'Thu gọn' : 'Mở bảng điều khiển';
 }
 $('sheet-handle').addEventListener('click', () => setSheet(!$('side').classList.contains('collapsed')));
 narrow.addEventListener('change', () => setSheet(false));
@@ -53,30 +54,26 @@ new ResizeObserver(() => map.invalidateSize()).observe($('map-wrap'));
 let mode = 'monitor';
 let firstCentered = false;
 
-function applyStyleBtn() {
-  $('map').classList.toggle('dark', darkMap);
-  $('btn-style').setAttribute('aria-pressed', String(darkMap));
-}
 function applyFollowBtn() { $('btn-follow').setAttribute('aria-pressed', String(follow)); }
 
 // ================= GIÁM SÁT =================
 function pinIcon(id, b) {
   const active = id === state.selected;
+  const tone = STATUS[buoyStatus(id, b)].tone;
   // Mũi tên hướng mũi phao khi có yaw (giống biểu tượng phương tiện trên Mission Planner)
   const arrow = b.hasAttitude ? `<b class="hdg" style="transform:rotate(${b.yaw}deg)"></b>` : '';
+  // Mũi tên nét đứt: hướng đi thực theo GPS. Đứng yên thì hướng GPS vô nghĩa nên không vẽ
+  const cog = b.course !== null && (b.speed === null || b.speed >= 0.2) ? `<b class="cog" style="transform:rotate(${b.course}deg)"></b>` : '';
   return L.divIcon({
     className: '', iconSize: [22, 22], iconAnchor: [11, 11],
-    html: `<div class="pin ${statusOf(b)}${active ? ' active' : ''}">${arrow}<i></i></div>`,
+    html: `<div class="pin" data-tone="${tone}"${active ? ' data-active' : ''}>${cog}${arrow}<i></i></div>`,
   });
 }
-
-// "-87 dBm" cho LoRa, "MAVLink" cho cầu nối không có RSSI
-const linkLabel = b => b.rssi === null ? 'MAVLink' : `${b.rssi} dBm`;
 
 function updateMarker(id) {
   const b = state.buoys.get(id);
   if (!b || !b.hasPos) return;
-  const label = `${id} ${linkLabel(b)}`;
+  const label = `${id} · ${STATUS[buoyStatus(id, b)].text}`;
   if (b.marker) {
     b.marker.setLatLng([b.lat, b.lon]).setIcon(pinIcon(id, b));
     b.marker.setTooltipContent(label);
@@ -88,40 +85,48 @@ function updateMarker(id) {
   }
 }
 
-const STATUS_ORDER = { stale: 0, nofix: 1, online: 2 };   // cần chú ý lên đầu
+const battIcon = p => p >= 75 ? 'ph-battery-full' : p >= 50 ? 'ph-battery-high' : p >= 25 ? 'ph-battery-medium' : p >= 10 ? 'ph-battery-low' : 'ph-battery-warning';
+// Cần chú ý lên đầu: lật, dừng, mất tín hiệu, quay về, rồi đang chạy và đang chờ
+const STATUS_ORDER = { capsized: 0, stopped: 1, lost: 2, returning: 3, patrol: 4, idle: 5 };
+let listSig = '';
+
 function renderList() {
+  const rows = [...state.buoys.entries()].map(([id, b]) => ({ id, b, st: buoyStatus(id, b), sig: signalOf(b), batt: batteryOf(b) }))
+    .sort((x, y) => STATUS_ORDER[x.st] - STATUS_ORDER[y.st] || x.id.localeCompare(y.id));
+  $('count').textContent = rows.length;
+  const sig = JSON.stringify([state.selected, rows.map(r => [r.id, r.st, r.sig, r.batt])]);
+  if (sig === listSig) return;   // rebuilding every second would steal hover and keyboard focus
+  listSig = sig;
   const list = $('list');
-  const ids = [...state.buoys.keys()].sort((a, b) =>
-    STATUS_ORDER[statusOf(state.buoys.get(a))] - STATUS_ORDER[statusOf(state.buoys.get(b))] || a.localeCompare(b));
-  $('count').textContent = ids.length;
   list.replaceChildren();
-  if (!ids.length) {
-    const e = document.createElement('div');
-    e.id = 'list-empty'; e.textContent = 'Chưa nhận được phao nào qua LoRa.';
+  if (!rows.length) {
+    const e = document.createElement('p');
+    e.className = 'quiet list-empty'; e.textContent = 'Chưa nhận được phao nào qua LoRa.';
     list.appendChild(e);
     return;
   }
-  for (const id of ids) {
-    const b = state.buoys.get(id);
+  for (const r of rows) {
+    const st = STATUS[r.st];
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = 'buoy ' + statusOf(b) + (id === state.selected ? ' active' : '');
-    const dot = document.createElement('span'); dot.className = 'dot';
-    const meta = document.createElement('div');
-    const name = document.createElement('div'); name.className = 'name'; name.textContent = id;
-    const sub = document.createElement('div'); sub.className = 'sub';
-    sub.textContent = `${STATUS_TEXT[statusOf(b)]} | ${fmtAgeSec((Date.now() - b.lastSeen) / 1000)} | ${linkLabel(b)}`
-      + (b.victims > 0 ? ` | Đã báo ${b.victims} người` : '');
-    meta.append(name, sub);
-    let br;
-    if (b.rssi === null) {
-      br = document.createElement('span'); br.className = 'link-tag'; br.textContent = 'MAV';
-    } else {
-      br = document.createElement('div'); br.className = 'bars l' + sigLevel(b.rssi);
-      br.append(...[1, 2, 3, 4].map(() => document.createElement('i')));
+    el.className = 'buoy';
+    if (r.id === state.selected) el.setAttribute('aria-current', 'true');
+    const main = document.createElement('span'); main.className = 'b-main';
+    const name = document.createElement('b'); name.textContent = r.id;
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.dataset.tone = st.tone; tag.textContent = st.text;
+    main.append(name, tag);
+    const bars = document.createElement('span'); bars.className = 'sig'; bars.dataset.level = r.sig;
+    bars.title = 'Tín hiệu ' + SIGNAL[r.sig].text.toLowerCase();
+    bars.append(...[1, 2, 3, 4].map(() => document.createElement('i')));
+    const batt = document.createElement('span'); batt.className = 'b-batt';
+    if (r.batt !== null) {
+      batt.innerHTML = `<i class="ph ${battIcon(r.batt)}" aria-hidden="true"></i>`;
+      batt.append(r.batt + '%');
+      if (r.batt < 20) batt.dataset.low = '';
     }
-    el.append(dot, meta, br);
-    el.addEventListener('click', () => select(id));
+    el.setAttribute('aria-label', `${r.id}: ${st.text}, tín hiệu ${SIGNAL[r.sig].text.toLowerCase()}${r.batt !== null ? `, pin ${r.batt}%` : ''}`);
+    el.append(main, bars, batt);
+    el.addEventListener('click', () => select(r.id));
     list.appendChild(el);
   }
 }
@@ -134,10 +139,28 @@ function select(id) {
   if (b && b.hasPos) map.panTo([b.lat, b.lon]);
 }
 
-// ---- Trạm bờ: marker đỏ, đường nối tới phao đang chọn ----
+// "Xem trên bản đồ" from the address search
+function showBuoy(id) {
+  const b = state.buoys.get(id);
+  if (!b) return;
+  if (mode !== 'monitor') setMode('monitor');
+  select(id);
+  if (b.hasPos) map.setView([b.lat, b.lon], Math.max(map.getZoom(), 16));
+  if (narrow.matches) { minimizeSearch(); setSheet(false); }   // phone: show the buoy card under the map
+}
+
+// ---- Trạm bờ: marker đỏ, đường nét đứt tới phao đang chọn, trạng thái GPS trong nhãn ----
 const STATION_RED = '#EF4444';
 const stationLine = L.polyline([], { color: STATION_RED, weight: 1.5, opacity: .8, dashArray: '2 6', interactive: false }).addTo(map);
 let stationMarker = null;
+
+function stationLabel() {
+  const ss = stationStatus();
+  const s = state.station;
+  const gps = ss === 'online' ? `GPS tốt${s.sats != null ? `, ${s.sats} vệ tinh` : ''}`
+    : ss === 'nofix' ? 'Chưa có GPS, vị trí cuối' : 'Mất tín hiệu, vị trí cuối';
+  return `<b>Trạm bờ</b><small>${gps}</small>`;
+}
 
 function updateStation() {
   const s = state.station;
@@ -146,11 +169,10 @@ function updateStation() {
       className: '', iconSize: [30, 30], iconAnchor: [15, 15],
       html: '<div class="station-pin"><i class="ph-fill ph-broadcast" aria-hidden="true"></i></div>',
     });
-    const label = 'TRẠM BỜ' + (s.fix === 1 ? '' : ' (vị trí cuối)');
-    if (stationMarker) stationMarker.setLatLng([s.lat, s.lon]).setTooltipContent(label);
+    if (stationMarker) stationMarker.setLatLng([s.lat, s.lon]).setTooltipContent(stationLabel());
     else {
       stationMarker = L.marker([s.lat, s.lon], { icon, zIndexOffset: 1000 })
-        .bindTooltip(label, { permanent: true, direction: 'bottom', offset: [0, 14], className: 'tip station-tip' })
+        .bindTooltip(stationLabel(), { permanent: true, direction: 'bottom', offset: [0, 14], className: 'tip station-tip' })
         .addTo(map)
         .on('click', () => map.setView([s.lat, s.lon], Math.max(map.getZoom(), 16)));
     }
@@ -162,34 +184,21 @@ function updateStation() {
 function fitAll() {
   const pts = [...state.buoys.values()].filter(b => b.hasPos).map(b => [b.lat, b.lon]);
   if (state.station && state.station.hasPos) pts.push([state.station.lat, state.station.lon]);
-  if (mode === 'mission') { wps.forEach(w => pts.push([w.lat, w.lon])); poly.forEach(w => pts.push([w.lat, w.lon])); }
+  if (mode === 'mission') wps.forEach(w => pts.push([w.lat, w.lon]));
   if (!pts.length) return;
   if (pts.length === 1) map.setView(pts[0], 16);
   else map.fitBounds(pts, { padding: [60, 60], maxZoom: 17 });
 }
 
-function centerOn(id) {
-  const b = state.buoys.get(id);
-  if (b && b.hasPos) map.setView([b.lat, b.lon], Math.max(map.getZoom(), 16));
-  else toast('Phao này chưa có tọa độ');
-}
-
-// ================= LỘ TRÌNH =================
+// ================= LỘ TRÌNH (chỉ waypoint) =================
 let wps = [];              // [{lat, lon}]
 let selWp = -1;
 let undoStack = [];        // ảnh chụp trạng thái để hoàn tác
-const routeLine = L.polyline([], { color: ACCENT, weight: 4, opacity: .95 }).addTo(map);
-const startLine = L.polyline([], { color: ACCENT, weight: 2, opacity: .7, dashArray: '6 8' }).addTo(map);
+const routeLine = L.polyline([], { color: '#22D3EE', weight: 4, opacity: .95 }).addTo(map);
+const startLine = L.polyline([], { color: '#22D3EE', weight: 2, opacity: .7, dashArray: '6 8' }).addTo(map);
 const wpLayer = L.layerGroup().addTo(map);
-const legLayer = L.layerGroup().addTo(map);
-let poly = [];             // đa giác vùng quét [{lat, lon}]
-let drawing = false, draft = [];
-const polyLayer = L.layerGroup().addTo(map);
 
 const validPt = p => p && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
-const speed = () => { const v = parseFloat($('m-speed').value); return Number.isFinite(v) && v > 0 ? v : 0; };
-const spacing = () => { const v = parseFloat($('s-space').value); return Number.isFinite(v) ? Math.min(500, Math.max(1, v)) : 10; };
-const angleVal = () => { const s = $('s-angle').value.trim(); const v = parseFloat(s); return s !== '' && Number.isFinite(v) ? ((v % 360) + 360) % 360 : null; };
 function pushUndo() { undoStack.push(JSON.stringify(wps)); if (undoStack.length > 50) undoStack.shift(); }
 
 // ---- Đồng bộ lộ trình với máy chủ: một bản chung, admin sửa, mọi người xem realtime ----
@@ -197,28 +206,25 @@ const cid = Math.random().toString(36).slice(2, 12);   // định danh tab này 
 let missionRev = 0;
 let saveTimer = null;
 let dragging = false;
-let missionLoaded = false;
-let downlink = null;   // { rev, id, loop, n, mission_rev, by, at }: lần gửi xuống phao gần nhất
+let downlink = null;   // { rev, id, loop, n, mission_rev, by, at, delivered }: lần gửi xuống phao gần nhất
+let downlinkLogged = 0;
 
 function applyMission(m) {
   wps = (m.waypoints || []).filter(validPt).slice(0, MAX_WP);
-  poly = (m.poly || []).filter(validPt);
-  $('s-space').value = m.spacing ?? 10;
-  $('s-angle').value = m.angle ?? '';
-  $('m-speed').value = m.speed ?? 1.5;
   selWp = -1; undoStack = [];
   missionRev = m.rev ?? 0;
   renderRoute();
 }
 
 async function pushMission() {
-  if (MOCK) return;
+  saveTimer = null;
+  if (MOCK) { missionRev++; return; }
   try {
     const res = await fetch('/api/mission', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waypoints: wps, poly, spacing: spacing(), angle: angleVal(), speed: speed() || 1.5, cid }),
+      body: JSON.stringify({ waypoints: wps, cid }),
     });
-    if (res.ok) { missionRev = (await res.json()).rev; return; }
+    if (res.ok) { missionRev = (await res.json()).rev; renderMissionPanel(); return; }
     toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền, hãy đăng nhập lại' : 'Không lưu được lộ trình');
   } catch { toast('Mất kết nối, chưa lưu được lộ trình'); }
 }
@@ -231,50 +237,14 @@ function saveMission() {
 }
 
 function wpIcon(i, active) {
-  if (wps.length > 40 && !active) {   // tuyến quét dài: chấm nhỏ, không đánh số
-    return L.divIcon({ className: '', iconSize: [10, 10], iconAnchor: [5, 5],
-      html: `<div style="width:10px;height:10px;border-radius:50%;background:${ACCENT};border:2px solid #fff"></div>` });
+  if (wps.length > 40 && !active) {   // lộ trình dài: chấm nhỏ, không đánh số
+    return L.divIcon({ className: '', iconSize: [10, 10], iconAnchor: [5, 5], html: '<div class="wp-dot"></div>' });
   }
   const s = active ? 32 : 26;
   return L.divIcon({
     className: '', iconSize: [s, s], iconAnchor: [s / 2, s / 2],
-    html: `<div style="width:${s}px;height:${s}px;border-radius:50%;background:${ACCENT};color:${ACCENT_INK};border:2px solid #fff;
-           box-shadow:${active ? '0 0 0 4px rgba(34,211,238,.45)' : '0 2px 6px rgba(0,0,0,.55)'};
-           display:flex;align-items:center;justify-content:center;font:800 ${active ? 14 : 12}px system-ui">${i + 1}</div>`,
+    html: `<div class="wp-pin"${active ? ' data-active' : ''}>${i + 1}</div>`,
   });
-}
-
-// Vẽ vùng quét (đang vẽ dở hoặc đã chốt) và thanh điều khiển vẽ
-function renderPoly() {
-  polyLayer.clearLayers();
-  $('drawbar').classList.toggle('show', mode === 'mission' && drawing);
-  $('s-draw').querySelector('span').textContent = drawing ? 'Đang vẽ...' : (poly.length ? 'Vẽ lại vùng' : 'Vẽ vùng quét');
-  $('s-draw').disabled = drawing;
-  $('s-regen').disabled = drawing || poly.length < 3;
-  $('s-clear').disabled = drawing || !poly.length;
-  if (mode !== 'mission') return;
-  const pts = drawing ? draft : poly;
-  if (!pts.length) return;
-  const ll = pts.map(p => [p.lat, p.lon]);
-  const style = { color: ACCENT, weight: 2, interactive: false, fillColor: ACCENT, fillOpacity: drawing ? .08 : .14, dashArray: drawing ? '6 6' : null };
-  (ll.length >= 3 ? L.polygon(ll, style) : L.polyline(ll, style)).addTo(polyLayer);
-  if (drawing) {
-    ll.forEach(c => L.circleMarker(c, { radius: 6, color: '#fff', weight: 2, fillColor: ACCENT, fillOpacity: 1, interactive: false }).addTo(polyLayer));
-    $('draw-info').textContent = draft.length + ' điểm' + (draft.length >= 3 ? ', sẵn sàng' : ', cần ít nhất 3');
-    $('draw-done').disabled = draft.length < 3;
-    $('draw-undo').disabled = !draft.length;
-  }
-}
-
-function generateSurvey() {
-  if (!isAdmin() || poly.length < 3) return;
-  const r = surveyPath(poly, spacing(), angleVal());
-  if (!r.pts.length) { toast('Vùng quá hẹp so với khoảng cách tuyến'); return; }
-  if (r.pts.length > MAX_WP) { toast(`Cần ${r.pts.length} điểm, vượt giới hạn ${MAX_WP}. Hãy tăng khoảng cách tuyến`); return; }
-  pushUndo();
-  wps = r.pts; selWp = -1;
-  saveMission(); renderRoute();
-  toast(`Đã tạo ${wps.length} điểm, hướng tuyến ${Math.round(r.angle)} độ`);
 }
 
 function selectedBuoyPos() {
@@ -284,8 +254,7 @@ function selectedBuoyPos() {
 
 // Vẽ lại toàn bộ lộ trình trên bản đồ và bảng bên cạnh
 function renderRoute() {
-  wpLayer.clearLayers(); legLayer.clearLayers();
-  renderPoly();
+  wpLayer.clearLayers();
   const pts = wps.map(w => [w.lat, w.lon]);
   routeLine.setLatLngs(mode === 'mission' ? pts : []);
   const start = selectedBuoyPos();
@@ -294,7 +263,7 @@ function renderRoute() {
 
   wps.forEach((w, i) => {
     const m = L.marker([w.lat, w.lon], { icon: wpIcon(i, i === selWp), draggable: isAdmin(), zIndexOffset: 500 }).addTo(wpLayer);
-    m.on('click', () => { if (!fx.measuring) selectWp(i, false); });
+    m.on('click', () => selectWp(i, false));
     m.on('drag', e => {
       const p = e.target.getLatLng();
       w.lat = p.lat; w.lon = p.lng;
@@ -302,11 +271,6 @@ function renderRoute() {
     });
     m.on('dragstart', () => { dragging = true; pushUndo(); });
     m.on('dragend', () => { dragging = false; saveMission(); renderRoute(); });
-    if (i > 0 && wps.length <= 40) {   // nhiều điểm (tuyến quét) thì bỏ nhãn cho đỡ rối
-      const a = wps[i - 1], mid = [(a.lat + w.lat) / 2, (a.lon + w.lon) / 2];
-      L.marker(mid, { interactive: false, icon: L.divIcon({
-        className: '', html: `<span class="leg-label">${fmtDist(distM(a, w))}</span>`, iconSize: [0, 0] }) }).addTo(legLayer);
-    }
   });
   renderMissionPanel();
 }
@@ -315,52 +279,73 @@ function renderRoute() {
 function updateStart() {
   const s = selectedBuoyPos();
   startLine.setLatLngs(s && wps.length ? [[s.lat, s.lon], [wps[0].lat, wps[0].lon]] : []);
-  renderMissionPanel();
+}
+
+// One line of route progress for buoy `id`, or null (docs/lora-route-downlink.md)
+function routeProgress(id) {
+  if (!downlink || !downlink.rev || downlink.id !== id) return null;
+  const r = state.buoys.get(id)?.route;
+  const n = downlink.n;
+  const ours = r && r.rev === downlink.rev;
+  // delivered: Worker thôi mời trạm gửi bản này, phao khởi động lại cũng không nhận lại
+  if (!ours && downlink.delivered) return { tone: 'warn', text: 'Phao đã khởi động lại và bỏ lộ trình. Bấm Gửi tới phao để chạy lại.' };
+  if (!ours) return { tone: 'pending', text: `Đã gửi lộ trình ${n} điểm, đang chờ phao nhận` };
+  if (r.have < n) return { tone: 'pending', text: `Phao đang nhận lộ trình: ${r.have}/${n} điểm` };
+  if (!r.pi) return { tone: 'pending', text: `Phao đã nhận đủ ${n} điểm, đang chuyển cho máy tính trên phao` };
+  return { tone: 'ok', text: n ? `Phao đã nhận lộ trình ${n} điểm${downlink.loop ? ', đi vòng' : ''}` : 'Phao đã bỏ lộ trình và đứng yên' };
+}
+
+function renderSendStatus() {
+  const r = downlink ? routeProgress(downlink.id) : null;
+  const el = $('m-sendstat');
+  el.hidden = !r;
+  if (r) { el.dataset.tone = r.tone; el.textContent = `${downlink.id}: ${r.text}`; }
+  const edited = downlink && downlink.rev && downlink.mission_rev !== missionRev && wps.length;
+  $('m-send').querySelector('span').textContent = edited ? 'Gửi bản mới tới phao' : 'Gửi tới phao';
 }
 
 function renderMissionPanel() {
   let total = 0;
   for (let i = 1; i < wps.length; i++) total += distM(wps[i - 1], wps[i]);
-  $('m-count').textContent = wps.length;
-  $('m-dist').textContent = wps.length > 1 ? fmtDist(total) : '-';
-  $('m-time').textContent = wps.length > 1 && speed() ? fmtDur(total / speed()) : '-';
+  $('m-sum').textContent = wps.length ? `${wps.length} điểm · ${fmtDist(total)}` : '';
   $('m-undo').disabled = !undoStack.length;
   $('m-clear').disabled = !wps.length;
-  $('m-export').disabled = !wps.length;
   renderSendStatus();
   $('m-hint').textContent = isAdmin()
-    ? 'Chạm lên bản đồ để đặt điểm đến, kéo điểm để dời vị trí. Hoặc vẽ vùng quét để tự tạo tuyến.'
-    : 'Bạn đang xem với tư cách khách: chỉ xem, không sửa được lộ trình.';
+    ? 'Chạm lên bản đồ để thêm điểm, kéo điểm để dời.'
+    : 'Bạn đang xem với tư cách khách. Chỉ admin sửa được lộ trình.';
 
   const list = $('m-list');
   list.replaceChildren();
   if (!wps.length) {
-    const e = document.createElement('div'); e.id = 'm-empty';
-    const b = document.createElement('b'); b.textContent = 'Chưa có điểm đến nào';
-    e.append(b, isAdmin() ? 'Chạm lên bản đồ để đặt điểm đầu tiên.' : 'Admin chưa tạo lộ trình.');
+    const e = document.createElement('li'); e.className = 'm-empty';
+    const b = document.createElement('b'); b.textContent = 'Chưa có điểm nào';
+    const p = document.createElement('span'); p.textContent = isAdmin() ? 'Chạm lên bản đồ để đặt điểm đầu tiên.' : 'Admin chưa tạo lộ trình.';
+    e.append(b, p);
     list.appendChild(e);
     return;
   }
   const start = selectedBuoyPos();
   wps.forEach((w, i) => {
-    const el = document.createElement('div');
-    el.className = 'wp' + (i === selWp ? ' active' : '');
+    const el = document.createElement('li');
+    el.className = 'wp';
+    if (i === selWp) el.setAttribute('aria-current', 'true');
     el.tabIndex = 0;
     const n = document.createElement('span'); n.className = 'n'; n.textContent = i + 1;
     const meta = document.createElement('div');
-    const pos = document.createElement('div'); pos.className = 'pos';
-    pos.textContent = `${w.lat.toFixed(6)}, ${w.lon.toFixed(6)}`;
-    const leg = document.createElement('div'); leg.className = 'leg';
+    const title = document.createElement('b'); title.textContent = 'Điểm ' + (i + 1);
+    const leg = document.createElement('small');
     const prev = i > 0 ? wps[i - 1] : start;
-    leg.textContent = prev
-      ? `${i > 0 ? 'Từ điểm ' + i : 'Từ phao'}: ${fmtDist(distM(prev, w))} | ${Math.round(bearingDeg(prev, w))} độ`
-      : 'Điểm xuất phát';
-    meta.append(pos, leg);
-    const del = document.createElement('button');
-    del.type = 'button'; del.className = 'del'; del.setAttribute('aria-label', 'Xóa điểm ' + (i + 1));
-    del.innerHTML = '<i class="ph ph-x" aria-hidden="true"></i>';
-    del.addEventListener('click', ev => { ev.stopPropagation(); removeWp(i); });
-    el.append(n, meta, del);
+    leg.textContent = prev ? `cách ${i > 0 ? 'điểm ' + i : 'phao'} ${fmtDist(distM(prev, w))}` : 'điểm xuất phát';
+    meta.append(title, leg);
+    el.append(n, meta);
+    if (isAdmin()) {
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'icon-btn del'; del.setAttribute('aria-label', 'Xoá điểm ' + (i + 1)); del.title = 'Xoá điểm';
+      del.innerHTML = '<i class="ph ph-x" aria-hidden="true"></i>';
+      del.addEventListener('click', ev => { ev.stopPropagation(); removeWp(i); });
+      el.appendChild(del);
+    }
     el.addEventListener('click', () => selectWp(i, true));
     el.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selectWp(i, true); } });
     list.appendChild(el);
@@ -379,7 +364,7 @@ function addWp(latlng) {
   wps.push({ lat: latlng.lat, lon: latlng.lng });
   selWp = wps.length - 1;
   saveMission(); renderRoute();
-  const el = $('m-list'); el.scrollTop = el.scrollHeight;
+  const el = $('m-list'); el.lastElementChild?.scrollIntoView({ block: 'nearest' });
 }
 function removeWp(i) {
   if (!isAdmin()) return;
@@ -390,31 +375,9 @@ function removeWp(i) {
 }
 
 map.on('click', e => {
-  if (mode !== 'mission' || fx.measuring || !isAdmin()) return;
-  if (drawing) { draft.push({ lat: e.latlng.lat, lon: e.latlng.lng }); renderPoly(); }
-  else addWp(e.latlng);
+  if (mode !== 'mission' || !isAdmin()) return;
+  addWp(e.latlng);
 });
-
-function stopDrawing() { drawing = false; draft = []; renderPoly(); setSheet(false); }
-$('s-draw').addEventListener('click', () => {
-  if (!isAdmin()) return;
-  if (wps.length && !confirm('Tạo tuyến quét mới sẽ thay thế lộ trình hiện tại. Tiếp tục vẽ?')) return;
-  stopMeasuring();
-  drawing = true; draft = []; selWp = -1; renderRoute();
-  setSheet(true);   // trên điện thoại: thu ngăn điều khiển lại để có chỗ vẽ
-});
-$('draw-undo').addEventListener('click', () => { draft.pop(); renderPoly(); });
-$('draw-cancel').addEventListener('click', stopDrawing);
-$('draw-done').addEventListener('click', () => {
-  if (draft.length < 3) return;
-  poly = draft; stopDrawing(); saveMission(); generateSurvey();
-});
-$('s-regen').addEventListener('click', () => {
-  if (wps.length && !confirm('Thay thế lộ trình hiện tại bằng tuyến quét mới?')) return;
-  generateSurvey();
-});
-$('s-clear').addEventListener('click', () => { poly = []; saveMission(); renderPoly(); });
-['s-space', 's-angle'].forEach(id => $(id).addEventListener('change', saveMission));
 
 $('m-undo').addEventListener('click', () => {
   if (!isAdmin() || !undoStack.length) return;
@@ -422,34 +385,21 @@ $('m-undo').addEventListener('click', () => {
   saveMission(); renderRoute();
 });
 $('m-clear').addEventListener('click', () => {
-  if (!isAdmin() || !wps.length || !confirm('Xóa toàn bộ ' + wps.length + ' điểm đến?')) return;
+  if (!isAdmin() || !wps.length || !confirm('Xoá toàn bộ ' + wps.length + ' điểm?')) return;
   pushUndo(); wps = []; selWp = -1;
   saveMission(); renderRoute();
 });
-$('m-speed').addEventListener('input', () => { if (!isAdmin()) return; saveMission(); renderMissionPanel(); });
 
 // ---- Gửi lộ trình đang lưu xuống phao qua trạm bờ LoRa (docs/lora-route-downlink.md) ----
-
-function renderSendStatus() {
-  const el = $('m-sendstat');
-  el.replaceChildren();
-  if (!downlink || !downlink.rev) return;
-  const line = (text, cls) => { const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls; el.appendChild(d); };
-  const hhmm = t => new Date(t).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-  line(`Bản gửi #${downlink.rev}: ${downlink.n} điểm${downlink.loop ? ', đi vòng' : ''} tới ${downlink.id}, lúc ${hhmm(downlink.at)}`);
-  const r = state.buoys.get(downlink.id)?.route;
-  // delivered: Worker thôi mời trạm gửi bản này, phao khởi động lại cũng không nhận lại
-  if ((!r || r.rev !== downlink.rev) && downlink.delivered) line(`Pi đã nhận bản này lúc ${hhmm(downlink.delivered)}, nay phao không còn giữ nó (khởi động lại?). Trạm không gửi lại: bấm Gửi tới phao để chạy lại`, 'warn');
-  else if (!r || r.rev !== downlink.rev) line('Đang chờ phao nhận (phao trả lời sau mỗi gói beacon)', 'warn');
-  else if (r.have < downlink.n) line(`Phao đang nhận: ${r.have}/${downlink.n} điểm`, 'warn');
-  else if (!r.pi) line(`Phao đã nhận đủ ${downlink.n} điểm, đang chuyển cho Pi`, 'warn');
-  else line(downlink.n ? 'Pi đã nhận lộ trình và đang chạy theo nó' : 'Pi đã nhận lộ trình rỗng: phao dừng', 'ok');
-  if (downlink.mission_rev !== missionRev) line('Lộ trình đã sửa sau lần gửi này: bấm Gửi tới phao để gửi bản mới', 'warn');
-}
-
 function onDownlinkMessage(m) {
   downlink = m;
+  // A fresh send (not the replay on page load) goes into the timeline once per rev
+  if (m.rev && m.rev !== downlinkLogged && Date.now() - m.at < 15000) {
+    log('route', m.n ? `Đã gửi lộ trình ${m.n} điểm tới ${m.id}` : `Đã yêu cầu ${m.id} bỏ lộ trình`, m.at);
+  }
+  if (m.rev) downlinkLogged = Math.max(downlinkLogged, m.rev);
   renderSendStatus();
+  if (m.id === state.selected) renderDetail();
 }
 
 $('m-send').addEventListener('click', async () => {
@@ -458,55 +408,20 @@ $('m-send').addEventListener('click', async () => {
   const clear = !wps.length;
   if (clear && !confirm(`Lộ trình đang trống. Gửi lộ trình rỗng để ${id} bỏ lộ trình cũ?`)) return;
   if (!clear && !confirm(`Gửi ${wps.length} điểm tới ${id} qua trạm bờ?`)) return;
-  if (MOCK) { toast('Chế độ mock: không gửi'); return; }
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await pushMission(); }   // gửi đúng bản đang thấy
+  const loop = $('m-loop').checked;
+  if (MOCK) { window.mockServer?.sendRoute(id, wps.length, loop, missionRev); return; }
+  if (saveTimer) { clearTimeout(saveTimer); await pushMission(); }   // gửi đúng bản đang thấy
   try {
-    const res = await jsonPost('/api/mission/send', { id, loop: $('m-loop').checked, clear });
+    const res = await jsonPost('/api/mission/send', { id, loop, clear });
     if (!res.ok) { toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không gửi được lộ trình'); return; }
     onDownlinkMessage(await res.json());
     toast(clear ? `Đã yêu cầu ${id} bỏ lộ trình` : `Đã gửi ${wps.length} điểm, chờ trạm bờ phát xuống phao`);
   } catch { toast('Mất kết nối, chưa gửi được'); }
 });
 
-$('m-export').addEventListener('click', () => {
-  const round = p => ({ lat: +p.lat.toFixed(7), lon: +p.lon.toFixed(7) });
-  const data = {
-    version: 1, speed_mps: speed() || 1.5,
-    survey: poly.length >= 3 ? { polygon: poly.map(round), spacing_m: spacing(), angle_deg: angleVal() } : undefined,
-    waypoints: wps.map(round),
-  };
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-  a.download = 'lo-trinh-phao.json';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  toast('Đã xuất ' + wps.length + ' điểm');
-});
-$('m-import').addEventListener('click', () => $('m-file').click());
-$('m-file').addEventListener('change', async ev => {
-  const f = ev.target.files[0]; ev.target.value = '';
-  if (!f || !isAdmin()) return;
-  try {
-    const d = JSON.parse(await f.text());
-    const pts = Array.isArray(d) ? d : d.waypoints;
-    if (!Array.isArray(pts) || !pts.length || !pts.every(validPt)) throw new Error('bad');
-    pushUndo();
-    wps = pts.slice(0, MAX_WP).map(p => ({ lat: +p.lat, lon: +p.lon }));
-    if (Number.isFinite(d.speed_mps) && d.speed_mps > 0) $('m-speed').value = d.speed_mps;
-    const sv = d.survey;
-    poly = sv && Array.isArray(sv.polygon) && sv.polygon.length >= 3 && sv.polygon.every(validPt)
-      ? sv.polygon.map(p => ({ lat: +p.lat, lon: +p.lon })) : [];
-    if (sv && sv.spacing_m > 0) $('s-space').value = sv.spacing_m;
-    $('s-angle').value = sv && sv.angle_deg !== null && Number.isFinite(sv.angle_deg) ? sv.angle_deg : '';
-    selWp = -1; saveMission(); renderRoute(); fitAll();
-    toast('Đã nhập ' + wps.length + ' điểm');
-  } catch { toast('File không hợp lệ'); }
-});
-
 // ---- Chuyển chế độ ----
 function setMode(m) {
   mode = m;
-  if (m !== 'mission') { drawing = false; draft = []; }
   document.body.dataset.mode = m;
   for (const b of document.querySelectorAll('#mode button')) b.setAttribute('aria-selected', String(b.dataset.m === m));
   renderRoute();
@@ -514,7 +429,7 @@ function setMode(m) {
 }
 for (const b of document.querySelectorAll('#mode button')) b.addEventListener('click', () => setMode(b.dataset.m));
 
-// ---- Tab Phao / Nhật ký ----
+// ---- Tab Phao / Sự kiện ----
 function showTab(which) {
   const log = which === 'log';
   $('buoys-view').hidden = log;
@@ -528,47 +443,75 @@ $('tab-log').addEventListener('click', () => showTab('log'));
 
 // ---- Nút công cụ bản đồ ----
 $('btn-fit').addEventListener('click', fitAll);
-$('btn-follow').addEventListener('click', () => { follow = !follow; store.set('follow', follow ? '1' : '0'); applyFollowBtn(); });
-$('btn-style').addEventListener('click', () => { darkMap = !darkMap; store.set('darkMap', darkMap ? '1' : '0'); applyStyleBtn(); });
+$('btn-follow').addEventListener('click', () => {
+  follow = !follow; store.set('follow', follow ? '1' : '0'); applyFollowBtn();
+  const b = state.buoys.get(state.selected);
+  if (follow && b && b.hasPos) map.panTo([b.lat, b.lon]);
+});
 
-// ---- Tick mỗi giây: cập nhật "x giây trước" và trạng thái mất tín hiệu ----
+// ---- Tick mỗi giây: trạng thái suy ra từ tuổi gói (mất tín hiệu, hết nhãn "Bị lật") ----
 setInterval(() => {
-  if (!state.buoys.size) return;
   for (const k of state.buoys.keys()) updateMarker(k);
-  renderList(); renderDetail();
+  renderList(); renderDetail(); renderPlace();
+  if (stationMarker) stationMarker.setTooltipContent(stationLabel());
 }, 1000);
 
 // ================= WEBSOCKET =================
 function onMissionMessage(m) {
   if (m.cid === cid || !(m.rev > missionRev) || dragging) return;   // bản của chính mình / cũ / đang kéo điểm
-  const first = !missionLoaded;
-  missionLoaded = true;
   applyMission(m);
-  emit('mission', { by: m.by, rev: m.rev, first });
 }
+
+// Popup when a buoy starts being driven along its route, or stands still again. Its last status other
+// than "lost" is remembered, so a buoy that drops out and comes back does not announce a start
+const lastMove = new Map();
+function noteMovement(id, b, snapshot) {
+  const st = buoyStatus(id, b);
+  if (st === 'lost') return;
+  const before = lastMove.get(id);
+  lastMove.set(id, st);
+  if (snapshot || before === undefined || before === st) return;
+  if (st === 'patrol' && before === 'idle') {
+    toast(`${id} bắt đầu chạy lộ trình`, 'ok');
+    log('run', `${id} bắt đầu chạy lộ trình`);
+  } else if (st === 'patrol' && before === 'stopped') {
+    toast(`${id} chạy tiếp lộ trình`, 'ok');   // hold.js already logs the resume
+  } else if (st === 'idle' && before === 'patrol') {
+    toast(`${id} đứng yên, chờ lộ trình mới`, 'info');
+    log('idle', `${id} đứng yên, chờ lộ trình mới`);
+  }
+}
+
+// Route fully handed to the Pi for the current downlink rev
+const routeDone = (id, r) => !!(downlink && downlink.rev && downlink.id === id && r && r.rev === downlink.rev && r.have === downlink.n && r.pi === 1);
 
 function onBuoyMessage(m) {
   const id = String(m.id || 'PHAO-01');
   const existed = state.buoys.get(id);
-  const prev = existed ? { fix: existed.fix, imuOk: existed.imuOk, nav: existed.nav, victims: existed.victims } : null;
+  const prev = existed ? { fix: existed.fix, nav: existed.nav, victims: existed.victims, returning: isReturning(existed), routeDone: routeDone(id, existed.route) } : null;
   const b = existed || { hasPos: false, marker: null };
   const snapshot = (Number(m.age_s) || 0) > 0;   // bản phát lại lúc mở trang, không phải gói mới
   b.fix = m.fix;
-  // Cầu nối MAVLink không đi qua LoRa nên không có RSSI/SNR: để null, giao diện hiện "MAVLink"
+  // Cầu nối MAVLink không đi qua LoRa nên không có RSSI/SNR: để null
   b.link = m.link === 'mavlink' ? 'mavlink' : 'lora';
   b.rssi = Number.isFinite(m.rssi) ? m.rssi : null;
   b.snr = Number.isFinite(m.snr) ? m.snr : null;
-  b.raw = String(m.raw ?? '');
   b.lastSeen = Date.now() - (Number(m.age_s) || 0) * 1000;
   // Nhóm điều hướng (ARMED, chế độ, tốc độ, ga, waypoint, pin, GPS) chỉ có ở MAVLink
   b.nav = m.nav && typeof m.nav === 'object' ? m.nav : null;
   // Số người phao đã báo phát hiện (bản STM32, qua LoRa); gói không có trường này thì giữ số cũ
   if (Number.isInteger(m.victims)) b.victims = m.victims;
+  // Hướng đi và tốc độ theo GPS, % pin, trạng thái thật hai đèn, cờ dừng (bản STM32); gói không có thì để trống
+  b.course = Number.isFinite(m.course) ? m.course : null;
+  b.speed = Number.isFinite(m.speed) ? m.speed : null;
+  b.battery = Number.isInteger(m.battery_pct) ? m.battery_pct : null;
+  b.lights = Number.isInteger(m.lights) ? m.lights : null;
+  b.hold = m.hold === 1 ? true : m.hold === 0 ? false : null;
   // Tiến độ nhận lộ trình gửi qua LoRa (bản STM32). Beacon LoRa không có w= là phao không giữ lộ trình
   // nào (F407 vừa khởi động lại); bản tin MAVLink không bao giờ có nhóm này nên giữ trạng thái cũ
   if (m.route && Number.isInteger(m.route.rev)) b.route = { rev: m.route.rev, have: m.route.have, pi: m.route.pi };
   else if (b.link === 'lora') b.route = null;
-  const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S'].includes(m.mode);
+  const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S', 'R'].includes(m.mode);
   if (attitudeValid) {
     b.hasAttitude = true;
     b.roll = Number(m.roll); b.pitch = Number(m.pitch); b.yaw = Number(m.yaw);
@@ -579,9 +522,12 @@ function onBuoyMessage(m) {
   // Chỉ ghi đè vị trí khi bản tin có tọa độ hợp lệ; NO_FIX giữ vị trí cũ
   if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { b.lat = m.lat; b.lon = m.lon; b.hasPos = true; }
   state.buoys.set(id, b);
+  noteHold(id);
   if (!state.selected) state.selected = id;
+  if (!snapshot && prev && !prev.routeDone && routeDone(id, b.route)) {
+    log('route', downlink.n ? `${id} đã nhận lộ trình ${downlink.n} điểm` : `${id} đã bỏ lộ trình`);
+  }
   if (downlink && downlink.id === id) renderSendStatus();
-  state.lastRx = Math.max(state.lastRx, b.lastSeen);
 
   // MAVLink đến 1-2 gói/giây: lấy mẫu lịch sử mỗi 2 giây để 300 mẫu phủ được 10 phút vệt đi
   const sampleDue = b.link !== 'mavlink' || !(b.lastSample > b.lastSeen - 2000);
@@ -593,9 +539,10 @@ function onBuoyMessage(m) {
     pushHistory(id, s);
   }
   emit('buoy', { id, prev, b, snapshot });
-  if (!snapshot && prev && Number.isInteger(prev.victims) && b.victims > prev.victims) toast(`${id} phát hiện người`);
+  noteMovement(id, b, snapshot);
+  if (!snapshot && prev && Number.isInteger(prev.victims) && b.victims > prev.victims && !state.eventBuoys.has(id)) toast(`${id} phát hiện người`, 'bad');
 
-  $('empty').hidden = true;
+  $('empty').hidden = [...state.buoys.values()].some(x => x.hasPos);
   updateMarker(id);
   updateTrail(id);
   if (b.hasPos && !firstCentered && !wps.length) { firstCentered = true; map.setView([b.lat, b.lon], 16); }
@@ -604,13 +551,10 @@ function onBuoyMessage(m) {
   if (id === state.selected) renderDetail();
   if (mode === 'mission' && id === state.selected) updateStart();
   if (id === state.selected) updateStation();
-  refreshStatusbar();
 }
 
 function onStationMessage(m) {
-  const prev = state.station ? { fix: state.station.fix } : null;
   const s = state.station || { hasPos: false };
-  const snapshot = (Number(m.age_s) || 0) > 0;
   s.fix = m.fix === 1 ? 1 : 0;
   s.sats = Number.isFinite(m.sats) ? m.sats : null;
   s.hdop = Number.isFinite(m.hdop) ? m.hdop : null;
@@ -618,11 +562,9 @@ function onStationMessage(m) {
   // Mất fix vẫn giữ vị trí cuối (trạm đứng yên)
   if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { s.lat = m.lat; s.lon = m.lon; s.hasPos = true; }
   state.station = s;
-  emit('station', { prev, s, snapshot });
   updateStation();
   if (s.hasPos && !firstCentered && !wps.length && !state.buoys.size) { firstCentered = true; map.setView([s.lat, s.lon], 15); }
   if (state.selected) renderDetail();
-  refreshStatusbar();
 }
 
 function onHistoryMessage(m) {
@@ -631,16 +573,20 @@ function onHistoryMessage(m) {
   const pts = m.points.filter(p => Number.isFinite(p.t) && (Number.isFinite(p.rssi) || Number.isFinite(p.lat)));
   state.history.set(String(m.id), pts.slice(-300));
   updateTrail(String(m.id));
-  if (String(m.id) === state.selected) renderDetail();
+}
+
+function setConn(up) {
+  state.connected = up;
+  $('conn').dataset.up = String(up);
+  $('conn-text').textContent = up ? 'Trực tuyến' : 'Mất kết nối';
 }
 
 function connect() {
   // Trên Cloudflare trang chạy qua https nên phải dùng wss; chạy cục bộ (http) thì ws
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => { state.connected = true; emit('ws', { up: true }); refreshStatusbar(); };
+  ws.onopen = () => setConn(true);
   ws.onclose = async () => {
-    if (state.connected) emit('ws', { up: false });
-    state.connected = false; refreshStatusbar();
+    setConn(false);
     if (!MOCK) {   // phiên hết hạn thì quay lại màn hình đăng nhập thay vì thử lại mãi
       const me = await fetch('/api/me').then(r => r.json()).catch(() => null);
       if (me && !me.role) { location.reload(); return; }
@@ -655,8 +601,43 @@ function connect() {
     else if (m.type === 'downlink') onDownlinkMessage(m);
     else if (m.type === 'history') onHistoryMessage(m);
     else if (m.type === 'station') onStationMessage(m);
+    else if (m.type === 'victims') onVictimsSnapshot(m);
+    else if (m.type === 'victim') onVictimMessage(m);
+    else if (m.type === 'alert') { onAlertMessage(m); renderDetail(); renderList(); }
+    else if (m.type === 'lights') onLightsMessage(m);
+    else if (m.type === 'hold') onHoldMessage(m);
     else onBuoyMessage(m);
   };
+}
+
+// ================= LỆNH ADMIN: ĐÈN, DỪNG, XOÁ CHẤM =================
+async function sendLights(id, lights, prev) {
+  if (MOCK) { window.mockServer?.setLights(id, lights); return; }
+  try {
+    const res = await jsonPost('/api/lights', { id, lights });
+    if (res.ok) { onLightsMessage(await res.json()); return; }
+    toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không gửi được lệnh đèn');
+  } catch { toast('Mất kết nối, chưa gửi được lệnh đèn'); }
+  revertLights(id, prev);
+}
+
+async function sendHold(id, hold, prev) {
+  if (MOCK) { window.mockServer?.setHold(id, hold); return; }
+  try {
+    const res = await jsonPost('/api/hold', { id, hold });
+    if (res.ok) { onHoldMessage(await res.json()); return; }
+    toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không gửi được lệnh dừng');
+  } catch { toast('Mất kết nối, chưa gửi được lệnh dừng'); }
+  revertHold(id, prev);
+}
+
+async function clearVictims() {
+  if (MOCK) { window.mockServer?.clearVictims(); return; }
+  try {
+    const res = await jsonPost('/api/victims/clear');
+    if (res.ok) onVictimsSnapshot(await res.json());
+    else toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không xoá được');
+  } catch { toast('Mất kết nối, chưa xoá được'); }
 }
 
 // ================= ĐĂNG NHẬP =================
@@ -669,11 +650,9 @@ function enter(me) {
   document.body.dataset.role = state.role;
   $('login').hidden = true;
   $('role-name').textContent = isAdmin() ? 'Admin' : 'Khách';
-  $('role-mail').textContent = state.email || '';
+  $('role-name').title = state.email || '';
   $('role-chip').hidden = false;
-  $('m-speed').readOnly = !isAdmin();
-  emit('session', { role: state.role, email: state.email });
-  renderRoute();
+  renderRoute(); renderDetail();
   connect();
 }
 
@@ -721,12 +700,16 @@ $('btn-logout').addEventListener('click', async () => {
 
 // ================= KHỞI ĐỘNG =================
 async function boot() {
-  initStatusbar();
-  initEventLog();
-  initTelemetry({ onCenter: centerOn, toast });
-  applyStyleBtn(); applyFollowBtn();
+  $('map').classList.add('dark');
+  initTimeline();
+  initTelemetry({ toast, routeLine: routeProgress });
+  initVictims(map, { toast, onClear: clearVictims });
+  initLights({ onSet: sendLights });
+  initHold({ onSet: sendHold });
+  initSearch(map, { onShowBuoy: showBuoy, onOpen: () => setSheet(true) });   // phone: give the results the whole map
+  applyFollowBtn();
   setMode('monitor');
-  renderDetail();
+  renderList(); renderDetail();
 
   // ?mock: chạy thử không cần backend; dev/mock.js không được deploy
   if (MOCK) {

@@ -3,7 +3,8 @@ from pathlib import Path
 
 try:
     import numpy as np
-    from modules.edge_model import BOAT, PERSON, EdgeDetection, EdgeModel, decode_yolo, letterbox, overlap_fraction
+    from modules.edge_model import (BOAT, CRITICAL, HIGH, MEDIUM, PERSON, SAFE, EdgeDetection, EdgeModel, RiskThresholds, decode_yolo,
+                                    drowning_signs, letterbox, overlap_fraction, risk_level)
 except ImportError:          # OpenCV or numpy missing
     decode_yolo = None
 
@@ -82,22 +83,96 @@ class ModelTest(unittest.TestCase):
 class NearCameraTest(unittest.TestCase):
     """NEAR_CAMERA_SAFE: legs out of sight because the box runs off the bottom of the frame are not water."""
 
-    def model(self, box):
+    def model(self, box, extra=(), keypoints=()):
         model = EdgeModel.__new__(EdgeModel)       # no TFLite: the two stages are stand-ins
         model.on_boat, model.max_poses, model.near_camera, model._pose = 0.4, 3, 0.03, object()
-        model._boxes = lambda _frame: [EdgeDetection(box, 0.5, PERSON)]
-        model._read_pose = lambda _frame, _box: (True, 0.05, ())   # no hips, knees or ankles seen
+        model.risk = RiskThresholds()
+        model._boxes = lambda _frame: [EdgeDetection(box, 0.5, PERSON), *extra]
+        model._read_pose = lambda _frame, _box: (True, 0.05, keypoints)   # no hips, knees or ankles seen
         return model
 
     def test_a_box_on_the_bottom_edge_is_near_the_camera_not_in_the_water(self):
         people, _ = self.model((0.2, 0.3, 0.99, 0.7)).detect(None)
         self.assertTrue(people[0].near_camera)
         self.assertFalse(people[0].in_water)
+        self.assertEqual(people[0].risk, MEDIUM)
 
     def test_a_box_clear_of_the_bottom_keeps_the_pose_reading(self):
         people, _ = self.model((0.4, 0.3, 0.8, 0.5)).detect(None)
         self.assertFalse(people[0].near_camera)
         self.assertTrue(people[0].in_water)
+        self.assertEqual(people[0].risk, HIGH)
+
+    def test_somebody_in_a_boat_is_safe_and_kept(self):
+        people, boats = self.model((0.4, 0.3, 0.6, 0.4), extra=(EdgeDetection((0.3, 0.2, 0.7, 0.6), 0.6, BOAT),)).detect(None)
+        self.assertEqual(len(boats), 1)
+        self.assertTrue(people[0].on_boat)
+        self.assertEqual(people[0].risk, SAFE)
+
+    def test_people_past_max_poses_are_medium(self):
+        model = self.model((0.4, 0.3, 0.8, 0.5), keypoints=raised_arms())
+        model.max_poses = 0
+        people, _ = model.detect(None)
+        self.assertIsNone(people[0].in_water)
+        self.assertEqual(people[0].risk, MEDIUM)
+
+    def test_raised_arms_in_the_water_are_critical(self):
+        people, _ = self.model((0.4, 0.3, 0.8, 0.5), keypoints=raised_arms()).detect(None)
+        self.assertEqual(people[0].risk, CRITICAL)
+
+
+def pose(**points):
+    """17 COCO keypoints (x, y, score), none seen but those given by name."""
+    names = ("nose", "left_eye", "right_eye", "left_ear", "right_ear", "left_shoulder", "right_shoulder", "left_elbow",
+             "right_elbow", "left_wrist", "right_wrist", "left_hip", "right_hip", "left_knee", "right_knee", "left_ankle", "right_ankle")
+    return tuple(points.get(name, (0.5, 0.5, 0.0)) for name in names)
+
+
+def raised_arms():
+    return pose(nose=(0.5, 0.40, 0.8), left_shoulder=(0.45, 0.50, 0.7), right_shoulder=(0.55, 0.50, 0.7),
+                left_wrist=(0.42, 0.30, 0.6), right_wrist=(0.58, 0.32, 0.6))
+
+
+@unittest.skipIf(decode_yolo is None, "OpenCV or numpy not installed")
+class RiskTest(unittest.TestCase):
+    """The team's flow: boat SAFE, body seen MEDIUM, in the water HIGH, drowning signs CRITICAL."""
+
+    def test_both_wrists_above_the_shoulders_are_a_drowning_sign(self):
+        self.assertTrue(drowning_signs(raised_arms()))
+
+    def test_one_wrist_down_is_not(self):
+        points = list(raised_arms())
+        points[10] = (0.58, 0.60, 0.6)           # right wrist below its shoulder
+        self.assertFalse(drowning_signs(tuple(points)))
+
+    def test_wrists_seen_too_poorly_are_not_judged(self):
+        points = list(raised_arms())
+        points[9] = (0.42, 0.30, 0.1)
+        self.assertFalse(drowning_signs(tuple(points)))
+
+    def test_only_the_head_above_the_water_is_a_drowning_sign(self):
+        self.assertTrue(drowning_signs(pose(nose=(0.5, 0.4, 0.7), left_eye=(0.48, 0.38, 0.6))))
+
+    def test_head_and_shoulders_seen_with_the_arms_down_is_not(self):
+        calm = pose(nose=(0.5, 0.4, 0.7), left_shoulder=(0.45, 0.5, 0.6), right_shoulder=(0.55, 0.5, 0.6),
+                    left_wrist=(0.42, 0.7, 0.5), right_wrist=(0.58, 0.7, 0.5))
+        self.assertFalse(drowning_signs(calm))
+
+    def test_nothing_seen_is_not(self):
+        self.assertFalse(drowning_signs(pose()))
+        self.assertFalse(drowning_signs(()))
+
+    def test_risk_levels(self):
+        self.assertEqual(risk_level(True, True, raised_arms()), SAFE)       # a boat wins over everything
+        self.assertEqual(risk_level(False, False, raised_arms()), MEDIUM)   # lower body seen
+        self.assertEqual(risk_level(False, None), MEDIUM)                   # no pose read
+        self.assertEqual(risk_level(False, True, pose(nose=(0.5, 0.4, 0.1))), HIGH)
+        self.assertEqual(risk_level(False, True, raised_arms()), CRITICAL)
+
+    def test_thresholds_come_from_the_config(self):
+        strict = RiskThresholds.from_config({"wrist_score": 0.9})
+        self.assertFalse(drowning_signs(raised_arms(), strict))
+        self.assertEqual(RiskThresholds.from_config(None), RiskThresholds())
 
 
 if __name__ == "__main__":

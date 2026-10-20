@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 from threading import Lock
 from time import monotonic
 
+# Risk level of a person (modules/edge_model.py risk_level): on a boat, body seen, in the water, drowning.
+SAFE, MEDIUM, HIGH, CRITICAL = 0, 1, 2, 3
+RISK_NAMES = ("SAFE", "MEDIUM", "HIGH", "CRITICAL")
+
 
 @dataclass(frozen=True)
 class ImuState:
@@ -35,6 +39,19 @@ class SysState:
     link_ok: bool = False
     timestamp: float = 0.0
     confirm_presses: int = -1   # STM32F407: presses of the victim's confirm button (PE4) since its boot; -1: not reported
+    battery_pct: int = -1       # STM32F407 $SYS 9th field: charge 0..100; -1 unknown (battery_v is then still volts)
+
+
+@dataclass(frozen=True)
+class LinkState:
+    """STM32F407 $LNK, once a second: whether the shore station has been heard lately (the F407
+    calls it lost after 60 s), how long ago it was last heard (-1: never) and the station's GPS
+    position, the boat's home. Firmware without $LNK leaves the default: link up, no home."""
+    shore_ok: bool = True
+    heard_ago_s: float = -1.0
+    home: tuple[float, float] | None = None
+    timestamp: float = 0.0
+    hold: bool = False        # STOP from the dashboard: the F407 keeps the motors off until released
 
 
 @dataclass(frozen=True)
@@ -68,6 +85,7 @@ class HumanTarget:
     distance_m: float
     confidence: float
     timestamp: float
+    risk: int = MEDIUM   # SAFE (on a boat), MEDIUM, HIGH (in the water), CRITICAL (drowning)
 
 
 @dataclass(frozen=True)
@@ -83,6 +101,7 @@ class Snapshot:
     human_targets: tuple[HumanTarget, ...] = ()  # everybody in the last frame, the followed one included
     focus: tuple[float, float] | None = None     # lat, lon of the person the rescue logic wants watched
     nav: NavState = NavState()
+    link: LinkState = LinkState()
 
 
 class StateStore:
@@ -99,6 +118,11 @@ class StateStore:
         self._focus: tuple[float, float] | None = None
         self._vehicle = VehicleState()
         self._nav = NavState()
+        self._link = LinkState()
+
+    def update_link(self, shore_ok: bool, heard_ago_s: float, home: tuple[float, float] | None, hold: bool = False) -> None:
+        with self._lock:
+            self._link = LinkState(shore_ok, heard_ago_s, home, monotonic(), hold)
 
     def update_vehicle(self, mode: str, armed: bool, mission_seq: int, mission_total: int = 0, wp_dist_m: float = -1.0,
                        wp_bearing_deg: float = 0.0) -> None:
@@ -121,9 +145,10 @@ class StateStore:
         with self._lock:
             self._gps = GpsState(lat, lon, fix, hdop, speed, course % 360.0, monotonic())
 
-    def update_system(self, battery: float, motor_fault: bool, estop: bool, link_ok: bool, confirm_presses: int = -1) -> None:
+    def update_system(self, battery: float, motor_fault: bool, estop: bool, link_ok: bool, confirm_presses: int = -1,
+                      battery_pct: int = -1) -> None:
         with self._lock:
-            self._system = SysState(battery, motor_fault, estop, link_ok, monotonic(), confirm_presses)
+            self._system = SysState(battery, motor_fault, estop, link_ok, monotonic(), confirm_presses, battery_pct)
 
     def update_obstacles(self, obstacles: tuple[object, ...], scan_timestamp: float | None = None) -> None:
         with self._lock:
@@ -152,4 +177,4 @@ class StateStore:
     def snapshot(self) -> Snapshot:
         with self._lock:
             return Snapshot(self._imu, self._gps, self._system, self._obstacles, self._scan_timestamp, self._waypoint, self._human_target, self._vehicle,
-                            self._human_targets, self._focus, self._nav)
+                            self._human_targets, self._focus, self._nav, self._link)

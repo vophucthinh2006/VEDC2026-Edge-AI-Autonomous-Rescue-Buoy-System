@@ -33,5 +33,13 @@ typedef struct {
 size_t RouteDownlink_Frame(const route_downlink_t *route, const char *beacon_id, const route_ack_t *ack,
                            char *buf, size_t size);
 
+/* The answer to every other frame of a buoy (STM32F4/App/shore_link.h):
+ *     ACK,<id>,<eseq>,<cmd>,<lat>,<lon>*CS
+ * eseq: the event frame acknowledged, 0 for a beacon. cmd: the admin's commands 0..7, bit 0 light 1
+ * (PC3), bit 1 light 2 (PC2), bit 2 STOP (the F407 keeps the motors off). lat, lon: the station's GPS, the buoy's way home; empty without a fix.
+ * The buoy takes any frame from the station as a sign the station is there. */
+size_t RouteDownlink_Ack(const char *id, uint16_t eseq, uint8_t lights, bool has_position, double lat, double lon,
+                         char *buf, size_t size);
+
 /* Parses the "rev:have:pi" value of a beacon's w= field. */
 bool RouteDownlink_ParseAck(const char *value, route_ack_t *ack);

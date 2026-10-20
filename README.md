@@ -40,6 +40,13 @@ boat <pixhawk|stm32> <build|flash|deploy|run|test> [tham số]
 Đổi kiến trúc trên cùng một Pi: nối dây đúng bộ điều khiển (cả hai dùng `/dev/serial0`), rồi
 `boat <tên> deploy`.
 
+## Phao `stm32`: thử từng chức năng và chạy toàn bộ
+
+`scripts\stm32\test_*.bat` thử từng chức năng (IMU, pin, LoRa, trạm, dashboard, Pi ↔ F407, loa, camera, LiDAR,
+đèn, motor), `scripts\stm32\test_host.bat` mọi test trên máy tính, `scripts\stm32\test_sim.bat` cả nhiệm vụ trong
+giả lập, `scripts\stm32\run_all.bat` nạp và chạy cả hệ thống. Máy trạng thái của phao, bảng chức năng → file
+test: [docs/stm32-system.md](docs/stm32-system.md).
+
 ## Từ giả lập lên phao thật
 
 - `sim/run_boat.sh --pi --hw`: giả lập đi qua đúng đường phần cứng của phao `pixhawk` (LiDAR qua cổng nối

@@ -108,6 +108,37 @@ static void set_mode(sx127x_t *dev, uint8_t mode) {
     write_reg(dev, REG_OP_MODE, MODE_LONG_RANGE_MODE | mode);
 }
 
+// Mức của một chân khi kéo lên rồi kéo xuống bằng điện trở trong (~45 kΩ): "noi" = thả nổi (không ai
+// lái), "0" = bị ghim xuống (chạm GND hoặc bị lái thấp), "1" = bị ghim lên (chạm 3.3 V hoặc bị lái cao).
+static const char *pin_state(gpio_num_t pin) {
+    gpio_reset_pin(pin);
+    gpio_set_direction(pin, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
+    vTaskDelay(pdMS_TO_TICKS(2));
+    int up = gpio_get_level(pin);
+    gpio_set_pull_mode(pin, GPIO_PULLDOWN_ONLY);
+    vTaskDelay(pdMS_TO_TICKS(2));
+    int down = gpio_get_level(pin);
+    gpio_set_pull_mode(pin, GPIO_FLOATING);
+    return up && !down ? "noi" : (!up && !down ? "0 (ghim xuong)" : (up && down ? "1 (ghim len)" : "nguoc?"));
+}
+
+// Đo từng chân nối RA-02 trước khi bật SPI, một lần lúc khởi động: tìm chân chạm GND / 3.3 V trên mạch
+// mà không cần tháo gì. Bình thường: SCK, MOSI, NSS thả nổi (chỉ ESP lái); MISO thả nổi khi NSS cao
+// (module không được chọn); RST ghim lên (module có điện trở kéo lên); DIO0 bị module lái (0 hoặc 1).
+static void probe_pins(gpio_num_t sck, gpio_num_t miso, gpio_num_t mosi, gpio_num_t cs, gpio_num_t reset, gpio_num_t dio0) {
+    ESP_LOGW(TAG, "Do chan LoRa: SCK GPIO%d %s | MOSI GPIO%d %s | NSS GPIO%d %s | RST GPIO%d %s | DIO0 GPIO%d %s",
+             sck, pin_state(sck), mosi, pin_state(mosi), cs, pin_state(cs), reset, pin_state(reset), dio0, pin_state(dio0));
+    gpio_reset_pin(cs);
+    gpio_set_direction(cs, GPIO_MODE_OUTPUT);
+    gpio_set_level(cs, 1);
+    const char *deselected = pin_state(miso);
+    gpio_set_level(cs, 0);
+    const char *selected = pin_state(miso);
+    gpio_set_level(cs, 1);
+    ESP_LOGW(TAG, "Do chan LoRa: MISO GPIO%d khi NSS cao: %s, khi NSS thap: %s", miso, deselected, selected);
+}
+
 // API
 
 bool sx127x_init(sx127x_t *dev, spi_host_device_t host,
@@ -118,6 +149,12 @@ bool sx127x_init(sx127x_t *dev, spi_host_device_t host,
     dev->pin_reset = reset;
     dev->pin_dio0 = dio0;
     dev->frequency_hz = frequency_hz;
+
+    static bool probed = false;
+    if (!probed) {
+        probe_pins(sck, miso, mosi, cs, reset, dio0);
+        probed = true;
+    }
 
     // Cấu hình chân CS/RESET làm output thủ công (không dùng CS phần cứng của SPI
     // để chủ động giữ CS thấp xuyên suốt các transaction địa chỉ+dữ liệu FIFO burst)
@@ -139,24 +176,17 @@ bool sx127x_init(sx127x_t *dev, spi_host_device_t host,
         .quadhd_io_num = -1,
         .max_transfer_sz = 264,
     };
-    // Cho phép gọi lại init nhiều lần an toàn: bỏ qua lỗi "bus đã cài đặt"
-    esp_err_t err = spi_bus_initialize(host, &buscfg, SPI_DMA_CH_AUTO);
+    // Cho phép gọi lại init nhiều lần an toàn: bus chỉ cài một lần (gọi lại thì IDF in lỗi mỗi lần)
+    static bool bus_ready = false;
+    esp_err_t err = bus_ready ? ESP_OK : spi_bus_initialize(host, &buscfg, SPI_DMA_CH_AUTO);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "spi_bus_initialize loi: %d", err);
         return false;
     }
+    bus_ready = true;
 
-    spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 4 * 1000 * 1000, // 4MHz, an toan cho SX127x (toi da 10MHz)
-        .mode = 0,
-        .spics_io_num = -1,   // dieu khien CS thu cong
-        .queue_size = 4,
-    };
-    err = spi_bus_add_device(host, &devcfg, &dev->spi);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "spi_bus_add_device loi: %d", err);
-        return false;
-    }
+    // Pull-up trên MISO: module không trả lời thì đọc ra 0xFF đều, không phải số ngẫu nhiên của chân thả nổi.
+    gpio_set_pull_mode(miso, GPIO_PULLUP_ONLY);
 
     // Reset phần cứng module LoRa
     gpio_set_level(reset, 0);
@@ -164,9 +194,39 @@ bool sx127x_init(sx127x_t *dev, spi_host_device_t host,
     gpio_set_level(reset, 1);
     vTaskDelay(pdMS_TO_TICKS(100)); // tang thoi gian cho, mot so module clone can lau hon 10ms
 
-    uint8_t version = read_reg(dev, REG_VERSION);
-    if (version != 0x12) {
-        ESP_LOGE(TAG, "Khong tim thay SX127x (doc REG_VERSION=0x%02x, ky vong 0x12). Kiem tra day noi SPI!", version);
+    // 4 MHz trước, rồi 500 kHz: dây dài trên breadboard làm méo cạnh xung ở tốc độ cao.
+    static const int clocks_hz[] = { 4 * 1000 * 1000, 500 * 1000 };
+    uint8_t reads[3] = { 0 };
+    bool found = false;
+    for (size_t c = 0; c < sizeof(clocks_hz) / sizeof(clocks_hz[0]) && !found; c++) {
+        spi_device_interface_config_t devcfg = {
+            .clock_speed_hz = clocks_hz[c],
+            .mode = 0,
+            .spics_io_num = -1,   // dieu khien CS thu cong
+            .queue_size = 4,
+        };
+        err = spi_bus_add_device(host, &devcfg, &dev->spi);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "spi_bus_add_device loi: %d", err);
+            return false;
+        }
+        for (size_t i = 0; i < sizeof(reads); i++) reads[i] = read_reg(dev, REG_VERSION);
+        found = reads[0] == 0x12 && reads[1] == 0x12 && reads[2] == 0x12;
+        if (!found) {
+            ESP_LOGE(TAG, "SX127x @ %d kHz: REG_VERSION doc 3 lan = 0x%02x 0x%02x 0x%02x (ky vong 0x12)",
+                     clocks_hz[c] / 1000, reads[0], reads[1], reads[2]);
+            spi_bus_remove_device(dev->spi);   // gọi lại init được mà không thêm thiết bị trùng
+            dev->spi = NULL;
+        }
+    }
+    if (!found) {
+        if (reads[0] == 0x00 && reads[1] == 0x00 && reads[2] == 0x00)
+            ESP_LOGE(TAG, "Khong tim thay SX127x: MISO GPIO%d bi keo xuong 0 du co pull-up. Module khong co nguon 3.3 V "
+                          "(chip khong cap dien ghim cac chan xuong 0), hoac MISO cham GND. Do DIEN AP VCC-GND tren RA-02", miso);
+        else if (reads[0] == 0xFF && reads[1] == 0xFF && reads[2] == 0xFF)
+            ESP_LOGE(TAG, "Khong tim thay SX127x: module khong tra loi (0xff). Kiem tra NSS GPIO%d, RST GPIO%d, MISO GPIO%d", cs, reset, miso);
+        else
+            ESP_LOGE(TAG, "Khong tim thay SX127x: gia tri thay doi, day MISO GPIO%d / SCK GPIO%d chap chon hoac nhieu", miso, sck);
         return false;
     }
 

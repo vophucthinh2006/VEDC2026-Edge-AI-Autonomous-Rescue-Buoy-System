@@ -8,7 +8,7 @@ except ImportError:          # OpenCV or numpy missing
     VisionWorker = None
 
 from modules.perception import Obstacle
-from modules.state_store import StateStore
+from modules.state_store import CRITICAL, HIGH, MEDIUM, SAFE, StateStore
 
 CAMERA = {"vertical_fov_deg": 46.8, "standing_score_min": 2.45, "water_score_max": 2.1, "distance_source": "bbox", "person_height_m": 0.57,
           "standing_height_m": 1.95, "max_target_distance_m": 12.0, "horizontal_fov_deg": 60.0}
@@ -133,6 +133,32 @@ class CameraReaderTest(unittest.TestCase):
             self.assertIsNotNone(self.read_at(reader, 4.2))
         self.assertEqual(len(logs.output), 2)               # "cannot open" once, then "back"
         self.assertIn("cannot open", logs.output[0])
+
+
+@unittest.skipIf(VisionWorker is None, "OpenCV not installed")
+class RiskChoiceTest(unittest.TestCase):
+    """The camera stays on the highest risk, nearest first, and never on somebody in a boat."""
+
+    def setUp(self):
+        self.worker = VisionWorker(CAMERA, StateStore(), threading.Event(), lambda _t: None, lambda _p: None, 2.0)
+
+    @staticmethod
+    def person(bearing, height, risk, on_boat=False):
+        return PersonDetection(bearing, 0.5, height, False, (0.4, 0.45, 0.4 + height, 0.55), risk=risk, on_boat=on_boat)
+
+    def test_only_people_in_a_boat_is_nobody_to_follow(self):
+        self.assertIsNone(self.worker._follow([self.person(0.0, 0.5, SAFE, True)], 0.0))
+
+    def test_a_far_drowning_person_beats_a_near_one_on_the_bank(self):
+        near, far = self.person(-10.0, 0.5, MEDIUM), self.person(20.0, 0.1, CRITICAL)
+        self.assertIs(self.worker._follow([near, far], 0.0), far)
+
+    def test_the_followed_one_is_kept_unless_somebody_at_a_higher_risk_shows(self):
+        a, b = self.person(-10.0, 0.5, HIGH), self.person(20.0, 0.1, HIGH)
+        self.worker._followed_bearing = 20.0
+        self.assertIs(self.worker._follow([a, b], 0.0), b)
+        c = self.person(-25.0, 0.1, CRITICAL)
+        self.assertIs(self.worker._follow([a, b, c], 0.0), c)
 
 
 if __name__ == "__main__":

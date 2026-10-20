@@ -1,40 +1,48 @@
-/* Biến thiết kế. Một màu nhấn (cyan), ba màu trạng thái, một hệ bo góc. */
+/* Design tokens. One accent (cyan), status tones, one radius scale. Dark theme only: the map is always dark. */
 :root{
   --bg:#070B10;
-  --panel:#0D141C;
-  --panel-2:#121B26;
-  --panel-3:#182432;
-  --line:#1E2B3A;
-  --line-2:#2A3A4E;
+  --panel:#0C131B;
+  --panel-2:#111A24;
+  --panel-3:#17222F;
+  --line:#1C2836;
+  --line-2:#283849;
 
   --text:#E8EEF5;
-  --muted:#9FB0C3;
-  --dim:#7C8FA4;
+  --muted:#A3B3C5;
+  --dim:#7F92A7;
 
   --accent:#22D3EE;
-  --accent-ink:#04171C;          /* chữ đặt trên nền accent, tương phản > 10:1 */
+  --accent-ink:#04171C;          /* text on accent, contrast > 10:1 */
   --ok:#34D399;
   --warn:#FBBF24;
   --bad:#F87171;
-  --station:#EF4444;             /* trạm bờ luôn màu đỏ, phân biệt với phao */
+  --bad-strong:#DC2626;          /* filled red buttons and tags (white text passes AA) */
+  --station:#EF4444;             /* the shore station is always red, distinct from buoys */
 
-  /* Hệ bo góc: điều khiển 6, thẻ 8, huy hiệu tròn hoàn toàn */
-  --r:6px;
-  --r-card:8px;
+  /* Tinted fills for status tags and rows */
+  --ok-bg:rgba(52,211,153,.12);
+  --warn-bg:rgba(251,191,36,.12);
+  --bad-bg:rgba(248,113,113,.14);
+  --accent-bg:rgba(34,211,238,.12);
 
-  --sidebar:clamp(340px, 27vw, 400px);
-  --sheet-h:50dvh;               /* ngăn kéo trên điện thoại */
+  /* Radius scale: controls 8, cards 12, tags and switches fully round */
+  --r:8px;
+  --r-card:12px;
+  --r-pill:999px;
+
+  --shadow:0 8px 28px rgba(2,6,12,.55);
+  --sidebar:clamp(340px, 28vw, 400px);
+  --sheet-h:52dvh;               /* bottom sheet on phones */
   --safe-b:env(safe-area-inset-bottom, 0px);
   --safe-l:env(safe-area-inset-left, 0px);
   --safe-r:env(safe-area-inset-right, 0px);
   --safe-t:env(safe-area-inset-top, 0px);
 
-  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,Menlo,monospace;
+  --sans:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
 
-  /* Thang z-index (mọi lớp phủ tham chiếu ở đây) */
+  /* z-index scale (every overlay refers to it) */
   --z-map-ui:800;
-  --z-drawbar:850;
+  --z-search:850;
   --z-toast:900;
   --z-login:5000;
 }
@@ -42,15 +50,15 @@
 *{ box-sizing:border-box; }
 html,body{ height:100%; margin:0; }
 body{
-  background:var(--bg); color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.4;
+  background:var(--bg); color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.45;
   overflow:hidden; overscroll-behavior:none; -webkit-text-size-adjust:100%; text-size-adjust:100%;
-  -webkit-font-smoothing:antialiased;
+  -webkit-font-smoothing:antialiased; font-variant-numeric:tabular-nums;
 }
 button,input{ font:inherit; color:inherit; }
 button{ cursor:pointer; }
 [hidden]{ display:none !important; }
-.mono{ font-family:var(--mono); font-variant-numeric:tabular-nums; }
 :focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.sr-only{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
 
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{ animation:none !important; transition:none !important; }

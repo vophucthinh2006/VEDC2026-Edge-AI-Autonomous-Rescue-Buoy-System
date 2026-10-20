@@ -23,17 +23,33 @@ void Control_Init(controller_t *control) {
     memset(control, 0, sizeof(*control));
     HeadingController_Init(&control->heading);
     ConfirmButton_Init(&control->confirm, HAL_GetTick());
+    FrontMotor_Init(&control->front);
     control->operating_mode = 'S';
 }
 
-/* Motors stopped, rudders centred, PID cleared, no target shown. */
-static void stop_heading(controller_t *control) {
+static void heading_off(controller_t *control) {
     HeadingController_Reset(&control->heading);
     control->heading_cmd = 0.0f;
     control->heading_target_valid = false;
     control->heading_state = HEADING_OFF;
     control->operating_mode = 'S';
+}
+
+/* A fault (disarmed, overturned, IMU lost): every motor off at once, rudders centred, no braking. */
+static void stop_heading(controller_t *control) {
+    heading_off(control);
+    FrontMotor_Reset(&control->front);
     Actuators_Stop();
+}
+
+/* Told to stop (NAV STOP, the Pi silent, STOP from the dashboard): rear motors off, and the front
+   motor brakes the boat for a moment (App/front_motor.c) before it rests too. */
+static void stop_braking(controller_t *control, uint32_t now_ms) {
+    heading_off(control);
+    float front = FrontMotor_Command(&control->front, 0.0f, now_ms);
+    if (front == 0.0f) { Actuators_Stop(); return; }
+    actuator_cmd_t cmd = { 0.0f, 0.0f, front, 0.0f };
+    Actuators_Apply(&cmd, now_ms);
 }
 
 /* Runs the PID on the locked target and steers cmd with it, around the
@@ -107,9 +123,11 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const bno055_eu
     heading_debug.arm_block = (uint8_t)arm_block;
     if (!control->armed) { stop_heading(control); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_DISARMED); return; }
 
+    /* STOP from the dashboard wins over the Pi: the boat stays where it is, the route is kept. */
+    if (control->hold) { stop_braking(control, now_ms); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_HOLD); return; }
     bool nav_fresh = pi->mode == NAV_AUTO && pi->ttl_ms > 0U && fresh(now_ms, pi->last_nav_ms, pi->ttl_ms);
     bool hbt_fresh = pi->pi_link_ok && fresh(now_ms, pi->last_hbt_ms, HBT_TIMEOUT_MS);
-    if (!nav_fresh || !hbt_fresh) { stop_heading(control); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_PI); return; }
+    if (!nav_fresh || !hbt_fresh) { stop_braking(control, now_ms); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_PI); return; }
     /* A stale heading must never drive a motor on the water. Only BENCH_IGNORE_IMU, for the boat
        on its stand, lets it run on the held one. */
     if (!imu_fresh && !BENCH_IGNORE_IMU) { stop_heading(control); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_IMU); return; }
@@ -123,7 +141,8 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const bno055_eu
     control->operating_mode = 'A';
     /* Pi speed in m/s is deliberately mapped conservatively; tune only on water after dry tests. */
     float throttle = clamp(pi->speed_mps / 1.0f, 0.0f, 0.50f);
-    actuator_cmd_t cmd = { throttle, throttle, 0.0f, 0.0f };
+    /* The front motor pushes with the rear ones, or brakes when the Pi has just slowed the boat. */
+    actuator_cmd_t cmd = { throttle, throttle, FrontMotor_Command(&control->front, throttle, now_ms), 0.0f };
     if (throttle <= 0.0f) {
         /* Speed 0 (e.g. holding standoff from a person): no pivoting next to
            the victim, motors rest and the rudders centre. */

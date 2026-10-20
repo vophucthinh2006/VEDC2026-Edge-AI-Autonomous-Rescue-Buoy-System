@@ -35,6 +35,20 @@ size_t RouteDownlink_Frame(const route_downlink_t *route, const char *beacon_id,
     return used + 3U;
 }
 
+size_t RouteDownlink_Ack(const char *id, uint16_t eseq, uint8_t lights, bool has_position, double lat, double lon,
+                         char *buf, size_t size)
+{
+    if (size == 0U) return 0U;
+    int n = has_position
+          ? snprintf(buf, size, "ACK,%s,%u,%u,%.6f,%.6f", id, (unsigned)eseq, (unsigned)(lights & 7U), lat, lon)
+          : snprintf(buf, size, "ACK,%s,%u,%u,,", id, (unsigned)eseq, (unsigned)(lights & 7U));
+    if (n < 0 || (size_t)n + 3U >= size || (size_t)n + 3U > DOWNLINK_FRAME_MAX) { buf[0] = '\0'; return 0U; }
+    uint8_t cs = 0U;
+    for (int i = 0; i < n; i++) cs ^= (uint8_t)buf[i];
+    snprintf(buf + n, size - (size_t)n, "*%02X", cs);
+    return (size_t)n + 3U;
+}
+
 bool RouteDownlink_ParseAck(const char *value, route_ack_t *ack)
 {
     memset(ack, 0, sizeof(*ack));

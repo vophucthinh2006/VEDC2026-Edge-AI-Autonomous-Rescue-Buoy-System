@@ -35,7 +35,7 @@ extern const uint16_t actuator_servo_center[SERVO_COUNT];
 /* Servos to their trimmed centres. ESC outputs stay silent until
    Actuators_StartEscs(). */
 void Actuators_Init(void);
-/* Start the stop signal (1000 us rear, neutral front) so the ESCs arm. */
+/* Start the stop signal (1500 us on all three: rear stop, front neutral) so the ESCs arm. */
 void Actuators_StartEscs(void);
 bool Actuators_EscsStarted(void);
 

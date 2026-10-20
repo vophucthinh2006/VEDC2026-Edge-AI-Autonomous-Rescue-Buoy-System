@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  Back to the normal program of the STM32F407 boat on its stand (after motor_test.bat):
+rem  Back to the normal program of the STM32F407 boat on its stand (after scripts\stm32\test_motor.bat):
 rem    1. builds and flashes the STM32F407's own firmware (STM32F4\build.bat, flash.bat: Debug)
 rem    2. on the Pi, restarts main.py with the stand settings and shows the viewer full
 rem       screen on the HDMI screen (Rasp_Pi/tools/bench_demo.sh)

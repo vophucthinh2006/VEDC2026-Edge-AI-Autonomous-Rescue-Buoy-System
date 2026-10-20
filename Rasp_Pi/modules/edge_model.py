@@ -10,6 +10,14 @@ Two TFLite models, both from YOLO_Movenet/weights:
 A person whose box lies mostly inside a boat's box is on that boat: not somebody to rescue. The
 pose of the rest says how much of them shows: hips, knees and ankles (COCO keypoints 11 to 16)
 scored low on average means the lower body is under water, as in YOLO_Movenet/src/risk_analyzer.py.
+
+Risk of each person, as in the team's diagram (risk_level):
+  SAFE      0 green   on a boat
+  MEDIUM    1 yellow  lower body seen: not in the water (or near the camera, or no pose read)
+  HIGH      2 orange  in the water
+  CRITICAL  3 red     in the water with signs of drowning (drowning_signs): both wrists raised
+                      above the shoulders, or only the head above the water (shoulders not seen)
+Only the nearest camera.max_poses people get a pose; the others stay MEDIUM.
 """
 from __future__ import annotations
 
@@ -18,8 +26,14 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from modules.state_store import CRITICAL, HIGH, MEDIUM, RISK_NAMES, SAFE  # noqa: F401  (RISK_NAMES re-exported)
+
 PERSON, BOAT = 0, 1
 LOWER_BODY = (11, 12, 13, 14, 15, 16)
+HEAD = (0, 1, 2)                       # nose, eyes
+SHOULDERS, WRISTS = (5, 6), (9, 10)    # left, right
+# BGR, for the snapshots and the viewer: green, yellow, orange, red
+RISK_COLOURS = ((0, 200, 0), (0, 220, 255), (0, 140, 255), (0, 0, 255))
 # COCO skeleton, for drawing (YOLO_Movenet/src/config.py KEYPOINT_EDGES)
 EDGES = ((0, 1), (0, 2), (1, 3), (2, 4), (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
          (5, 11), (6, 12), (11, 12), (11, 13), (13, 15), (12, 14), (14, 16))
@@ -35,6 +49,46 @@ class EdgeDetection:
     lower_body_score: float = 0.0
     keypoints: tuple[tuple[float, float, float], ...] = ()   # x, y (0..1 of the frame), score
     near_camera: bool = False                # box on the frame's bottom edge: legs cut off by the frame, not by water
+    risk: int = MEDIUM                       # SAFE .. CRITICAL (risk_level)
+
+
+@dataclass(frozen=True)
+class RiskThresholds:
+    """camera.risk: keypoint scores (0..1) for drowning_signs."""
+    wrist_score: float = 0.3              # both wrists and both shoulders seen at least this well to judge raised arms
+    shoulder_hidden_score: float = 0.2    # both shoulders below this: under the water ...
+    head_score: float = 0.3               # ... while the nose or an eye is seen at least this well
+
+    @classmethod
+    def from_config(cls, risk: dict | None) -> "RiskThresholds":
+        risk = risk or {}
+        return cls(float(risk.get("wrist_score", cls.wrist_score)), float(risk.get("shoulder_hidden_score", cls.shoulder_hidden_score)),
+                   float(risk.get("head_score", cls.head_score)))
+
+
+def drowning_signs(keypoints: tuple[tuple[float, float, float], ...], limits: RiskThresholds = RiskThresholds()) -> bool:
+    """keypoints: 17 COCO points, x, y (y grows downward), score. Both wrists above their shoulders
+    (the arms raised, waving or climbing the water), or only the head above the water: the
+    shoulders not seen while the nose or an eye is."""
+    if len(keypoints) < 17:
+        return False
+    points = [keypoints[i] for i in SHOULDERS + WRISTS]
+    if all(p[2] >= limits.wrist_score for p in points):
+        (_, left_shoulder, _), (_, right_shoulder, _), (_, left_wrist, _), (_, right_wrist, _) = points
+        if left_wrist < left_shoulder and right_wrist < right_shoulder:
+            return True
+    shoulders_hidden = all(keypoints[i][2] < limits.shoulder_hidden_score for i in SHOULDERS)
+    return shoulders_hidden and max(keypoints[i][2] for i in HEAD) >= limits.head_score
+
+
+def risk_level(on_boat: bool, in_water: bool | None, keypoints: tuple = (), limits: RiskThresholds = RiskThresholds()) -> int:
+    """The team's flow: on a boat SAFE; lower body seen (in_water False, which near_camera forces)
+    or no pose read (in_water None) MEDIUM; in the water CRITICAL with drowning_signs, else HIGH."""
+    if on_boat:
+        return SAFE
+    if not in_water:
+        return MEDIUM
+    return CRITICAL if drowning_signs(keypoints, limits) else HIGH
 
 
 def letterbox(image: np.ndarray, size: int) -> tuple[np.ndarray, float, float, float]:
@@ -109,6 +163,7 @@ class EdgeModel:
         # edge (fraction of the frame height; 15 px of 480 there) is somebody close to the camera.
         self.near_camera = float(camera.get("near_camera_margin", 0.03))
         self.max_poses = int(camera.get("max_poses", 3))
+        self.risk = RiskThresholds.from_config(camera.get("risk"))
         self._yolo = interpreter_class(model_path=camera["model_path"])
         self._yolo.allocate_tensors()
         self._yolo_in = self._yolo.get_input_details()[0]
@@ -169,7 +224,8 @@ class EdgeModel:
         return lower < self.water, lower, keypoints
 
     def detect(self, frame: np.ndarray) -> tuple[list[EdgeDetection], list[EdgeDetection]]:
-        """People (on a boat or not, with a pose for the nearest max_poses of the others) and boats."""
+        """People (on a boat or not, with a pose for the nearest max_poses of the others), each with
+        a risk level, and boats."""
         found = self._boxes(frame)
         boats = [d for d in found if d.kind == BOAT]
         people = sorted((d for d in found if d.kind == PERSON), key=lambda d: d.box[0] - d.box[2])   # tallest first
@@ -177,14 +233,16 @@ class EdgeModel:
         poses = 0
         for person in people:
             if any(overlap_fraction(person.box, boat.box) >= self.on_boat for boat in boats):
-                out.append(EdgeDetection(person.box, person.confidence, PERSON, on_boat=True))
+                out.append(EdgeDetection(person.box, person.confidence, PERSON, on_boat=True, risk=SAFE))
                 continue
             if self._pose is not None and poses < self.max_poses:
                 poses += 1
                 in_water, lower, keypoints = self._read_pose(frame, person.box)
                 # The frame, not water, hides the legs of somebody whose box runs off its bottom edge.
                 near = person.box[2] >= 1.0 - self.near_camera
-                out.append(EdgeDetection(person.box, person.confidence, PERSON, False, False if near else in_water, lower, keypoints, near))
+                in_water = False if near else in_water
+                out.append(EdgeDetection(person.box, person.confidence, PERSON, False, in_water, lower, keypoints, near,
+                                         risk_level(False, in_water, keypoints, self.risk)))
             else:
-                out.append(person)
+                out.append(EdgeDetection(person.box, person.confidence, PERSON, risk=MEDIUM))   # no pose: MEDIUM
         return out, boats

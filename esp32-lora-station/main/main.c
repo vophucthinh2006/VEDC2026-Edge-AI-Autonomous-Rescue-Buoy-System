@@ -54,7 +54,7 @@ static const char *TAG = "tram_bo";
 #define CLOUD_HTTP_TIMEOUT_MS  8000
 #define CLOUD_MAX_TRIES        3
 
-#define JSON_MAX 384
+#define JSON_MAX 512
 
 // LỘ TRÌNH GỬI XUỐNG PHAO (docs/lora-route-downlink.md)
 #define DOWNLINK_POLL_MS       5000   // chu kỳ hỏi Worker bản admin đã bấm "Gửi tới phao"
@@ -69,6 +69,18 @@ static EventGroupHandle_t wifi_event_group;
 static QueueHandle_t cloud_queue;
 static route_downlink_t downlink;          // bản đang gửi, rev = 0: không có gì để gửi
 static SemaphoreHandle_t downlink_lock;
+
+// LỆNH ĐÈN admin bật trên dashboard, theo từng phao (GET /api/downlink, trường "lights").
+// Phao bật relay đúng theo giá trị này mỗi lần nhận ACK; phao chưa có lệnh: tắt (0).
+#define MAX_LIGHT_BUOYS 8
+// mask = trường lệnh trong ACK: bit 0 đèn 1, bit 1 đèn 2, bit 2 DỪNG (F407 khóa motor tới khi admin cho chạy tiếp)
+typedef struct { char id[32]; uint8_t mask; } light_cmd_t;
+static light_cmd_t lights[MAX_LIGHT_BUOYS];   // dưới downlink_lock
+static int light_count;
+
+// VỊ TRÍ TRẠM cho ACK: phao mất liên lạc quá 60 s thì tự chạy về đây.
+static gps_fix_t tram_fix;
+static portMUX_TYPE tram_fix_mux = portMUX_INITIALIZER_UNLOCKED;
 #define WIFI_CONNECTED_BIT BIT0
 
 // ---------------------------------------------------------------- WiFi Station
@@ -147,9 +159,61 @@ static bool json_append(char *dst, size_t capacity, size_t *used, const char *fo
     return true;
 }
 
+// Hàng đợi đầy (mất mạng lâu): bỏ bản tin CŨ NHẤT để giữ dữ liệu mới nhất
+static void xep_hang_cloud(const cloud_msg_t *m) {
+    if (xQueueSend(cloud_queue, m, 0) != pdTRUE) {
+        cloud_msg_t bo;
+        xQueueReceive(cloud_queue, &bo, 0);
+        xQueueSend(cloud_queue, m, 0);
+        ESP_LOGW(TAG, "Hang doi cloud day, da bo ban tin cu nhat");
+    }
+}
+
+// ------------------------------------------------------------- Sự kiện của phao (ev=...)
+// Người phát hiện (V), phao lật (T), nút xác nhận lấy đồ (C). Phao phát lại tới khi trạm ACK, nên
+// Worker có thể nhận trùng (id, seq): Worker bỏ bản trùng.
+static void xu_ly_su_kien(const lora_event_t *ev, const char *raw, int rssi, float snr) {
+    char id_sach[32], raw_sach[100];
+    lam_sach_cho_json(id_sach, ev->id, sizeof(id_sach));
+    lam_sach_cho_json(raw_sach, raw, sizeof(raw_sach));
+    cloud_msg_t m;
+    m.station = false;
+    size_t used = 0U;
+    char lat[24] = "null", lon[24] = "null";
+    if (ev->has_position) {
+        snprintf(lat, sizeof(lat), "%.6f", ev->lat);
+        snprintf(lon, sizeof(lon), "%.6f", ev->lon);
+    }
+    bool ok = json_append(m.json, sizeof(m.json), &used,
+                          "{\"id\":\"%s\",\"rssi\":%d,\"snr\":%.1f,\"raw\":\"%s\",\"event\":{\"seq\":%u,\"type\":\"%c\",\"lat\":%s,\"lon\":%s",
+                          id_sach, rssi, snr, raw_sach, ev->seq, ev->type, lat, lon);
+    if (ev->type == 'V') {
+        ok = ok && json_append(m.json, sizeof(m.json), &used, ",\"risk\":%u,\"conf\":%.2f,\"count\":%u",
+                               ev->risk, ev->confidence, ev->count);
+        ESP_LOGW(TAG, "[SU KIEN] %s phat hien nguoi, muc %u, tin cay %.2f, tai %s %s", id_sach, ev->risk, ev->confidence, lat, lon);
+    } else if (ev->type == 'T') {
+        ok = ok && json_append(m.json, sizeof(m.json), &used, ",\"roll\":%.1f,\"pitch\":%.1f", ev->roll, ev->pitch);
+        ESP_LOGE(TAG, "[SU KIEN] %s BI LAT: roll %.1f pitch %.1f, tai %s %s", id_sach, ev->roll, ev->pitch, lat, lon);
+    } else {
+        ok = ok && json_append(m.json, sizeof(m.json), &used, ",\"presses\":%u", ev->presses);
+        ESP_LOGW(TAG, "[SU KIEN] %s: nguoi da lay do tiep te (lan nhan %u)", id_sach, ev->presses);
+    }
+    ok = ok && json_append(m.json, sizeof(m.json), &used, "}}");
+    if (!ok) {
+        ESP_LOGE(TAG, "JSON su kien vuot qua %u byte", (unsigned int)sizeof(m.json));
+        return;
+    }
+    xep_hang_cloud(&m);
+}
+
 // ------------------------------------------------------------- Xử lý gói LoRa nhận được
 // Dựng JSON đúng định dạng dashboard/Worker mong đợi rồi xếp vào hàng đợi gửi cloud.
 static void xu_ly_goi_lora(const char *raw, int rssi, float snr) {
+    lora_event_t ev;
+    if (lora_event_parse(raw, &ev)) {
+        xu_ly_su_kien(&ev, raw, rssi, snr);
+        return;
+    }
     lora_payload_t payload;
     if (!lora_payload_parse(raw, &payload)) {
         ESP_LOGW(TAG, "Bo goi LoRa khong hop le");
@@ -200,38 +264,73 @@ static void xu_ly_goi_lora(const char *raw, int rssi, float snr) {
         json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"victims\":%u", payload.victims);
         if (payload.victims > 0U) ESP_LOGW(TAG, "[NHAN] id=%s da bao phat hien nguoi: %u", co_id ? id_sach : "(khong co)", payload.victims);
     }
+    // Hướng đi thật (GPS), tốc độ, pin, đèn: phao bỏ những trường không vừa khung hoặc chưa biết.
+    if (payload.has_course) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"course\":%.1f", payload.course);
+    if (payload.has_speed) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"speed\":%.2f", payload.speed);
+    if (payload.has_battery) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"battery_pct\":%u", payload.battery_pct);
+    if (payload.has_lights) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"lights\":%u", payload.lights);
+    if (payload.has_hold) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"hold\":%u", payload.hold);
     json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, "}");
     if (!json_ok) {
         ESP_LOGE(TAG, "JSON telemetry vuot qua %u byte", (unsigned int)sizeof(m.json));
         return;
     }
-
-    // Hàng đợi đầy (mất mạng lâu): bỏ bản tin CŨ NHẤT để giữ dữ liệu mới nhất
-    if (xQueueSend(cloud_queue, &m, 0) != pdTRUE) {
-        cloud_msg_t bo;
-        xQueueReceive(cloud_queue, &bo, 0);
-        xQueueSend(cloud_queue, &m, 0);
-        ESP_LOGW(TAG, "Hang doi cloud day, da bo ban tin cu nhat");
-    }
+    xep_hang_cloud(&m);
 }
 
-// ------------------------------------------------- Trả lời beacon bằng một khung lộ trình RTE
-// Phao chỉ nghe 1.5 s sau mỗi beacon, nên trạm chỉ phát ngay sau khi nghe phao đích.
-static void tra_loi_lo_trinh(const char *raw) {
-    lora_payload_t payload;
-    if (!lora_payload_parse(raw, &payload) || payload.id[0] == '\0') return;
-    route_ack_t ack = { .has = payload.has_route, .rev = payload.route_rev, .have = payload.route_have, .pi = payload.route_pi };
+// Lệnh đèn của phao id (gọi khi đang giữ downlink_lock); chưa có lệnh: tắt.
+static uint8_t lenh_den(const char *id) {
+    for (int i = 0; i < light_count; i++)
+        if (strcmp(lights[i].id, id) == 0) return lights[i].mask;
+    return 0U;
+}
+
+// ------------------------------------------------- Trả lời MỌI khung của phao
+// Phao nghe 1.5 s sau mỗi khung, nên trạm phát ngay sau khi nghe phao:
+// - khung RTE khi phao còn thiếu lộ trình, khung đó là beacon và đèn của phao đã đúng lệnh;
+// - ngược lại ACK: số sự kiện được nhận (0 với beacon), lệnh đèn, vị trí trạm (đường về của phao).
+// Phao coi mọi khung của trạm là còn liên lạc; im quá 60 s thì phao tự quay về trạm.
+static void tra_loi_phao(const char *raw) {
+    lora_event_t ev;
+    lora_payload_t payload = { 0 };
+    bool la_su_kien = lora_event_parse(raw, &ev);
+    const char *id;
+    if (la_su_kien) {
+        id = ev.id;
+    } else {
+        if (!lora_payload_parse(raw, &payload) || payload.id[0] == '\0') return;
+        id = payload.id;
+    }
     char frame[DOWNLINK_FRAME_MAX + 1];
+    size_t len = 0;
     xSemaphoreTake(downlink_lock, portMAX_DELAY);
-    size_t len = RouteDownlink_Frame(&downlink, payload.id, &ack, frame, sizeof(frame));
+    uint8_t den = lenh_den(id);
     uint16_t count = downlink.count;
+    route_ack_t ack = { 0 };
+    // RTE chỉ khi đèn và trạng thái dừng của phao đã đúng lệnh: lệnh dừng không phải chờ hết lộ trình
+    bool den_dung = !payload.has_lights || payload.lights == (den & 3U);
+    bool dung_dung = !payload.has_hold || payload.hold == ((den >> 2) & 1U);
+    if (!la_su_kien && den_dung && dung_dung) {
+        ack = (route_ack_t){ .has = payload.has_route, .rev = payload.route_rev, .have = payload.route_have, .pi = payload.route_pi };
+        len = RouteDownlink_Frame(&downlink, id, &ack, frame, sizeof(frame));
+    }
     xSemaphoreGive(downlink_lock);
-    if (len == 0) return;
+    bool la_rte = len > 0;
+    if (!la_rte) {
+        portENTER_CRITICAL(&tram_fix_mux);
+        gps_fix_t tram = tram_fix;
+        portEXIT_CRITICAL(&tram_fix_mux);
+        len = RouteDownlink_Ack(id, la_su_kien ? ev.seq : 0U, den, tram.fix_valid, tram.lat, tram.lon, frame, sizeof(frame));
+        if (len == 0) return;
+    }
     vTaskDelay(pdMS_TO_TICKS(LORA_TURNAROUND_MS));
     bool ok = sx127x_send_packet(&lora_dev, (const uint8_t *)frame, (uint8_t)len, LORA_TX_TIMEOUT_MS);
     sx127x_start_receive(&lora_dev);
-    ESP_LOGI(TAG, "[LO TRINH] %s -> %s (phao co %u/%u diem): %s", ok ? "da phat" : "LOI phat", payload.id,
-             ack.has ? ack.have : 0U, count, frame);
+    if (la_rte)
+        ESP_LOGI(TAG, "[LO TRINH] %s -> %s (phao co %u/%u diem): %s", ok ? "da phat" : "LOI phat", id,
+                 ack.has ? ack.have : 0U, count, frame);
+    else
+        ESP_LOGI(TAG, "[ACK] %s -> %s: %s", ok ? "da phat" : "LOI phat", id, frame);
 }
 
 // ---------------------------------------------------------------- Task nhận LoRa
@@ -246,7 +345,7 @@ static void task_nhan_lora(void *arg) {
         if (len > 0) {
             buf[len] = '\0';
             xu_ly_goi_lora((const char *)buf, rssi, snr);
-            tra_loi_lo_trinh((const char *)buf);
+            tra_loi_phao((const char *)buf);
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -268,12 +367,37 @@ static void tao_url_downlink(char *out, size_t n) {
     else   snprintf(out, n, "%s", u);
 }
 
-// {"rev":7,"id":"PHAO-01","loop":false,"pts":[[lat,lon],...]} -> downlink. False nếu sai dạng.
-static bool doc_downlink(const char *body, route_downlink_t *out) {
+// {"rev":7,"id":"PHAO-01","loop":false,"pts":[[lat,lon],...],"lights":{"PHAO-01":1},"hold":{"PHAO-01":1}}
+// -> downlink và lệnh của từng phao (đèn ở bit 0-1, dừng ở bit 2). False nếu lộ trình sai dạng; lệnh sai
+// dạng thì bỏ qua từng mục.
+static bool doc_downlink(const char *body, route_downlink_t *out, light_cmd_t *den, int *so_den) {
     cJSON *root = cJSON_Parse(body);
     if (root == NULL) return false;
     bool ok = false;
     memset(out, 0, sizeof(*out));
+    *so_den = 0;
+    const cJSON *lights_json = cJSON_GetObjectItem(root, "lights");
+    const cJSON *muc;
+    cJSON_ArrayForEach(muc, lights_json) {
+        if (*so_den >= MAX_LIGHT_BUOYS || muc->string == NULL || strlen(muc->string) >= sizeof(den->id)) continue;
+        if (!cJSON_IsNumber(muc) || muc->valueint < 0 || muc->valueint > 3) continue;
+        strcpy(den[*so_den].id, muc->string);
+        den[*so_den].mask = (uint8_t)muc->valueint;
+        (*so_den)++;
+    }
+    cJSON_ArrayForEach(muc, cJSON_GetObjectItem(root, "hold")) {
+        if (muc->string == NULL || strlen(muc->string) >= sizeof(den->id)) continue;
+        if (!cJSON_IsNumber(muc) || (muc->valueint != 0 && muc->valueint != 1)) continue;
+        int i = 0;
+        while (i < *so_den && strcmp(den[i].id, muc->string) != 0) i++;
+        if (i == *so_den) {
+            if (*so_den >= MAX_LIGHT_BUOYS) continue;
+            strcpy(den[i].id, muc->string);
+            den[i].mask = 0U;
+            (*so_den)++;
+        }
+        if (muc->valueint) den[i].mask |= 4U; else den[i].mask &= 3U;
+    }
     const cJSON *rev = cJSON_GetObjectItem(root, "rev");
     if (cJSON_IsNumber(rev) && rev->valueint == 0) {
         ok = true;                                    // chưa gửi gì
@@ -305,6 +429,7 @@ static bool doc_downlink(const char *body, route_downlink_t *out) {
 static void task_lay_lo_trinh(void *arg) {
     static char url[160];
     static route_downlink_t moi;                      // 5 KB: không để trên stack của task
+    static light_cmd_t den_moi[MAX_LIGHT_BUOYS];
     tao_url_downlink(url, sizeof(url));
     char *body = malloc(DOWNLINK_BODY_MAX);
     if (body == NULL) { ESP_LOGE(TAG, "Khong du bo nho cho lo trinh"); vTaskDelete(NULL); return; }
@@ -328,10 +453,19 @@ static void task_lay_lo_trinh(void *arg) {
         esp_http_client_cleanup(client);
         if (len >= 0) {
             body[len] = '\0';
-            if (doc_downlink(body, &moi)) {
+            int so_den = 0;
+            if (doc_downlink(body, &moi, den_moi, &so_den)) {
                 xSemaphoreTake(downlink_lock, portMAX_DELAY);
                 bool doi = moi.rev != downlink.rev;
                 downlink = moi;
+                for (int i = 0; i < so_den; i++) {
+                    if (lenh_den(den_moi[i].id) != den_moi[i].mask)
+                        ESP_LOGW(TAG, "[LENH] %s: %u (den 1 %s, den 2 %s, %s)", den_moi[i].id, den_moi[i].mask,
+                                 den_moi[i].mask & 1U ? "bat" : "tat", den_moi[i].mask & 2U ? "bat" : "tat",
+                                 den_moi[i].mask & 4U ? "DUNG" : "duoc chay");
+                }
+                memcpy(lights, den_moi, sizeof(den_moi));
+                light_count = so_den;
                 xSemaphoreGive(downlink_lock);
                 if (doi && moi.rev) ESP_LOGW(TAG, "[LO TRINH] ban gui #%u: %u diem cho %s%s", moi.rev, moi.count, moi.id, moi.loop ? ", di vong" : "");
             } else {
@@ -426,6 +560,9 @@ static void task_gps_tram(void *arg) {
     while (true) {
         int len = uart_read_bytes(GPS_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(100));
         for (int i = 0; i < len; i++) nmea_feed_char((char)buf[i], &fix);
+        portENTER_CRITICAL(&tram_fix_mux);
+        tram_fix = fix;   // ACK gửi vị trí này cho phao làm đường về
+        portEXIT_CRITICAL(&tram_fix_mux);
 
         bool doi_trang_thai = (fix.fix_valid != da_bao_fix);
         TickType_t now = xTaskGetTickCount();
@@ -453,10 +590,17 @@ void app_main(void) {
 
     khoi_dong_wifi_sta();   // không chặn: WiFi kết nối ở nền
 
-    if (!sx127x_init(&lora_dev, SPI2_HOST, LORA_SCK, LORA_MISO, LORA_MOSI,
-                      LORA_CS, LORA_RST, LORA_DIO0, LORA_FREQUENCY_HZ)) {
-        ESP_LOGE(TAG, "Khong khoi tao duoc LoRa! Dung chuong trinh.");
-        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+    // GPS trạm và cloud chạy dù LoRa chưa lên: vị trí trạm vẫn lên dashboard trong lúc sửa dây.
+    xTaskCreate(task_gps_tram, "gps_tram", 3072, NULL, 3, NULL);
+    xTaskCreate(task_gui_cloud, "gui_cloud", 8192, NULL, 4, NULL);
+    xTaskCreate(task_lay_lo_trinh, "lay_lo_trinh", 6144, NULL, 3, NULL);
+
+    // Không tìm thấy module LoRa thì thử lại mỗi 3 s thay vì dừng hẳn: module cấp nguồn muộn,
+    // hay dây cắm lại khi trạm đang chạy, vẫn được nhận.
+    for (int lan = 1; !sx127x_init(&lora_dev, SPI2_HOST, LORA_SCK, LORA_MISO, LORA_MOSI,
+                                   LORA_CS, LORA_RST, LORA_DIO0, LORA_FREQUENCY_HZ); lan++) {
+        ESP_LOGE(TAG, "Khong khoi tao duoc LoRa (lan %d), thu lai sau 3 s", lan);
+        vTaskDelay(pdMS_TO_TICKS(3000));
     }
     sx127x_set_sync_word(&lora_dev, LORA_SYNC_WORD);
     sx127x_set_spreading_factor(&lora_dev, LORA_SPREADING_FACTOR);
@@ -464,10 +608,7 @@ void app_main(void) {
     sx127x_set_coding_rate(&lora_dev, LORA_CODING_RATE);
     sx127x_set_crc(&lora_dev, true);   // khung lộ trình gửi xuống phao có CRC như beacon của phao
 
-    xTaskCreate(task_gps_tram, "gps_tram", 3072, NULL, 3, NULL);
-    xTaskCreate(task_gui_cloud, "gui_cloud", 8192, NULL, 4, NULL);
     xTaskCreate(task_nhan_lora, "nhan_lora", 4096, NULL, 5, NULL);
-    xTaskCreate(task_lay_lo_trinh, "lay_lo_trinh", 6144, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "San sang. Dang cho tin hieu LoRa...");
 }

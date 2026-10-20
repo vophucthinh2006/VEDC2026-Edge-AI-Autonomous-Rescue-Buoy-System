@@ -28,6 +28,7 @@ BLOCK = {  # drive_block_t in App/control.h
     1: "not armed",
     2: "the Pi is not driving: no route from the dashboard, NAV STOP, or no NAV/HBT",
     3: "IMU stale (Euler or gyro read failing)",
+    4: "STOPPED from the dashboard: motors off until \"Chạy tiếp\"",
 }
 ARM_BLOCK = {  # arm_block_t in App/control.h
     0: "-",

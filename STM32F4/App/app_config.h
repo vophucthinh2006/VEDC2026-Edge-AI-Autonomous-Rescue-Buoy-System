@@ -40,7 +40,11 @@
 /* Heading reference. East magnetic declination and a clockwise sensor
    mounting correction are positive. Calibrate both values on the finished
    boat before a water run. */
-#define IMU_MOUNTING_OFFSET_DEG    0.0f
+/* The bow is the BNO055's -x axis. Measured 2026-10-20 with the bow pointed north by a phone
+   compass, indoors: the sensor read 191.2 deg (180 for -x, the rest the indoor field and the phone).
+   Measure again on the water, away from steel: point the bow north, read Tools/heading_monitor.py,
+   set this to 360 - yaw. */
+#define IMU_MOUNTING_OFFSET_DEG    168.8f
 #define MAGNETIC_DECLINATION_DEG   0.0f
 /* Gyro Z to a clockwise turn rate. BNO055 flat, Z up: gyro Z is positive
    anticlockwise, hence -1. Check on the desk: turn the sensor clockwise
@@ -66,12 +70,16 @@
 #define HEADING_DIFF_GAIN          0.30f
 #define HEADING_DIFF_DIR           (+1)
 
-/* Rear ESCs: unbranded 30 A, one direction, PWM 50 Hz (TIM2_CH1 PA5, TIM2_CH4 PA3). Their
-   throttle range is fixed (no calibration): stepped on the bench (2026-10-18) they stay still up to
-   1490 us and turn from 1500 us; 1500..2000 us is the range settled on after the motor phase swap.
-   Any rear demand above zero is spread over START..REAR_MAX. */
-#define ESC_STOP_US                1000U
-#define ESC_REAR_START_US          1500U
+/* Rear ESCs: unbranded 30 A, one direction, PWM 50 Hz (TIM2_CH1 PA5, TIM2_CH4 PA3). FIXED, set on
+   the bench 2026-10-20, do not change without trying them on the stand again:
+     stop and arm  1500 us   the front ESC's neutral. Never 1000 us: armed from 1000 us at power-up
+                             the rear right ESC never took a command.
+     throttle      1550..2000 us   any rear demand above zero is spread over START..REAR_MAX.
+   ESC_REAR_STOP_US is only the rear stop: the lowest pulse of all three ESCs is ESC_MIN_US (the
+   front one pushes forward below 1500 us), so never clamp the front with the rear stop. */
+#define ESC_REAR_STOP_US           1500U
+#define ESC_MIN_US                 1000U   /* lowest pulse sent to any ESC: front full forward */
+#define ESC_REAR_START_US          1550U
 #define ESC_REAR_MAX_US            2000U
 #define ESC_MAX_US                 2000U
 /* Front ESC (ZTW Shark G2 50A) is bidirectional: 1500 us is stop, 1000 and 2000 us
@@ -107,9 +115,20 @@
 #define ESC_RAMP_PER_S             2.0f
 #define ESC_FRONT_REVERSE_DELAY_MS 200U
 
+/* Front motor in AUTO (App/front_motor.c): it pushes with the rear ones (front = throttle * GAIN)
+   and brakes when the Pi slows the boat or stops it: backwards at BRAKE_LEVEL for
+   MS_PER_THROTTLE per unit of throttle shed (0.3 -> 600 ms), at most BRAKE_MAX_MS. Tune on water:
+   the boat should stop within its own length without moving backwards. GAIN 0 and LEVEL 0: the
+   front motor stays off as before. */
+#define FRONT_THRUST_GAIN          1.0f
+#define FRONT_BRAKE_LEVEL          0.40f
+#define FRONT_BRAKE_MIN_DROP       0.05f
+#define FRONT_BRAKE_MS_PER_THROTTLE 2000U
+#define FRONT_BRAKE_MAX_MS         1000U
+
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
    instead of the control loop. ESC output is capped and time-limited. The first three
-   can be set from the build: the HwTest preset (motor_test.bat) does. */
+   can be set from the build: the HwTest preset (scripts/stm32/test_motor.bat) does. */
 #ifndef HW_TEST_ENABLED
 #define HW_TEST_ENABLED            0
 #endif
@@ -120,7 +139,7 @@
 #define HW_TEST_ESC_FRONT_SPAN_US  150U    /* front ESC: neutral +/- this, about 30 % each way; water-cooled, keep runs short */
 #endif
 #define HW_TEST_ESC_MAX_RUN_MS     60000U  /* motors on a stand; a lost debugger still stops them */
-#define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (1000 us rear, neutral front) so the ESCs arm */
+#define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (1500 us on all three) so the ESCs arm */
 #define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */
 
 /* Camera pan servo (SERVO_CAMERA, TIM3_CH1) follows the CAM packet from the Pi.
@@ -150,3 +169,23 @@
 #define LORA_TX_POWER_DBM          17U         /* PA_BOOST; 17 dBm is the most that needs no PA_DAC */
 #define LORA_BEACON_PERIOD_MS      5000U
 #define LORA_GPS_STALE_MS          3000U       /* GPS silent for this long: send NO_FIX */
+/* Events (App/event_queue.h): an event frame waiting for the station's ACK goes out again this soon.
+   The station silent for SHORE_LINK_TIMEOUT_MS (60 s, App/shore_link.h): the Pi takes the boat home. */
+#define LORA_EVENT_RETRY_MS        1500U
+/* Overturned for this long after the first tilt event: report it once more, with the boat's GPS then. */
+#define TILT_REPEAT_MS             30000U
+
+/* Battery: INA226 on I2C1 next to the BNO055 (0x44 on this boat; any of 0x40..0x4F is found), IN+/IN- in series with the pack.
+   Many INA226 modules carry a 0.1 ohm shunt (R100), which reads up to 0.8 A only: measure the shunt on
+   yours and set it here before trusting the current. The charge needs the voltage only. */
+#define INA226_ENABLED             1
+#define INA226_ADDRESS             0x44U   /* this boat's module: A0 or A1 strapped (found by the scan, 2026-10-20) */
+#define INA226_SHUNT_OHM           0.1f
+#define INA226_MAX_A               0.8f
+#define BATTERY_CELLS              3U          /* LiPo cells in series: 3S = 12.6 V full */
+#define BATTERY_READ_PERIOD_MS     500U
+
+/* Lights on RELAY1 PC3 and RELAY2 PC2, switched only from the dashboard (App/lights.h).
+   1: the relay module closes on a high input. If the lights come on at boot, the module closes on
+   low: set 0. */
+#define RELAY_ON_LEVEL             1

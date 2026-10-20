@@ -58,11 +58,13 @@ export async function readSession(request, env) {
     if (!ok) return null;
     const s = JSON.parse(dec.decode(b64uDecode(payload)));
     if (!s || typeof s.exp !== "number" || s.exp < Date.now() / 1000) return null;
+    // sid: stable per cookie, used only for per-session rate limits (never sent to the browser)
+    const sid = sig.slice(0, 22);
     if (s.role === "admin") {
       if (!s.email || !adminEmails(env).includes(String(s.email).toLowerCase())) return null;
-      return { role: "admin", email: s.email };
+      return { role: "admin", email: s.email, sid };
     }
-    if (s.role === "guest") return { role: "guest", email: null };
+    if (s.role === "guest") return { role: "guest", email: null, sid };
   } catch { /* cookie hỏng */ }
   return null;
 }

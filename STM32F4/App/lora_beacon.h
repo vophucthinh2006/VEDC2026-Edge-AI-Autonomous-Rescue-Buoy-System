@@ -1,9 +1,10 @@
 #pragma once
 
-/* Sends GPS and attitude to the shore station every LORA_BEACON_PERIOD_MS, then listens for
- * LORA_RX_WINDOW_MS for a route frame the station answers with (App/route_link.c,
- * docs/lora-route-downlink.md). Non-blocking: each loop pass does a few short SPI transfers, so the
- * control loop is unaffected. */
+/* Sends GPS and attitude to the shore station every LORA_BEACON_PERIOD_MS, and events (a person,
+ * overturned, the confirm button) at once in frames of their own (App/event_queue.h). After each
+ * frame it listens for the station's answer: a route frame (App/route_link.c) or an ACK with the
+ * lights and the station's position (App/shore_link.c); docs/lora-route-downlink.md.
+ * Non-blocking: each loop pass does a few short SPI transfers, so the control loop is unaffected. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -33,6 +34,18 @@ typedef struct {
     uint32_t last_tx_ms;
     uint16_t last_len;
     uint16_t gps_valid;        /* whether the last frame carried a position */
+    /* Shore link and events; appended so the fields above keep their offsets. */
+    uint32_t ack_count;        /* ACK frames taken from the station */
+    uint32_t event_tx;         /* event frames sent */
+    uint32_t events_dropped;   /* events never acknowledged */
+    uint32_t last_heard_ms;    /* last frame of the station */
+    int32_t home_lat_e6;       /* the station's position, the way home */
+    int32_t home_lon_e6;
+    uint8_t events_pending;
+    uint8_t shore_ok;          /* 0: the station has been silent for SHORE_LINK_TIMEOUT_MS */
+    uint8_t lights;            /* relays driven, bit 0 PC3, bit 1 PC2 */
+    uint8_t home_valid;
+    uint8_t hold;              /* 1: STOP from the dashboard, motors off */
 } lora_debug_t;
 
 extern volatile lora_debug_t lora_debug;
@@ -43,6 +56,21 @@ void LoraBeacon_Tick(uint32_t now_ms);
 /* Number of people the Pi has reported. Every frame carries it, so one lost
  * packet does not lose the alert; a new count is sent without waiting for the period. */
 void LoraBeacon_SetVictims(uint8_t count, uint32_t now_ms);
+
+/* Events for the shore, sent at once and again until acknowledged. A person at the position the
+ * Pi reckoned (has_pos false: none), risk 0 safe .. 3 critical; overturned and the confirm button
+ * with the boat's own GPS. */
+void LoraBeacon_ReportVictim(bool has_pos, int32_t lat_e6, int32_t lon_e6, uint8_t risk, uint8_t confidence_pct, uint32_t now_ms);
+void LoraBeacon_ReportTilt(float roll_deg, float pitch_deg, uint32_t now_ms);
+void LoraBeacon_ReportConfirm(uint16_t presses, uint32_t now_ms);
+
+/* The shore station: false once it has been silent for SHORE_LINK_TIMEOUT_MS. The payload of the
+ * $LNK line for the Pi (App/shore_link.h). */
+bool LoraBeacon_ShoreOk(uint32_t now_ms);
+/* STOP from the dashboard (bit 2 of the station's ACK): the motors stay off until released. Off at
+ * boot until the first ACK says otherwise. */
+bool LoraBeacon_Hold(void);
+size_t LoraBeacon_LinkLine(uint16_t seq, uint32_t now_ms, char *buf, size_t size);
 
 /* Route from the dashboard, for the Pi: the revision the Pi's $HBT reports, and the next $RTE line
  * payload to send (false: nothing now). Call NextPiRouteLine once per telemetry period. */

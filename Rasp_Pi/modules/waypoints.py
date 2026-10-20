@@ -15,6 +15,7 @@ after the home row become the route. tools/set_waypoints.py writes the YAML form
 """
 from __future__ import annotations
 
+from math import cos, hypot, radians
 from pathlib import Path
 
 import yaml
@@ -58,6 +59,42 @@ class Route:
             if (lat1 > lat) != (lat2 > lat) and lon < lon1 + (lat - lat1) * (lon2 - lon1) / (lat2 - lat1):
                 inside = not inside
         return inside
+
+    def clamp_inside_fence(self, lat: float, lon: float, margin_m: float) -> tuple[float, float]:
+        """The point itself when it is inside the fence (or there is no fence); else the nearest
+        point on the fence, moved margin_m inside it: square off the edge, or toward the fence's
+        middle where that does not land inside (a corner, a narrow end). The boat's way home when
+        the shore station stands outside the pool."""
+        if self.inside_fence(lat, lon):
+            return lat, lon
+        # Flat metres north and east of the point, which is small enough a fence for it.
+        k_north, k_east = 111_320.0, 111_320.0 * cos(radians(lat))
+
+        def to_latlon(north: float, east: float) -> tuple[float, float]:
+            return lat + north / k_north, lon + east / k_east
+
+        corners = [((c_lat - lat) * k_north, (c_lon - lon) * k_east) for c_lat, c_lon in self.geofence]
+        best: tuple[float, tuple[float, float], tuple[float, float]] | None = None   # distance, point, edge direction
+        for (n1, e1), (n2, e2) in zip(corners, corners[1:] + corners[:1]):
+            dn, de = n2 - n1, e2 - e1
+            length_sq = dn * dn + de * de
+            t = 0.0 if length_sq == 0 else max(0.0, min(1.0, -(n1 * dn + e1 * de) / length_sq))
+            point = (n1 + t * dn, e1 + t * de)
+            if best is None or hypot(*point) < best[0]:
+                best = (hypot(*point), point, (dn, de))
+        assert best is not None
+        _, (pn, pe), (dn, de) = best
+        length = hypot(dn, de) or 1.0
+        normal = (-de / length, dn / length)
+        if not self.inside_fence(*to_latlon(pn + 0.01 * normal[0], pe + 0.01 * normal[1])):
+            normal = (-normal[0], -normal[1])
+        middle = (sum(n for n, _ in corners) / len(corners), sum(e for _, e in corners) / len(corners))
+        to_middle = hypot(middle[0] - pn, middle[1] - pe) or 1.0
+        for un, ue in (normal, ((middle[0] - pn) / to_middle, (middle[1] - pe) / to_middle)):
+            candidate = to_latlon(pn + margin_m * un, pe + margin_m * ue)
+            if self.inside_fence(*candidate):
+                return candidate
+        return to_latlon(*middle) if self.inside_fence(*to_latlon(*middle)) else to_latlon(pn, pe)
 
     def describe(self) -> str:
         if not self.waypoints:

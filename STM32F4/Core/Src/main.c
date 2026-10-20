@@ -28,7 +28,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "actuators.h"
+#include "battery.h"
 #include "buzzer.h"
+#include "lights.h"
 #include "app_config.h"
 #include "control.h"
 #include "gps_nmea.h"
@@ -84,10 +86,34 @@ static void send_telemetry(uint16_t sequence)
   snprintf(payload, sizeof(payload), "%u,%.6f,%.6f,%u,%.1f,%.2f,%.1f", sequence, gps.latitude_deg, gps.longitude_deg, gps.fix, gps.hdop, gps.speed_mps, gps.course_deg);
   Protocol_Send(&huart4, "GPS", payload);
   /* armed and auto let the Pi sweep its camera while the boat waits; with no RC transmitter auto is
-     always 1. The last field counts presses of the victim's confirm button (PE4) since boot. */
-  snprintf(payload, sizeof(payload), "%u,0.0,%u,%u,%u,%u,1,%u", sequence, control.motor_fault ? 1U : 0U, control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U,
-           control.armed ? 1U : 0U, (unsigned)control.confirm.presses);
+     always 1. Then the presses of the victim's confirm button (PE4) since boot, and the battery's
+     charge in % (-1 unknown) after its voltage in the first field. */
+  snprintf(payload, sizeof(payload), "%u,%.2f,%u,%u,%u,%u,1,%u,%d", sequence, (double)Battery_Volts(), control.motor_fault ? 1U : 0U,
+           control.estop ? 1U : 0U, pi_command.pi_link_ok ? 1U : 0U, control.armed ? 1U : 0U, (unsigned)control.confirm.presses,
+           Battery_Percent());
   Protocol_Send(&huart4, "SYS", payload);
+}
+#endif
+
+#if !HW_TEST_ENABLED
+/* Events for the shore station over LoRa: a person the Pi reported, the boat overturned (again
+   every TILT_REPEAT_MS while it stays so), the confirm button pressed. */
+static void report_events(uint32_t now)
+{
+  static bool was_overturned;
+  static uint32_t last_tilt_ms;
+  static uint16_t presses_seen;
+  if (control.overturned && (!was_overturned || (uint32_t)(now - last_tilt_ms) >= TILT_REPEAT_MS))
+  {
+    LoraBeacon_ReportTilt(imu.roll_deg, imu.pitch_deg, now);
+    last_tilt_ms = now;
+  }
+  was_overturned = control.overturned;
+  if (control.confirm.presses != presses_seen)
+  {
+    presses_seen = control.confirm.presses;
+    LoraBeacon_ReportConfirm(presses_seen, now);
+  }
 }
 #endif
 /* USER CODE END 0 */
@@ -135,6 +161,7 @@ int main(void)
   Protocol_Init(&pi_command);
   GPS_Init(&gps);
   Control_Init(&control);
+  Lights_Init();           /* off until the shore station sends the admin's command */
   LoraBeacon_Init(&hspi2, &gps, &imu, &control); /* SPI2 + NSS PB12 + RST PC4, non-blocking */
 #if HW_TEST_ENABLED
   HwTest_Init();
@@ -145,6 +172,7 @@ int main(void)
   Buzzer_Beep(1U);         /* firmware is up */
 #endif
   (void)IMU_Init();
+  Battery_Init(&hi2c1);    /* INA226 on the BNO055's bus */
 
   HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
   HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
@@ -169,12 +197,15 @@ int main(void)
     {
       last_control = now;
       if (IMU_Read(&imu)) control.last_imu_ms = now;
+      Battery_Tick(now);   /* same bus as the IMU, after it, never during */
 #if HW_TEST_ENABLED
       HwTest_Tick(now);
 #else
+      control.hold = LoraBeacon_Hold();
       Control_Tick(&control, &pi_command, &imu, now);
       Camera_Tick(&pi_command, now);
       Buzzer_Tick(now);
+      report_events(now);
 #endif
       /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
 
@@ -185,6 +216,9 @@ int main(void)
         Protocol_Send(&huart4, "ACK", ack);
         pi_command.txd_pending = false;
         LoraBeacon_SetVictims(pi_command.victim_count, now);
+        if (pi_command.victim_report)
+          LoraBeacon_ReportVictim(pi_command.victim_has_pos, pi_command.victim_lat_e6, pi_command.victim_lon_e6,
+                                  pi_command.victim_risk, pi_command.victim_confidence_pct, now);
       }
     }
 
@@ -202,6 +236,10 @@ int main(void)
       LoraBeacon_SetPiRouteRev(pi_command.route_rev);
       if (LoraBeacon_NextPiRouteLine(sequence, now, route_line, sizeof(route_line)))
         Protocol_Send(&huart4, "RTE", route_line);
+      /* Once a second the shore link and the way home ($LNK): the Pi takes the boat home when it is lost. */
+      if (sequence % (1000U / TELEMETRY_PERIOD_MS) == 0U &&
+          LoraBeacon_LinkLine(sequence, now, route_line, sizeof(route_line)) > 0U)
+        Protocol_Send(&huart4, "LNK", route_line);
 #endif
     }
   }

@@ -54,6 +54,23 @@ def station_json(frame: str) -> dict | None:
         elif key == "v":
             if value.isdigit() and int(value) <= 255:
                 out["victims"] = int(value)
+        elif key == "H":
+            if value in ("0", "1"):
+                out["hold"] = int(value)       # stopped from the dashboard
+        elif key in ("g", "s", "b", "L"):
+            # Course over ground, speed, battery %, lights (STM32F4/App/lora_beacon.c), each only in range.
+            try:
+                number = float(value)
+            except ValueError:
+                continue
+            if key == "g" and 0.0 <= number < 360.0:
+                out["course"] = number
+            elif key == "s" and 0.0 <= number < 50.0:
+                out["speed"] = number
+            elif key == "b" and value.isdigit() and int(value) <= 100:
+                out["battery_pct"] = int(value)
+            elif key == "L" and value.isdigit() and int(value) <= 3:
+                out["lights"] = int(value)
         else:
             attitude[key] = value
     fix = len(coordinates) == 2 and abs(coordinates[0]) <= 90.0 and abs(coordinates[1]) <= 180.0

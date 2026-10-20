@@ -1,7 +1,9 @@
 """TFLite person detection and safe camera-to-LiDAR target lock.
 
 camera.model picks the detector: yolo_movenet (the team's YOLOv8n + MoveNet, modules/edge_model.py)
-or ssd (the earlier COCO SSD MobileNet v1, models/detect.tflite)."""
+or ssd (the earlier COCO SSD MobileNet v1, models/detect.tflite). Each person carries a risk level
+(edge_model.risk_level; MEDIUM with the SSD, which reads no pose). People on a boat are SAFE: they
+go to the rescue logic to be reported, but the camera never follows them."""
 from __future__ import annotations
 
 import logging
@@ -14,10 +16,12 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from modules.edge_model import EDGES
+from modules.edge_model import EDGES, MEDIUM, RISK_COLOURS, RISK_NAMES, SAFE
 from modules.perception import SweepPattern, associate_person, estimate_distance_bbox, make_scan, standing_score, track_pan
 from modules.state_store import HumanTarget, StateStore
 from utils.geometry import bearing_deg, signed_angle_deg
+
+IDLE_FRAME_S = 0.2   # detector off (no route): a frame this often for the viewer, nothing else
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,8 @@ class PersonDetection:
     in_water: bool | None = None   # yolo_movenet: lower body hidden (pose); None without a pose
     keypoints: tuple[tuple[float, float, float], ...] = ()   # yolo_movenet: x, y (0..1 of the frame), score
     near_camera: bool = False      # yolo_movenet: box on the bottom edge, so not in the water (NEAR_CAMERA_SAFE)
+    risk: int = MEDIUM             # edge_model SAFE .. CRITICAL
+    on_boat: bool = False          # yolo_movenet: inside a boat's box (risk SAFE)
 
 
 def source_needs_box(camera: dict) -> bool:
@@ -91,11 +97,19 @@ class CameraReader:
 
 
 class VisionWorker(threading.Thread):
-    def __init__(self, camera: dict, state: StateStore, stop_event: threading.Event, on_confirmed: Callable[[HumanTarget], None], send_pan: Callable[[float], None], standoff_m: float) -> None:
+    def __init__(self, camera: dict, state: StateStore, stop_event: threading.Event, on_confirmed: Callable[[HumanTarget], None], send_pan: Callable[[float], None], standoff_m: float,
+                 sweep_allowed: Callable[[], bool] | None = None, detect_allowed: Callable[[], bool] | None = None) -> None:
+        """sweep_allowed: whether the mission wants the search sweep now (main.py: not while the
+        STM32 boat stands still without a route); None: always, as far as the autopilot's mode goes.
+        detect_allowed: whether to run the detector at all (main.py: the same); while it is not, the
+        camera only feeds the viewer, a few frames a second, and looks ahead. None: always."""
         super().__init__(name="vision", daemon=True)
         self.c = camera
         self.state, self.stop, self.on_confirmed = state, stop_event, on_confirmed
         self.send_pan, self.standoff_m = send_pan, standoff_m
+        self._sweep_allowed = sweep_allowed or (lambda: True)
+        self._detect_allowed = detect_allowed or (lambda: True)
+        self._detector_on = True
         self.log = logging.getLogger(__name__)
         self._last_seen = 0.0
         self._last_report = 0.0
@@ -134,18 +148,18 @@ class VisionWorker(threading.Thread):
         return (value.astype(np.float32) - zero) * scale if scale else value.astype(np.float32)
 
     def _person(self, box: tuple[float, float, float, float], confidence: float, in_water: bool | None = None,
-                keypoints: tuple = (), near_camera: bool = False) -> PersonDetection:
+                keypoints: tuple = (), near_camera: bool = False, risk: int = MEDIUM, on_boat: bool = False) -> PersonDetection:
         ymin, xmin, ymax, xmax = box
         bearing = ((xmin + xmax) / 2.0 - 0.5) * float(self.c["horizontal_fov_deg"])
         return PersonDetection(bearing, confidence, max(0.0, ymax - ymin), ymin < 0.02 or ymax > 0.98, box, in_water, keypoints,
-                               near_camera)
+                               near_camera, risk, on_boat)
 
     def _detect_edge(self, frame: np.ndarray) -> list[PersonDetection]:
-        """YOLOv8n + MoveNet. People on a boat are left out: they are not the ones to rescue."""
+        """YOLOv8n + MoveNet. People on a boat stay in, as SAFE: reported, never followed."""
         people, boats = self._model.detect(frame)
         self._view_boats = [b.box for b in boats]
         self._view_ignored = [p.box for p in people if p.on_boat]
-        found = [self._person(p.box, p.confidence, p.in_water, p.keypoints, p.near_camera) for p in people if not p.on_boat]
+        found = [self._person(p.box, p.confidence, p.in_water, p.keypoints, p.near_camera, p.risk, p.on_boat) for p in people]
         return sorted(found, key=lambda d: -d.box_height_frac)
 
     def _detect(self, interpreter: object, details: list[dict], frame: np.ndarray) -> list[PersonDetection]:
@@ -199,18 +213,25 @@ class VisionWorker(threading.Thread):
             return None
         return signed_angle_deg(bearing_deg(snap.gps.lat_deg, snap.gps.lon_deg, *snap.focus) - snap.imu.yaw_deg)
 
-    def _follow(self, detections: list[PersonDetection], pan_deg: float) -> PersonDetection:
-        """Which of several people the camera stays on. The one the rescue logic is going to, if it
-        named one (state focus); else the one followed in the last frame; else the nearest. Without
-        this the tallest box won every frame, and with two people equally far the choice, the servo
-        and the position sent to the autopilot could change from one frame to the next."""
+    def _follow(self, detections: list[PersonDetection], pan_deg: float) -> PersonDetection | None:
+        """Which of several people the camera stays on; never one on a boat (SAFE), so None when
+        nobody else is in view. The one the rescue logic is going to, if it named one (state
+        focus); else the one followed in the last frame, unless somebody at a higher risk came into
+        view; else the highest risk, nearest first. Without this the tallest box won every frame,
+        and with two people equally far the choice, the servo and the position sent to the
+        autopilot could change from one frame to the next."""
+        candidates = sorted((d for d in detections if d.risk != SAFE), key=lambda d: (-d.risk, -d.box_height_frac))
+        if not candidates:
+            return None
         focus = self._focus_bearing()
         wanted = focus if focus is not None else self._followed_bearing
         if wanted is None:
-            return detections[0]
-        nearest = min(detections, key=lambda d: abs(signed_angle_deg(pan_deg + d.bearing_cam_deg - wanted)))
+            return candidates[0]
+        nearest = min(candidates, key=lambda d: abs(signed_angle_deg(pan_deg + d.bearing_cam_deg - wanted)))
         gate = float(self.c.get("follow_gate_deg", 15.0))
-        return nearest if abs(signed_angle_deg(pan_deg + nearest.bearing_cam_deg - wanted)) <= gate else detections[0]
+        if abs(signed_angle_deg(pan_deg + nearest.bearing_cam_deg - wanted)) > gate:
+            return candidates[0]
+        return candidates[0] if focus is None and nearest.risk < candidates[0].risk else nearest
 
     def _distance(self, detection: PersonDetection, bearing_body_deg: float, followed: bool = True) -> float | None:
         snap = self.state.snapshot()
@@ -262,33 +283,31 @@ class VisionWorker(threading.Thread):
         return {"frame": self._view_frame, "box": detection.box if detection else None,
                 "confidence": detection.confidence if detection else 0.0, "distance_m": distance_m,
                 "in_water": detection.in_water if detection else None, "keypoints": detection.keypoints if detection else (),
-                "others": [(d.box, d.confidence, range_m) for d, range_m in self._view_others],
+                "risk": detection.risk if detection else None,
+                "others": [(d.box, d.confidence, range_m, d.risk) for d, range_m in self._view_others],
                 "boats": self._view_boats, "on_boat": self._view_ignored,
                 "model": "YOLOv8n + MoveNet" if self._model is not None else "SSD MobileNet",
                 "pan_deg": self._pan if detection is None else pan_deg, "scanning": self._scanning, "age_s": monotonic() - at}
 
     def _searching(self) -> bool:
         vehicle = self.state.snapshot().vehicle
-        return self._scan is not None and (self._scan_always or (vehicle.armed and vehicle.mode in self._scan_modes))
+        return self._scan is not None and (self._scan_always or (vehicle.armed and vehicle.mode in self._scan_modes
+                                                                 and self._sweep_allowed()))
 
-    def _save_snapshot(self, frame: np.ndarray, people: list[PersonDetection], followed: PersonDetection,
+    def _save_snapshot(self, frame: np.ndarray, people: list[PersonDetection], followed: PersonDetection | None,
                        pan_deg: float, now: float) -> None:
-        """Everybody in view with their box, skeleton and state; the person followed in a thicker box,
-        people on a boat (left out of people) in orange."""
+        """Everybody in view with their box, skeleton and risk (in its colour); the person followed
+        in a thicker box."""
         if not self._snapshot_dir or now - self._last_snapshot < float(self.c.get("snapshot_cooldown_s", 5.0)):
             return
         self._last_snapshot = now
         image = frame.copy()
         height, width = image.shape[:2]
         states = []
-        for ymin, xmin, ymax, xmax in self._view_ignored:
-            states.append("ON BOAT")
-            cv2.rectangle(image, (int(xmin * width), int(ymin * height)), (int(xmax * width), int(ymax * height)), (0, 160, 255), 1)
-            cv2.putText(image, "ON BOAT", (int(xmin * width) + 3, max(14, int(ymin * height) - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 160, 255), 2)
         for person in people:
-            state, colour = (("NEAR CAMERA", (0, 220, 0)) if person.near_camera else ("IN WATER", (0, 0, 255)) if person.in_water
-                             else ("NO POSE", (200, 200, 200)) if person.in_water is None else ("ON LAND", (0, 220, 0)))
+            state = RISK_NAMES[person.risk] + (" ON BOAT" if person.on_boat else " NEAR CAMERA" if person.near_camera
+                                               else " NO POSE" if person.in_water is None else "")
+            colour = RISK_COLOURS[person.risk]
             states.append(state)
             ymin, xmin, ymax, xmax = person.box
             cv2.rectangle(image, (int(xmin * width), int(ymin * height)), (int(xmax * width), int(ymax * height)),
@@ -323,6 +342,29 @@ class VisionWorker(threading.Thread):
             if self._scanning and isinstance(self._scan, SweepPattern):
                 self._pan = self._scan.frame_done(now)
                 self._publish_pan(now)
+
+    def _nobody_to_follow(self, now: float) -> None:
+        """No one to follow in this frame. After detection_hold_s the target is dropped and the
+        camera looks toward the rescue logic's person, or sweeps, or comes back ahead."""
+        if now - self._last_seen <= self.c["detection_hold_s"]:
+            return
+        self.state.update_human_target(None)
+        self._followed_bearing = None
+        focus = self._focus_bearing()
+        if focus is not None:
+            # The rescue logic is going to somebody not in the frame: look their way.
+            self._scanning = False
+            self._pan = max(-float(self.c["pan_limit_deg"]), min(float(self.c["pan_limit_deg"]), focus))
+            self._publish_pan(now)
+        elif now - self._last_seen > self.c["recenter_after_s"]:
+            if self._searching():
+                with self._pan_lock:
+                    self._pan = self._scan.frame_done(now) if self._scanning else self._scan.start(now, self._pan)
+                    self._scanning = True
+                    self._publish_pan(now)
+            else:
+                self._scanning = False
+                self._recenter()
 
     def _pan_loop(self) -> None:
         period = 1.0 / self._pan_rate_hz
@@ -383,6 +425,24 @@ class VisionWorker(threading.Thread):
                 now = monotonic()
                 self._view_frame = frame
                 self._frame_aspect = frame.shape[1] / frame.shape[0]
+                if not self._detect_allowed():
+                    if self._detector_on:
+                        # No route: nobody to look for. Forget whoever was in view.
+                        self.log.info("detector off: no route from the dashboard")
+                        self._detector_on = False
+                        self.state.update_human_targets((), None)
+                        self._followed_bearing = None
+                        self._view_others = []
+                    with self._pan_lock:
+                        self._scanning = False
+                        if self._pan != 0.0:
+                            self._recenter()   # a step a frame until the camera looks ahead
+                    self._view_result = (None, self._pan, None, now)
+                    self.stop.wait(IDLE_FRAME_S)   # the viewer still gets a picture, the CPU rests
+                    continue
+                if not self._detector_on:
+                    self.log.info("detector on: a route to run")
+                    self._detector_on = True
                 self._sweep_step(now)        # without the pan thread (pan_rate_hz: 0), once per frame
                 pan_at_capture = self._pan   # the sweep moves on while the detector runs
                 # Simulator only (camera.max_fps): hold the detector to the rate expected of the Pi.
@@ -393,37 +453,14 @@ class VisionWorker(threading.Thread):
                 self._last_frame = now
                 detections = self._detect(interpreter, details, frame)
                 now = monotonic()
-                if not detections:
-                    self._view_result, self._view_others = (None, self._pan, None, now), []
-                    if now - self._last_seen > self.c["detection_hold_s"]:
-                        self.state.update_human_target(None)
-                        self._followed_bearing = None
-                        focus = self._focus_bearing()
-                        if focus is not None:
-                            # The rescue logic is going to somebody not in the frame: look their way.
-                            self._scanning = False
-                            self._pan = max(-float(self.c["pan_limit_deg"]), min(float(self.c["pan_limit_deg"]), focus))
-                            self._publish_pan(now)
-                        elif now - self._last_seen > self.c["recenter_after_s"]:
-                            if self._searching():
-                                with self._pan_lock:
-                                    self._pan = self._scan.frame_done(now) if self._scanning else self._scan.start(now, self._pan)
-                                    self._scanning = True
-                                    self._publish_pan(now)
-                            else:
-                                self._scanning = False
-                                self._recenter()
-                    continue
-                with self._pan_lock:
-                    self._scanning = False   # somebody in view: stop the sweep, the servo now follows them
-                self._last_seen = now
-                detection = self._follow(detections, pan_at_capture)
-                self._save_snapshot(frame, detections, detection, pan_at_capture, now)
-                with self._pan_lock:
-                    # From where the camera pointed when the frame was taken, not where the sweep got to since.
-                    self._pan = track_pan(pan_at_capture, detection.bearing_cam_deg, self.c["pan_gain"], self.c["pan_deadband_deg"], self.c["pan_limit_deg"])
-                    self._publish_pan(now)
-                # Everybody in the frame goes to the rescue logic, each with a bearing and a range.
+                detection = self._follow(detections, pan_at_capture) if detections else None
+                if detection is not None:
+                    with self._pan_lock:
+                        self._scanning = False   # somebody to follow in view: stop the sweep, the servo now follows them
+                    self._last_seen = now
+                if detections:
+                    self._save_snapshot(frame, detections, detection, pan_at_capture, now)
+                # Everybody in the frame goes to the rescue logic, each with a bearing, a range and a risk.
                 targets, target, others = [], None, []
                 for found in detections:
                     bearing_body = signed_angle_deg(pan_at_capture + found.bearing_cam_deg)
@@ -431,13 +468,25 @@ class VisionWorker(threading.Thread):
                     if found is detection:
                         self._followed_bearing = bearing_body
                         self._view_result = (detection, pan_at_capture, distance, now)
-                    else:
+                    elif not found.on_boat:         # those are drawn from on_boat
                         others.append((found, distance))
                     if distance is not None:
-                        targets.append(HumanTarget(bearing_body, distance, found.confidence, now))
+                        targets.append(HumanTarget(bearing_body, distance, found.confidence, now, found.risk))
                         if found is detection:
                             target = targets[-1]
                 self._view_others = others
+                if detection is None:
+                    # Nobody in view, or only people on a boat: the camera searches on.
+                    self._view_result = (None, self._pan, None, now)
+                    self._nobody_to_follow(now)
+                    if targets:
+                        # The person followed until detection_hold_s ago stays the target meanwhile.
+                        self.state.update_human_targets(tuple(targets), self.state.snapshot().human_target)
+                    continue
+                with self._pan_lock:
+                    # From where the camera pointed when the frame was taken, not where the sweep got to since.
+                    self._pan = track_pan(pan_at_capture, detection.bearing_cam_deg, self.c["pan_gain"], self.c["pan_deadband_deg"], self.c["pan_limit_deg"])
+                    self._publish_pan(now)
                 self.state.update_human_targets(tuple(targets), target)
                 if target is None:
                     continue

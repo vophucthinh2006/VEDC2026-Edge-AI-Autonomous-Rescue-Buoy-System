@@ -25,5 +25,10 @@ mission:
 follow:
   only_on_route: true
 camera:
-  # The Suyin USB camera by its serial number: /dev/video0, 1, ... change with the plugging order.
-  device: /dev/v4l/by-id/usb-Suyin_HD_Camera_200910120001-video-index0
+  # The camera by its id: /dev/video0, 1, ... change with the plugging order. The Rapoo C270L on the
+  # pan servo (2026-10-20), which sweeps and follows as the Suyin did; the Suyin was
+  # /dev/v4l/by-id/usb-Suyin_HD_Camera_200910120001-video-index0.
+  device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._rapoo_camera_SN0001-video-index0
+  pan_limit_deg: 45           # following a person, too: the servo stays within +-45 deg
+  scan:
+    sweep_limit_deg: 45       # the search sweep (in every state but IDLE, modules/mission.py): +-45 deg
