@@ -42,7 +42,9 @@ start_hw_standins() {
 # link (tools/lora_radio.py), which hands the board the route an admin sends from the dashboard
 # (docs/lora-route-downlink.md). The station reads that route from the Worker with
 # VEDC_INGEST_TOKEN set (VEDC_CLOUD_URL, default http://127.0.0.1:8787), or from the YAML file
-# VEDC_ROUTE_FILE.
+# VEDC_ROUTE_FILE. The station answers every frame with the admin's lights and its own position
+# (VEDC_STATION_POS lat,lon, default the world origin), the way home for the boat; a file named
+# station_off in the run dir silences it, as if it were switched off (sim/tools/stm32_mission_test.sh).
 #
 #   start_stm32_standins <run dir> <home lat,lon> <Gazebo world name> [<east,north,heading>]
 #
@@ -55,7 +57,9 @@ start_stm32_standins() {
     # The route code of both firmwares, compiled for this machine and run through ctypes.
     gcc -std=c11 -O1 -Wall -shared -fPIC -I"$repo/STM32F4/App" -I"$repo/esp32-lora-station/main" \
         "$VEDC_SIM_REPO/tools/route_radio_shim.c" "$repo/STM32F4/App/route_link.c" \
-        "$repo/esp32-lora-station/main/route_downlink.c" -lm -o "$run/librouteradio.so" || return 1
+        "$repo/STM32F4/App/shore_link.c" "$repo/STM32F4/App/event_queue.c" \
+        "$repo/esp32-lora-station/main/route_downlink.c" "$repo/esp32-lora-station/main/lora_payload.c" \
+        -lm -o "$run/librouteradio.so" || return 1
     if [ -n "$VEDC_ROUTE_FILE" ]; then
         station_args=(--route-file "$VEDC_ROUTE_FILE")
     elif [ -n "$VEDC_INGEST_TOKEN" ]; then
@@ -67,7 +71,7 @@ start_stm32_standins() {
         > "$run/lidar_sim.log" 2>&1 &
     LIDAR_SIM_PID=$!
     python3 -u "$VEDC_SIM_REPO/tools/shore_station_sim.py" --radio-lib "$run/librouteradio.so" "${station_args[@]}" \
-        > "$run/station_sim.log" 2>&1 &
+        --dir "$run" --station-pos "${VEDC_STATION_POS:-$home}" > "$run/station_sim.log" 2>&1 &
     STATION_SIM_PID=$!
     python3 -u "$VEDC_SIM_REPO/tools/stm32_board_sim.py" --pty "$run/stm32_pty" --dir "$run" --radio-lib "$run/librouteradio.so" \
         --home "$home" --world "$world" "${start_args[@]}" ${STM32_SIM_ARGS:-} > "$run/stm32_sim.log" 2>&1 &

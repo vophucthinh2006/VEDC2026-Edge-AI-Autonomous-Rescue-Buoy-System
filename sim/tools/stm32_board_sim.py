@@ -10,11 +10,14 @@ STM32F4/Modules/PiLink/uart_protocol.c) and does in Gazebo what the F407 does on
                            thrusters, throttle = speed / 1 m/s capped at 0.5, front motor off
     $NAV STOP / stale  ->  motors off, rudders centred (NAV TTL, HBT 500 ms, IMU 100 ms)
     $CAM pan           ->  camera_pan_joint
-    $TXD               ->  $ACK,seq,TXD,ACCEPTED
-    every 100 ms       ->  $IMU, $GPS, $SYS from the buoy's Gazebo odometry
+    $TXD               ->  $ACK,seq,TXD,ACCEPTED, and a person event over LoRa
+    every 100 ms       ->  $IMU, $GPS, $SYS (battery SIM_BATTERY_V) from the buoy's Gazebo odometry
+    every second       ->  $LNK: the shore link and the way home (App/shore_link.c)
     with --radio-lib   ->  LoRa beacon to tools/shore_station_sim.py, route frames back
                            (App/route_link.c itself, through ctypes), $RTE lines to the Pi until
-                           its $HBT reports the route (docs/lora-route-downlink.md)
+                           its $HBT reports the route (docs/lora-route-downlink.md); events (a
+                           person, overturned, the confirm button) in frames of their own until
+                           the station's ACK (App/event_queue.c), whose lights it drives
 
 There is no RC transmitter, as on the boat (STM32F4/App/control.c): the board is armed whenever it is
 safe and AUTO is the only mode; the motors turn while the Pi drives. PE4 is the victim's confirm button, not an E-stop: a file named
@@ -54,8 +57,15 @@ DEADBAND_DEG, INTEGRAL_LIMIT, RATE_LPF_HZ = 2.0, 100.0, 5.0
 RUDDER_GAIN, DIFF_GAIN, DIFF_DIR = 1.0, 0.30, +1
 RUDDER_SPAN_US, RUDDER_FRONT_GAIN = 250.0, 1.0
 ESC_RAMP_PER_S = 2.0
+# App/front_motor.c: the bidirectional front motor pushes with the rear ones and brakes on a throttle cut.
+FRONT_THRUST_GAIN, FRONT_BRAKE_LEVEL, FRONT_BRAKE_MIN_DROP = 1.0, 0.40, 0.05
+FRONT_BRAKE_S_PER_THROTTLE, FRONT_BRAKE_MAX_S, ESC_FRONT_REVERSE_DELAY_S = 2.0, 1.0, 0.2
 CAM_PAN_LIMIT_DEG = 80.0
 AUTO_THROTTLE_MAX = 0.50
+TILT_REPEAT_S = 30.0
+LORA_EVENT_RETRY_S = 1.5
+SIM_BATTERY_V, BATTERY_CELLS = 11.9, 3
+CELL_VOLTS = (3.27, 3.61, 3.69, 3.71, 3.73, 3.77, 3.79, 3.84, 3.92, 4.02, 4.20)   # App/battery.c
 # sim/models/vedc_buoy/model.sdf: a pod turns 45 deg for 500 us, positive cmd_pos (anticlockwise
 # seen from above) on the rear pods turns the bow right; the front pod swings the other way.
 POD_RAD_PER_US = math.radians(45.0) / 500.0
@@ -103,6 +113,43 @@ class HeadingController:
         if raw == output or (output >= 1.0 and error < 0.0) or (output <= -1.0 and error > 0.0):
             self.integral = candidate
         return output
+
+
+def cell_percent(volts: float) -> int:
+    """Battery_CellPercent of App/battery.c."""
+    if volts <= CELL_VOLTS[0]:
+        return 0
+    if volts >= CELL_VOLTS[-1]:
+        return 100
+    for i in range(len(CELL_VOLTS) - 1):
+        if volts < CELL_VOLTS[i + 1]:
+            return int(10.0 * (i + (volts - CELL_VOLTS[i]) / (CELL_VOLTS[i + 1] - CELL_VOLTS[i])) + 0.5)
+    return 100
+
+
+class FrontMotor:
+    """App/front_motor.c, line for line: front command -1..1, positive pushes forward."""
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.last, self.until, self.braking = 0.0, 0.0, False
+
+    def command(self, throttle: float, now: float) -> float:
+        throttle = max(throttle, 0.0)
+        drop = self.last - throttle
+        if drop >= FRONT_BRAKE_MIN_DROP:
+            self.until = now + ESC_FRONT_REVERSE_DELAY_S + min(drop * FRONT_BRAKE_S_PER_THROTTLE, FRONT_BRAKE_MAX_S)
+            self.braking = True
+        elif throttle > self.last:
+            self.braking = False
+        self.last = throttle
+        if self.braking:
+            if now < self.until:
+                return -FRONT_BRAKE_LEVEL
+            self.braking = False
+        return throttle * FRONT_THRUST_GAIN
 
 
 def heading_mix(u: float, throttle: float) -> tuple[float, float, float]:
@@ -168,12 +215,15 @@ class Board:
         self.lora: Lora | None = None
         # Actuator outputs after the ESC ramp
         self.esc = [0.0, 0.0]
+        self.front_motor, self.front = FrontMotor(), 0.0
         self.steer = 0.0
         self.state = "S"
         self.u = 0.0
         self.armed = False
         self.estop = False          # PE4 is the confirm button now: estop always 0 (App/control.c)
         self.confirm_presses = 0
+        self.was_overturned, self.last_tilt = False, 0.0
+        self.lights = 0               # App/lights.c: RELAY1 PC3 bit 0, RELAY2 PC2 bit 1
         self.events = (args.dir / "stm32_events.log").open("a", buffering=1)
         self.seq_drops = 0
 
@@ -226,8 +276,15 @@ class Board:
                 if -90.0 <= pan <= 90.0:
                     self.cam_pan = pan
             elif kind == "TXD" and len(fields) >= 6:
-                if fields[2] == "VICTIM_FOUND":
-                    self.victims = min(self.victims + 1, 255)
+                if fields[2] in ("VICTIM_FOUND", "VICTIM_UPDATE"):
+                    if fields[2] == "VICTIM_FOUND":   # a new person; UPDATE: the one followed, not counted again
+                        self.victims = min(self.victims + 1, 255)
+                    # $TXD,seq,VICTIM_FOUND|VICTIM_UPDATE,lat,lon,confidence[,risk]: 0, 0 is no position; no risk: 2.
+                    lat, lon, confidence = float(fields[3]), float(fields[4]), float(fields[5])
+                    risk = min(int(fields[6]), 3) if len(fields) >= 7 else 2
+                    if self.lora is not None:
+                        position = (lat, lon) if (lat or lon) and abs(lat) <= 90 and abs(lon) <= 180 else None
+                        self.lora.event_now(self.lora.events.victim(position, risk, round(clamp(confidence, 0.0, 1.0) * 100), self.victims))
                 self.event(f"TXD {','.join(fields[2:])} (victims {self.victims})")
                 self.send(fd, "ACK", int(fields[1]) & 0xFFFF, "TXD", "ACCEPTED")
         except ValueError:
@@ -240,15 +297,26 @@ class Board:
             imu_fresh = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
             heading, rate, pitch, roll = b.heading, b.yaw_rate, b.pitch, b.roll
         confirm = self.args.dir / "confirm"
-        if confirm.exists():
+        confirm_pressed = confirm.exists()
+        if confirm_pressed:
             confirm.unlink()
             self.confirm_presses += 1
             self.event(f"confirm button pressed ({self.confirm_presses})")
         overturned = imu_fresh and (abs(pitch) > MAX_PITCH_DEG or abs(roll) > MAX_ROLL_DEG)
+        if self.lora is not None:
+            # Core/Src/main.c report_events: overturned (again every 30 s), the confirm button.
+            if confirm_pressed:
+                self.lora.event_now(self.lora.events.confirm(self.position(), self.confirm_presses))
+            if overturned and (not self.was_overturned or now - self.last_tilt >= TILT_REPEAT_S):
+                self.lora.event_now(self.lora.events.tilt(self.position(), roll, pitch))
+                self.last_tilt = now
+                self.event(f"overturned: roll {roll:.1f} pitch {pitch:.1f}, event to the shore")
+        self.was_overturned = overturned
         # No RC: armed whenever it is safe, AUTO the only mode (App/control.c).
         armed = imu_fresh and not self.estop and not overturned
         throttle, u, state = 0.0, 0.0, "S"
-        if armed:
+        held = self.lora is not None and self.lora.shore.hold   # STOP from the dashboard (App/control.c)
+        if armed and not held:
             nav_fresh = self.nav_mode == "AUTO" and now - self.last_nav <= self.nav_ttl
             hbt_fresh = self.link_ok and now - self.last_hbt <= HBT_TIMEOUT_S
             if imu_fresh and nav_fresh and hbt_fresh:
@@ -267,6 +335,22 @@ class Board:
             self.event({"A": "AUTO: steering", "S": "stop"}[state]
                        + ("" if state == "A" else f" (estop {int(self.estop)}, imu {int(imu_fresh)}, nav {self.nav_mode}"
                           f" {now - self.last_nav:.2f} s old, hbt {now - self.last_hbt:.2f} s old)"))
+        # The front motor: off at once on a fault, else it pushes with the rear ones or brakes.
+        if not armed:
+            self.front_motor.reset()
+            front_target = 0.0
+        else:
+            front_target = self.front_motor.command(throttle if state == "A" else 0.0, now)
+        if front_target < 0.0 <= self.front:
+            self.event(f"front motor brakes ({FRONT_BRAKE_LEVEL:.2f} backwards)")
+        # Actuators_Apply for the front ESC: through neutral before it turns the other way, magnitude
+        # rises at ESC_RAMP_PER_S, cuts are immediate.
+        if self.front != 0.0 and front_target != 0.0 and (front_target > 0) != (self.front > 0):
+            self.front = 0.0
+        elif abs(front_target) <= abs(self.front):
+            self.front = front_target
+        else:
+            self.front = math.copysign(min(abs(front_target), abs(self.front) + ESC_RAMP_PER_S * dt), front_target)
         self.state, self.u, self.armed = state, u, armed
         # Actuators_Apply: magnitudes rise at ESC_RAMP_PER_S, cuts are immediate.
         for index, target in enumerate((left, right)):
@@ -281,13 +365,22 @@ class Board:
             self.pub[name].publish(msg)
         put("left", self.esc[0] * self.args.rear_thrust_n)
         put("right", self.esc[1] * self.args.rear_thrust_n)
-        put("front", 0.0)
+        put("front", self.front * self.args.rear_thrust_n)
         pod = self.steer * RUDDER_SPAN_US * POD_RAD_PER_US
         put("pod_left", pod)
         put("pod_right", pod)
         put("pod_front", -pod * RUDDER_FRONT_GAIN)
         if self.cam_pan is not None:   # Camera_Tick: independent of arming, holds the last angle
             put("pan", math.radians(clamp(self.cam_pan, -CAM_PAN_LIMIT_DEG, CAM_PAN_LIMIT_DEG)))
+
+    def position(self) -> tuple[float, float] | None:
+        """The boat's GPS position (None without a fix), as lora_beacon.c boat_position."""
+        if self.args.gps_fix < 1:
+            return None
+        with self.buoy.lock:
+            x, y = self.buoy.x, self.buoy.y
+        lat0, lon0 = self.args.home
+        return (lat0 + math.degrees(y / EARTH_RADIUS_M), lon0 + math.degrees(x / (EARTH_RADIUS_M * math.cos(math.radians(lat0)))))
 
     # ---- Core/Src/main.c send_telemetry -------------------------------------------------------
     def telemetry(self, fd: int, seq: int, now: float) -> None:
@@ -303,8 +396,11 @@ class Board:
         course = math.degrees(math.atan2(ve, vn)) % 360.0
         self.send(fd, "IMU", seq, f"{pitch:.2f}", f"{roll:.2f}", f"{heading:.2f}", int(imu_ok), int(overturned))
         self.send(fd, "GPS", seq, f"{lat:.6f}", f"{lon:.6f}", self.args.gps_fix, "0.9", f"{speed:.2f}", f"{course:.1f}")
-        self.send(fd, "SYS", seq, "0.0", 0, int(self.estop), int(self.link_ok), int(self.armed), 1,
-                  self.confirm_presses)
+        self.send(fd, "SYS", seq, f"{SIM_BATTERY_V:.2f}", 0, int(self.estop), int(self.link_ok), int(self.armed), 1,
+                  self.confirm_presses, cell_percent(SIM_BATTERY_V / BATTERY_CELLS))
+        if self.lora is not None and seq % 10 == 0:
+            # Once a second the shore link and the way home: the Pi takes the boat home when it is lost.
+            self.send(fd, "LNK", self.lora.shore.pi_line(seq, int(now * 1000)))
         if self.lora is not None:
             # Route from the dashboard: one $RTE line a period until $HBT reports its revision.
             self.lora.route.set_pi_rev(self.pi_route_rev)
@@ -320,16 +416,22 @@ class Board:
         with b.lock:
             imu_ok = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
             x, y, heading, pitch, roll = b.x, b.y, b.heading, b.pitch, b.roll
+            ve, vn = b.ve, b.vn
         lat0, lon0 = self.args.home
         lat = lat0 + math.degrees(y / EARTH_RADIUS_M)
         lon = lon0 + math.degrees(x / (EARTH_RADIUS_M * math.cos(math.radians(lat0))))
         target = round(self.nav_heading, 1) % 360.0 if self.state == "A" else -1.0
+        mode = "R" if self.state == "A" and not self.lora.shore.ok(int(now * 1000)) else self.state
         self.lora_seq += 1
         frame = (f"id={self.args.buoy_id},{lat:.6f},{lon:.6f},r={roll if imu_ok else 0:.1f},p={pitch if imu_ok else 0:.1f},"
-                 f"y={round(heading, 1) % 360.0 if imu_ok else 0:.1f},t={target:.1f},m={self.state},i={int(imu_ok)},c={3 if imu_ok else 0},"
+                 f"y={round(heading, 1) % 360.0 if imu_ok else 0:.1f},t={target:.1f},m={mode},i={int(imu_ok)},c={3 if imu_ok else 0},"
                  f"q={self.lora_seq},v={self.victims}")
-        field = self.lora.route.beacon_field()
-        return frame + ("," + field if field and len(frame) + 1 + len(field) <= 120 else "")
+        # The optional fields, each only while there is room, most needed first.
+        for field in (self.lora.route.beacon_field(), f"H={int(self.lora.shore.hold)}", f"L={self.lights}", f"b={cell_percent(SIM_BATTERY_V / BATTERY_CELLS)}",
+                      f"g={round(math.degrees(math.atan2(ve, vn)), 1) % 360.0:.1f}", f"s={math.hypot(ve, vn):.2f}"):
+            if field and len(frame) + 1 + len(field) < 120:
+                frame += "," + field
+        return frame
 
     def status(self, now: float) -> str:
         b = self.buoy
@@ -340,14 +442,18 @@ class Board:
 
 class Lora:
     """App/lora_beacon.c over the simulated radio (tools/lora_radio.py): a beacon every 5 s, every
-    1.5 s while a route is coming in, then 1.5 s of listening for the station's RTE frame."""
+    1.5 s while a route is coming in, events at once and again every 1.5 s until acknowledged; after
+    each frame 1.5 s of listening for the station's answer, an RTE frame or an ACK."""
 
     PERIOD_S, ROUTE_PERIOD_S, RX_WINDOW_S = 5.0, 1.5, 1.5
 
     def __init__(self, board: Board, lib: Path) -> None:
         import socket
-        from lora_radio import BEACON_PORT, DOWNLINK_PORT, BuoyRoute, airtime_s
+        from lora_radio import BEACON_PORT, DOWNLINK_PORT, BuoyEvents, BuoyRoute, BuoyShore, airtime_s
         self.board, self.route, self.airtime_s = board, BuoyRoute(lib), airtime_s
+        self.shore, self.events = BuoyShore(lib), BuoyEvents(lib)
+        self.event_due = 0.0
+        self.was_ok = True
         self.tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.rx.bind(("127.0.0.1", DOWNLINK_PORT))
@@ -363,13 +469,28 @@ class Lora:
             except BlockingIOError:
                 return out
 
+    def event_now(self, eseq: int) -> None:
+        self.event_due = time.monotonic()
+        self.board.event(f"LoRa event {eseq} queued ({self.events.pending} waiting)")
+
     def tick(self, now: float) -> None:
+        now_ms = int(now * 1000)
+        ok = self.shore.ok(now_ms)
+        if ok != self.was_ok:
+            self.board.event("shore station heard again" if ok else "shore station lost: silent for 60 s, $LNK shore_ok 0")
+            self.was_ok = ok
         if self.state == "idle":
             self._received()                     # not listening: the radio hears nothing
-            if now < self.next_tx:
-                return
-            self.frame = self.board.beacon(now)
-            self.next_tx = now + (self.ROUTE_PERIOD_S if self.route.receiving else self.PERIOD_S)
+            frame = ""
+            if self.events.pending and now >= self.event_due:
+                frame = self.events.frame(self.board.args.buoy_id)
+                self.event_due = now + LORA_EVENT_RETRY_S
+            if not frame:
+                if now < self.next_tx:
+                    return
+                frame = self.board.beacon(now)
+                self.next_tx = now + (self.ROUTE_PERIOD_S if self.route.receiving else self.PERIOD_S)
+            self.frame = frame
             self.state, self.until = "tx", now + self.airtime_s(len(self.frame))
         elif self.state == "tx":
             self._received()
@@ -379,12 +500,26 @@ class Lora:
             self.state, self.until = "rx", now + self.RX_WINDOW_S
         else:
             frames = self._received()
-            for frame in frames[:1]:            # one answer per beacon
+            for frame in frames[:1]:            # one answer per frame
                 was_receiving = self.route.receiving
+                eseq = None
                 if self.route.on_frame(frame, self.board.args.buoy_id):
+                    self.shore.heard(now_ms)
                     self.board.event(f"LoRa RTE taken: rev {self.route.rev}, {self.route.have}/{self.route.total} points")
                     if not self.route.receiving and (was_receiving or self.route.total == 0):
                         self.next_tx = now       # tell the station at once that the route is complete
+                elif (eseq := self.shore.on_frame(frame, self.board.args.buoy_id, now_ms)) is not None:
+                    if self.shore.hold != getattr(self, "_was_held", False):
+                        self.board.event("STOPPED from the dashboard: motors off" if self.shore.hold else "released from the dashboard")
+                        self._was_held = self.shore.hold
+                    if self.shore.lights != self.board.lights:
+                        self.board.event(f"lights {self.shore.lights} (light 1 {'on' if self.shore.lights & 1 else 'off'}, "
+                                         f"light 2 {'on' if self.shore.lights & 2 else 'off'})")
+                        self.board.lights = self.shore.lights
+                    if eseq and self.events.ack(eseq):
+                        self.board.event(f"LoRa event {eseq} acknowledged")
+                        if self.events.pending:
+                            self.event_due = now
                 else:
                     self.board.event(f"LoRa frame refused: {frame[:60]!r}")
             if frames or now >= self.until:
@@ -474,7 +609,7 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        board.esc, board.steer, board.cam_pan = [0.0, 0.0], 0.0, None
+        board.esc, board.steer, board.cam_pan, board.front = [0.0, 0.0], 0.0, None, 0.0
         board.publish()
         if args.pty.is_symlink():
             args.pty.unlink()

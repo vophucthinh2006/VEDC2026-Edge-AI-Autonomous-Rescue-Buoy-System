@@ -2,9 +2,16 @@
 """The ESP32 shore station in the simulator (esp32-lora-station/main/main.c), for the STM32 boat.
 
 Hears the beacons of the simulated STM32F407 (stm32_board_sim.py --radio-lib) over the simulated
-LoRa link (lora_radio.py), posts each one to the Worker as the station does, and answers it with
-the route an admin sent with "Gửi tới phao" (docs/lora-route-downlink.md), built by the station's
-own route_downlink.c.
+LoRa link (lora_radio.py), posts each one to the Worker as the station does, and answers every
+frame, as the station does, with the station's own route_downlink.c (docs/lora-route-downlink.md):
+the route an admin sent with "Gửi tới phao" while the boat still lacks it, otherwise an ACK with the
+event acknowledged, the admin's lights and the station's position (--station-pos), the boat's way
+home. Event frames (ev=...: a person, overturned, the confirm button) are posted as the "event" group.
+
+A file named station_off in --dir silences the station: no answers, no posts, as if switched off.
+The lights and the STOP come from the Worker's "lights" and "hold" (GET /api/downlink), or with
+--route-file from files in --dir: lights holding the mask (1 light 1, 2 light 2, 3 both), and hold
+(present: the boat is stopped). They go down as one command, bit 2 the STOP.
 
 The route comes from the Worker (GET /api/downlink every 5 s, Bearer VEDC_INGEST_TOKEN), or with
 --route-file from a YAML file instead (waypoints: [[lat, lon], ...], loop, id): every change of
@@ -57,18 +64,39 @@ def read_file(path: Path, rev: int) -> dict | None:
             "pts": [[float(lat), float(lon)] for lat, lon in data.get("waypoints") or []]}
 
 
+def read_commands(directory: Path) -> dict[str, int]:
+    """The lights file's mask, with bit 2 when a file named hold is there."""
+    try:
+        mask = int((directory / "lights").read_text(encoding="utf-8").strip() or "0") & 3
+    except (OSError, ValueError):
+        mask = 0
+    return {"PHAO-01": mask | (4 if (directory / "hold").exists() else 0)}
+
+
+def cloud_commands(data: dict) -> dict[str, int] | None:
+    """{"lights": {id: mask}, "hold": {id: 0|1}} of GET /api/downlink as one command per buoy."""
+    lights, hold = data.get("lights") or {}, data.get("hold") or {}
+    if not isinstance(lights, dict) or not isinstance(hold, dict):
+        return None
+    return {str(k): (int(lights.get(k, 0)) & 3) | (4 if int(hold.get(k, 0)) else 0) for k in set(lights) | set(hold)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--radio-lib", required=True, type=Path, help="librouteradio.so (tools/hw_standins.sh)")
     parser.add_argument("--cloud", help="Worker base URL; beacons are posted to /api/ingest, the route is read from /api/downlink")
     parser.add_argument("--route-file", type=Path, help="YAML route instead of the Worker's (waypoints, loop, id)")
+    parser.add_argument("--dir", type=Path, default=Path("."), help="where station_off and lights are looked for")
+    parser.add_argument("--station-pos", help="lat,lon of the station's GPS, sent in every ACK; none: no fix")
     args = parser.parse_args()
+    station_pos = tuple(float(v) for v in args.station_pos.split(",")[:2]) if args.station_pos else None
     token = os.environ.get("VEDC_INGEST_TOKEN", "")
     if args.cloud and not token:
         parser.error("--cloud needs VEDC_INGEST_TOKEN (the Worker's INGEST_TOKEN)")
 
     route = StationRoute(args.radio_lib)
     lock = threading.Lock()
+    lights: dict[str, int] = {}
 
     def poll() -> None:
         file_rev, file_mtime = 0, None
@@ -84,6 +112,14 @@ def main() -> int:
                     data = read_file(args.route_file, file_rev)
             elif args.cloud:
                 data = fetch_cloud(args.cloud.rstrip("/"), token)
+            new_lights = read_commands(args.dir) if args.route_file else (cloud_commands(data) if data else None)
+            if isinstance(new_lights, dict):
+                with lock:
+                    for buoy, mask in new_lights.items():
+                        if lights.get(buoy, 0) != mask:
+                            log(f"command for {buoy}: lights {mask & 3}{', STOP' if mask & 4 else ''}")
+                    lights.clear()
+                    lights.update(new_lights)
             if data is not None and int(data.get("rev", 0)) != route.rev:
                 points = [(float(p[0]), float(p[1])) for p in data.get("pts", [])]
                 with lock:
@@ -99,7 +135,22 @@ def main() -> int:
     log(f"shore station listening on udp {BEACON_PORT}, route from {args.route_file or args.cloud or 'nowhere'}")
     try:
         while True:
-            raw = rx.recv(256).decode("ascii", "replace")
+            data = rx.recv(256)
+            if (args.dir / "station_off").exists():
+                continue                      # switched off: hears nothing, answers nothing
+            raw = data.decode("ascii", "replace")
+            event = route.event_json(data)
+            if event is not None:
+                buoy, group = event
+                if args.cloud:
+                    body = {"id": buoy, "rssi": -72, "snr": 9.5, "raw": raw[:99], "event": group}
+                    threading.Thread(target=post, args=(args.cloud.rstrip("/") + "/api/ingest", token, body), daemon=True).start()
+                with lock:
+                    frame = route.ack(buoy, group["seq"], lights.get(buoy, 0), station_pos)
+                time.sleep(TURNAROUND_S + airtime_s(len(frame)))
+                tx.sendto(frame, ("127.0.0.1", DOWNLINK_PORT))
+                log(f"event {group}: sent {frame.decode()}")
+                continue
             body = station_json(raw)
             if body is None:
                 continue
@@ -112,12 +163,19 @@ def main() -> int:
                     pass
             if args.cloud:
                 threading.Thread(target=post, args=(args.cloud.rstrip("/") + "/api/ingest", token, body), daemon=True).start()
+            buoy = body.get("id", "")
+            if not buoy:
+                continue
             with lock:
-                frame = route.frame(body.get("id", ""), w)
-            if frame:
-                time.sleep(TURNAROUND_S + airtime_s(len(frame)))   # arrives when it is off the air
-                tx.sendto(frame, ("127.0.0.1", DOWNLINK_PORT))
-                log(f"beacon w={w}: sent {frame.decode()}")
+                want = lights.get(buoy, 0)
+                # RTE while the boat lacks the route and its lights and STOP are right; otherwise an ACK.
+                right = body.get("lights", want & 3) == want & 3 and body.get("hold", (want >> 2) & 1) == (want >> 2) & 1
+                frame = route.frame(buoy, w) if right else b""
+                if not frame:
+                    frame = route.ack(buoy, 0, want, station_pos)
+            time.sleep(TURNAROUND_S + airtime_s(len(frame)))   # arrives when it is off the air
+            tx.sendto(frame, ("127.0.0.1", DOWNLINK_PORT))
+            log(f"beacon w={w} L={body.get('lights', '-')}: sent {frame.decode()}")
     except KeyboardInterrupt:
         pass
     return 0
