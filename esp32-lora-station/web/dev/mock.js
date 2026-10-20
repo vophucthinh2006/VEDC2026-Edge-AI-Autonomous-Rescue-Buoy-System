@@ -167,7 +167,10 @@
               send({ id: b.id, fix, ...(fix ? { lat: p.lat, lon: p.lon } : {}), rssi: rssiAt(p), snr, raw: '', ...att, yaw: (n * 7) % 360, target_yaw: 90, mode, age_s: 0,
                      speed: Math.round((1.1 + noise(0.2)) * 100) / 100, course: courseAt(b, t), battery_pct: 64, route: { rev: 1, have: 4, pi: 1 } });
             } else if (b.id === 'PHAO-03') {
-              send({ id: b.id, fix: 1, lat: p.lat, lon: p.lon, rssi: rssiAt(p), snr, raw: '', ...att, yaw: 40, target_yaw: -1, mode: 'S', age_s: 0, speed: 0.05, battery_pct: 92 });
+              // Stands still (mode S) until a route sent from the dashboard reaches its Pi, then is driven (mode A)
+              const driven = !!(r && r.pi && r.n);
+              send({ id: b.id, fix: 1, lat: p.lat, lon: p.lon, rssi: rssiAt(p), snr, raw: '', ...att, yaw: 40, target_yaw: driven ? 40 : -1,
+                     mode: driven ? 'A' : 'S', age_s: 0, speed: driven ? 0.9 : 0.05, battery_pct: 92, ...route });
             } else {
               send({ id: b.id, fix: 1, lat: p.lat, lon: p.lon, rssi: -112 + Math.round(noise(3)), snr: -2.5, raw: '', ...att, yaw: 300, target_yaw: -1,
                      mode: holds[b.id].have ? 'S' : 'A', age_s: 0, speed: 0, battery_pct: 17, hold: holds[b.id].have ? 1 : 0, ...route });

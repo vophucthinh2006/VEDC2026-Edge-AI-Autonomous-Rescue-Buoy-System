@@ -25,7 +25,7 @@ const isAdmin = () => state.role === 'admin';
 // ?mock (admin giả) hoặc ?mock=guest (khách giả): chạy không cần máy chủ
 const MOCK = (() => { const q = new URLSearchParams(location.search); return q.has('mock') ? (q.get('mock') || 'admin') : null; })();
 
-// kind: 'bad' (đỏ, cảnh báo người/lật) hoặc 'ok' (xanh); cảnh báo hiện lâu hơn
+// kind: 'bad' (đỏ, cảnh báo người/lật), 'ok' (xanh) hoặc 'info' (màu thường); có kind thì hiện lâu hơn
 function toast(msg, kind = '') {
   const t = $('toast'); t.textContent = msg; t.dataset.kind = kind; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), kind ? 6000 : 2400);
@@ -462,6 +462,26 @@ function onMissionMessage(m) {
   applyMission(m);
 }
 
+// Popup when a buoy starts being driven along its route, or stands still again. Its last status other
+// than "lost" is remembered, so a buoy that drops out and comes back does not announce a start
+const lastMove = new Map();
+function noteMovement(id, b, snapshot) {
+  const st = buoyStatus(id, b);
+  if (st === 'lost') return;
+  const before = lastMove.get(id);
+  lastMove.set(id, st);
+  if (snapshot || before === undefined || before === st) return;
+  if (st === 'patrol' && before === 'idle') {
+    toast(`${id} bắt đầu chạy lộ trình`, 'ok');
+    log('run', `${id} bắt đầu chạy lộ trình`);
+  } else if (st === 'patrol' && before === 'stopped') {
+    toast(`${id} chạy tiếp lộ trình`, 'ok');   // hold.js already logs the resume
+  } else if (st === 'idle' && before === 'patrol') {
+    toast(`${id} đứng yên, chờ lộ trình mới`, 'info');
+    log('idle', `${id} đứng yên, chờ lộ trình mới`);
+  }
+}
+
 // Route fully handed to the Pi for the current downlink rev
 const routeDone = (id, r) => !!(downlink && downlink.rev && downlink.id === id && r && r.rev === downlink.rev && r.have === downlink.n && r.pi === 1);
 
@@ -519,6 +539,7 @@ function onBuoyMessage(m) {
     pushHistory(id, s);
   }
   emit('buoy', { id, prev, b, snapshot });
+  noteMovement(id, b, snapshot);
   if (!snapshot && prev && Number.isInteger(prev.victims) && b.victims > prev.victims && !state.eventBuoys.has(id)) toast(`${id} phát hiện người`, 'bad');
 
   $('empty').hidden = [...state.buoys.values()].some(x => x.hasPos);

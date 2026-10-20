@@ -10,6 +10,7 @@ const KINDS = {
   rescue:  { icon: 'ph-fill ph-hand-heart',         tone: 'ok' },
   stop:    { icon: 'ph-fill ph-hand-palm',          tone: 'bad' },
   run:     { icon: 'ph-fill ph-play',               tone: 'ok' },
+  idle:    { icon: 'ph-fill ph-pause-circle',       tone: 'accent' },
   route:   { icon: 'ph-fill ph-path',               tone: 'accent' },
   home:    { icon: 'ph ph-arrow-u-up-left',         tone: 'warn',   alert: true },
   lost:    { icon: 'ph ph-cell-signal-slash',       tone: 'warn',   alert: true },

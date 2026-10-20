@@ -62,8 +62,9 @@ export function buoyStatus(id, b) {
     return b.nav.armed ? 'patrol' : 'idle';
   }
   if (isReturning(b)) return 'returning';
-  // The Pi runs a route once it has all of it (route.pi = 1); heading mode S means it was told to stand still
-  if (b.route && b.route.pi === 1 && b.route.have > 0 && !(b.hasAttitude && b.headingMode === 'S')) return 'patrol';
+  // The F407 reports mode A only while the Pi is driving it (a fresh NAV AUTO and heartbeat); without a
+  // route, or with main.py not running, it stands still in mode S
+  if (b.hasAttitude && b.headingMode === 'A') return 'patrol';
   return 'idle';
 }
 
