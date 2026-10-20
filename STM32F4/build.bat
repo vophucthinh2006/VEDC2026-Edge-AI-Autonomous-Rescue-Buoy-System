@@ -6,7 +6,7 @@ rem  Usage: build.bat [Debug|Release|HwTest] [clean]
 rem    Debug   : -O0 -g3 (default)
 rem    Release : -Os
 rem    HwTest  : Debug with the bench motor test instead of the control loop
-rem              (App/hw_test.c, driven by ..\motor_test.bat)
+rem              (App/hw_test.c, driven by scripts\stm32\test_motor.bat)
 rem    clean   : delete build\<type> before building
 rem
 rem  Output : build\<type>\STM32F4.elf / .hex / .bin

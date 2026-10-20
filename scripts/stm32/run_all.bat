@@ -48,12 +48,22 @@ if not defined NOFLASH (
 )
 if not defined NOSTATION (
     echo ===== 3. shore station
+    rem The log window of an earlier run holds the station's COM port: stop its monitor first.
+    rem By command line, not window title (in Windows Terminal the title is not the cmd's);
+    rem [m]: the pattern must not match this very PowerShell.
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'esp_idf_[m]onitor|idf\.py.* [m]onitor' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    ping -n 3 127.0.0.1 >nul
     call "%~dp0test_station.bat" build flash || goto :fail
     start "shore station" cmd /k ""%~dp0test_station.bat" monitor"
 )
 echo ===== 4. Pi code
 call "%ROOT%boat.bat" stm32 deploy || goto :fail
 echo ===== 5. main.py on the Pi
+rem One main.py only: two would fight over the F407's UART. End the ssh of an earlier run's window
+rem and stop any main.py still running on the Pi ([m]/[s]: the patterns must not match the shell
+rem that runs them).
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'ssh.*run\.sh [s]tm32' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+ssh %PI_HOST% "pkill -INT -f '[m]ain.py --overlay'; sleep 2" >nul 2>&1
 start "Pi main.py" cmd /k ssh -t %PI_HOST% "cd %PI_DIR% && ./run.sh stm32 --viewer"
 ping -n 10 127.0.0.1 >nul
 echo ===== 6. dashboard and viewer
