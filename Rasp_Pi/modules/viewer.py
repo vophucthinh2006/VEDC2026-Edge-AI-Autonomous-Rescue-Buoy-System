@@ -22,7 +22,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from modules.edge_model import EDGES
+from modules.edge_model import EDGES, RISK_NAMES
 from modules.obstacle_feed import SECTOR_DEG, objects_from, sectors
 from modules.state_store import Snapshot, StateStore
 from modules.ui_draw import (BG, BLUE, CARD, CARD_EDGE, CYAN, DIM, GREEN, GRID, GUTTER, MUTED, ORANGE, RED, TEXT, WHITE, YELLOW,
@@ -32,6 +32,7 @@ from modules.world_map import WorldMemory, draw_world
 CAMERA_W, CAMERA_H = 640, 480
 MAP = 444                      # the LiDAR panel is MAP x CAMERA_H pixels
 HEADER = 52                    # title, status chips and readouts across the top
+RISK_COLOURS = (GREEN, YELLOW, ORANGE, RED)   # SAFE, MEDIUM, HIGH, CRITICAL (modules/edge_model.py)
 
 PAGE = b"""<!doctype html><html><head><meta charset="utf-8"><title>RedgeSCUE - Pi view</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -47,8 +48,9 @@ When they differ the boat is going round something.</p></body></html>"""
 
 def draw_camera(view: dict | None) -> np.ndarray:
     """view: frame (BGR) or None, box (ymin, xmin, ymax, xmax in 0..1) or None, confidence,
-    distance_m, pan_deg, scanning, age_s; with the YOLO + MoveNet model also keypoints and in_water
-    of the person followed, boats and on_boat (boxes), model (its name)."""
+    distance_m, pan_deg, scanning, age_s; with the YOLO + MoveNet model also keypoints, in_water
+    and risk of the person followed, boats and on_boat (boxes), model (its name). others: the
+    other people, (box, confidence, distance_m[, risk])."""
     panel = np.full((CAMERA_H, CAMERA_W, 3), CARD, np.uint8)
     if not view or view.get("frame") is None:
         put(panel, "no camera frame" if view is None else view.get("note", "no camera frame"), (CAMERA_W // 2, CAMERA_H // 2), 18, MUTED,
@@ -60,12 +62,15 @@ def draw_camera(view: dict | None) -> np.ndarray:
     cv2.line(panel, (CAMERA_W // 2, CAMERA_H // 2 - 10), (CAMERA_W // 2, CAMERA_H // 2 + 10), DIM, 1, cv2.LINE_AA)
     fresh = view.get("age_s", 0.0) < 1.0
     if fresh:
-        for other_box, confidence, distance in view.get("others", []):      # people in view the camera is not following
-            ymin, xmin, ymax, xmax = other_box
+        for other in view.get("others", []):      # people in view the camera is not following
+            (ymin, xmin, ymax, xmax), confidence, distance = other[:3]
+            risk = other[3] if len(other) > 3 else None
+            colour = ORANGE if risk is None else RISK_COLOURS[risk]
             p1 = (int(xmin * CAMERA_W), int(ymin * CAMERA_H))
-            cv2.rectangle(panel, p1, (int(xmax * CAMERA_W), int(ymax * CAMERA_H)), ORANGE, 1, cv2.LINE_AA)
-            tag(panel, f"person {confidence:.2f}" + (f" · {distance:.1f} m" if distance else ""), (p1[0], p1[1] - 22), ORANGE, 12, filled=False)
-        for kind, boxes in (("boat", view.get("boats", [])), ("on boat", view.get("on_boat", []))):
+            cv2.rectangle(panel, p1, (int(xmax * CAMERA_W), int(ymax * CAMERA_H)), colour, 1, cv2.LINE_AA)
+            tag(panel, ("person" if risk is None else RISK_NAMES[risk]) + f" {confidence:.2f}" + (f" · {distance:.1f} m" if distance else ""),
+                (p1[0], p1[1] - 22), colour, 12, filled=False)
+        for kind, boxes in (("boat", view.get("boats", [])), ("on boat · SAFE", view.get("on_boat", []))):
             for ymin, xmin, ymax, xmax in boxes:
                 p1 = (int(xmin * CAMERA_W), int(ymin * CAMERA_H))
                 cv2.rectangle(panel, p1, (int(xmax * CAMERA_W), int(ymax * CAMERA_H)), BLUE, 1, cv2.LINE_AA)
@@ -90,9 +95,12 @@ def draw_camera(view: dict | None) -> np.ndarray:
             cv2.line(panel, (x, y), (x + dx * arm, y), GREEN, 3, cv2.LINE_AA)
             cv2.line(panel, (x, y), (x, y + dy * arm), GREEN, 3, cv2.LINE_AA)
         distance = view.get("distance_m")
-        label = f"PERSON {view.get('confidence', 0.0):.2f}" + (f"  ·  {distance:.1f} m" if distance else "  ·  range ?")
+        label = ("PERSON" if view.get("risk") is None else RISK_NAMES[view["risk"]]) + f" {view.get('confidence', 0.0):.2f}" + (f"  ·  {distance:.1f} m" if distance else "  ·  range ?")
         tag(panel, label, (p1[0], p1[1] - 26), GREEN)
-        if view.get("in_water") is not None:
+        if view.get("risk") is not None and view.get("in_water") is not None:
+            tag(panel, RISK_NAMES[view["risk"]] + (" · IN WATER" if view["in_water"] else " · BODY VISIBLE"), (p1[0], p2[1] + 5),
+                RISK_COLOURS[view["risk"]], 12)
+        elif view.get("in_water") is not None:
             tag(panel, "IN WATER" if view["in_water"] else "BODY VISIBLE", (p1[0], p2[1] + 5), RED if view["in_water"] else YELLOW, 12)
     return panel
 

@@ -48,14 +48,26 @@ class Stm32Uart(threading.Thread):
                 self._state.update_gps(float(lat), float(lon), int(fix), float(hdop), float(speed), float(course))
             elif packet.command == "SYS" and len(packet.fields) >= 5:
                 _, battery, motor_fault, estop, link_ok = packet.fields[:5]
-                # Firmware from 2026-10-17 adds the presses of the victim's confirm button (PE4).
+                # Firmware from 2026-10-17 adds the presses of the victim's confirm button (PE4),
+                # later firmware the battery's charge in percent (-1 unknown); battery is then volts.
                 presses = int(packet.fields[7]) if len(packet.fields) >= 8 else -1
-                self._state.update_system(float(battery), bool(int(motor_fault)), bool(int(estop)), bool(int(link_ok)), presses)
+                percent = int(packet.fields[8]) if len(packet.fields) >= 9 and packet.fields[8] != "" else -1
+                self._state.update_system(float(battery), bool(int(motor_fault)), bool(int(estop)), bool(int(link_ok)), presses, percent)
                 if len(packet.fields) >= 7:
                     # Newer firmware adds armed and the RC mode switch; the camera's search sweep
                     # (camera.scan.modes) runs on them as it does on the autopilot's mode.
                     armed, auto = bool(int(packet.fields[5])), bool(int(packet.fields[6]))
                     self._state.update_vehicle("AUTO" if auto else "MANUAL", armed, 0)
+            elif packet.command == "LNK" and len(packet.fields) >= 4:
+                # $LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon[,hold], once a second: the
+                # shore station's link as the F407 hears it over LoRa, the station's position (home) and
+                # whether the admin stopped the boat from the dashboard (the F407 then keeps the motors off).
+                _, shore_ok, heard_ago, home_valid = packet.fields[:4]
+                home = None
+                if int(home_valid) and len(packet.fields) >= 6 and packet.fields[4] and packet.fields[5]:
+                    home = (float(packet.fields[4]), float(packet.fields[5]))
+                hold = len(packet.fields) >= 7 and packet.fields[6] == "1"
+                self._state.update_link(bool(int(shore_ok)), float(heard_ago) if heard_ago else -1.0, home, hold)
             elif packet.command == "RTE":
                 route = self._routes.feed(packet.fields)
                 if route is not None:

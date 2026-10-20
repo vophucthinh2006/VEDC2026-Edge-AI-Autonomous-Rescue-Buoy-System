@@ -69,7 +69,15 @@ camera:
   on_boat_overlap: 0.4          # a person box this much inside a boat box is on the boat: not a victim
   water_lower_body_score: 0.25  # hips, knees, ankles scored below this on average: in the water
   near_camera_margin: 0.03      # unless the box reaches this close to the bottom edge (of the frame height): legs cut off by the frame
-  max_poses: 3                  # MoveNet runs on at most this many people a frame (the nearest)
+  max_poses: 3                  # MoveNet runs on at most this many people a frame (the nearest); the others are MEDIUM
+  # Risk of each person (modules/edge_model.py): SAFE on a boat, MEDIUM lower body seen, HIGH in
+  # the water, CRITICAL in the water with signs of drowning: both wrists above the shoulders (each of
+  # the four keypoints scored wrist_score or more), or only the head above the water (both
+  # shoulders below shoulder_hidden_score while the nose or an eye reaches head_score).
+  risk:
+    wrist_score: 0.3
+    shoulder_hidden_score: 0.2
+    head_score: 0.3
   detection_hold_s: 0.40
   report_cooldown_s: 10.0
   lidar_association_half_angle_deg: 8.0
@@ -203,18 +211,40 @@ mission:
   # false: only the file's geofence is used; the waypoints come from the dashboard alone
   # (docs/lora-route-downlink.md). config/boat_stm32.yaml sets it.
   waypoints_from_file: true
-# STM32 boat (main.py) only: SEARCH the route, FOLLOW a person, back (modules/follow.py).
+# STM32 boat (main.py) only: PATROL the route, FOLLOW a person, back (modules/mission.py, follow.py).
 follow:
   confirm_frames: 3           # seen in this many detector passes
   confirm_s: 2.5              # within this long (the 640 px detector looks about every 0.8 s)
   lost_s: 4.0                 # no sighting this long while following: back to the route
   # true: with no route to run (none sent yet, an empty one sent, or the last waypoint reached)
-  # the boat stays still and follows nobody. config/boat_stm32.yaml sets it: no RC to stop it.
+  # the boat stays still and follows nobody (IDLE). config/boat_stm32.yaml sets it: no RC to stop it.
   only_on_route: false
+  # Reports to the shore ($TXD VICTIM_FOUND): everybody confirmed once, not twice within
+  # report_dedup_m; while following, the person's risk when it changed (seen risk_frames times in a
+  # row) and, every report_every_s, their position if it moved more than report_moved_m.
+  report_every_s: 20.0
+  report_moved_m: 3.0
+  report_dedup_m: 5.0
+  risk_frames: 2
+  # The confirm button pressed while following: the person took the supplies. Nobody within
+  # ignore_radius_m of them (by compass bearing without a GPS fix) is followed for ignore_s.
+  ignore_s: 60.0
+  ignore_radius_m: 5.0
+# STM32 boat (main.py) only: no word from the shore station (the F407's $LNK shore_ok 0, after 60 s)
+# sends the boat home (RETURN), to the station's GPS position; a station outside the geofence is
+# brought fence_margin_m inside it. Within arrive_radius_m the boat holds (HOME_HOLD).
+return:
+  arrive_radius_m: 3.0
+  fence_margin_m: 2.0
 # STM32 boat (main.py) only: spoken messages (modules/announcer.py), WAVs from tools/make_sounds.ps1.
 audio:
-  device: plughw:0,0          # the Pi's 3.5 mm jack; plughw:1,0 is the HDMI monitor
+  # The Pi's 3.5 mm jack by its ALSA name: on Bookworm card 0 is the HDMI output and the jack card 1,
+  # and the numbers can move; aplay -l lists them.
+  device: plughw:CARD=Headphones,DEV=0
   sounds_dir: sounds
+  # sounds/<periodic_sound>.wav ("phao cứu hộ") every periodic_s, the first at start; 0: never.
+  periodic_sound: rescue_boat
+  periodic_s: 100
 # Obstacles sent to the autopilot's avoidance (modules/obstacle_feed.py): MAVLink OBSTACLE_DISTANCE.
 avoidance:
   rate_hz: 5.0

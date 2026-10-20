@@ -16,7 +16,8 @@ nối vào `modules/edge_model.py`:
 - **YOLOv8n** (`yolov8n_640_int8.tflite`: int8 bên trong, vào/ra float), đầu vào 640 × 640, hai lớp `person` / `boat`.
   Trên Pi 4 khoảng 0.8 s một khung (bản 320 px trước đó: 0.24 s) nhưng tìm được người nhỏ và ở xa tốt hơn. Điểm số
   luôn ra 0.50, nên `camera.confidence_threshold` chỉ tách có / không có người.
-  Người có khung nằm phần lớn trong khung thuyền (`camera.on_boat_overlap`) là người **trên thuyền**, không tính là nạn nhân.
+  Người có khung nằm phần lớn trong khung thuyền (`camera.on_boat_overlap`) là người **trên thuyền**: mức `SAFE`,
+  vẫn được báo về bờ một lần nhưng không bao giờ bị bám theo.
 - **MoveNet Lightning** đọc tư thế từng người còn lại (tối đa `camera.max_poses`). Hông, gối, cổ chân có điểm trung
   bình dưới `camera.water_lower_body_score` thì người đó **dưới nước** (`IN WATER` trên viewer, khung xương đỏ).
 - Hướng, khoảng cách, xác nhận và quét camera giữ nguyên như trước: chỉ phần "thấy người ở đâu trong khung hình" đổi.
@@ -101,10 +102,40 @@ Trình tự đầy đủ khi đưa lên phao nằm ở `docs/porting-checklist.m
 
 ### Bản STM32 (`main.py`)
 
-Bản trình diễn trên cạn. Pi gửi hướng và tốc độ (`$NAV`), nhịp sống (`$HBT`), góc camera (`$CAM`) và
-sự kiện phát hiện người (`$TXD,VICTIM_FOUND`); STM32 đưa số người đã báo vào khung LoRa để trạm bờ và
-dashboard hiện cảnh báo. Khi tay điều khiển đã arm và gạt sang AUTO mà chưa thấy ai, camera quét tìm theo
-`camera.scan` (STM32 báo `armed`, `auto` trong gói `$SYS`).
+Pi + STM32F407, **không có tay điều khiển**: phao chỉ chạy lộ trình admin gửi từ dashboard qua LoRa
+([docs/lora-route-downlink.md](../docs/lora-route-downlink.md)). Pi gửi hướng và tốc độ (`$NAV`), nhịp sống
+(`$HBT`), góc camera (`$CAM`) và báo người (`$TXD,VICTIM_FOUND`); STM32 giữ hướng bằng PID và đưa báo cáo vào
+khung LoRa cho trạm bờ và dashboard. Đèn và relay chỉ do dashboard bật, Pi không đụng tới (`$SOS` không dùng).
+
+**Trạng thái** (`modules/mission.py`, hiện trên viewer và trong log):
+
+| Trạng thái | Phao làm gì | Chuyển sang |
+|---|---|---|
+| `IDLE` | đứng yên (chưa có lộ trình, nhận lộ trình rỗng, hoặc đã đi hết), camera nhìn thẳng | `PATROL` khi có lộ trình |
+| `PATROL` | đi lần lượt các waypoint, né vật cản (BAPF), camera quét ±45° | `FOLLOW` khi xác nhận được người; `RETURN` khi mất liên lạc bờ |
+| `FOLLOW` | tới người có mức rủi ro cao nhất (cùng mức thì người gần nhất), dừng cách `target_standoff_m` | `PATROL` khi người đó nhấn nút xác nhận (đã lấy phao/đồ, Pi bỏ qua người này `follow.ignore_s` giây) hoặc mất dấu `follow.lost_s` giây; `RETURN` khi mất liên lạc bờ |
+| `RETURN` | về nhà, không bám người nhưng vẫn phát hiện và báo người | `HOME_HOLD` khi cách nhà dưới `return.arrive_radius_m` |
+| `HOME_HOLD` | đứng yên ở nhà | — |
+
+Khi liên lạc bờ trở lại, `RETURN` / `HOME_HOLD` quay về `PATROL` **đúng waypoint đang đi dở** (hoặc `IDLE` nếu
+không còn lộ trình). Bộ an toàn (`modules/safety.py`: IMU, lật, GPS, geofence, LiDAR) luôn đứng trên mọi trạng thái.
+
+- **Mất liên lạc bờ**: F407 báo trong `$LNK` (không nghe trạm 60 s thì `shore_ok` = 0). **Nhà** là vị trí GPS của
+  trạm bờ (cũng trong `$LNK`); trạm nằm ngoài geofence thì nhà được kéo vào trong hàng rào `return.fence_margin_m`
+  mét. Chưa từng nhận vị trí trạm thì nhà là chỗ phao đứng khi nhận lộ trình hiện tại.
+- **Mức rủi ro** (`modules/edge_model.py`, ngưỡng ở `camera.risk`): người trên thuyền `SAFE` (xanh lá, không bao giờ
+  bám theo); thấy phần thân dưới `MEDIUM` (vàng); dưới nước `HIGH` (cam); dưới nước có dấu hiệu đuối nước
+  `CRITICAL` (đỏ): hai cổ tay cao hơn vai, hoặc chỉ còn thấy đầu (không thấy vai). Người ngoài `camera.max_poses`
+  người gần nhất không được đọc tư thế nên tính `MEDIUM`.
+- **Báo về bờ** `$TXD,seq,VICTIM_FOUND,lat,lon,conf,risk` (`risk` 0..3; `lat,lon` = 0,0 khi chưa có GPS fix):
+  mỗi người khi được xác nhận lần đầu (cả người `SAFE`; cùng vị trí ước tính trong 5 m thì không báo lại); khi
+  đang bám mà mức rủi ro của người đó đổi (thấy 2 lần liên tiếp); và mỗi `follow.report_every_s` (20 s) nếu vị
+  trí ước tính của người đó đã dịch hơn 3 m.
+- **Loa**: "phao cứu hộ" (`sounds/rescue_boat.wav`) mỗi `audio.periodic_s` (100 s), lần đầu ngay khi chạy; nhấn nút
+  xác nhận thì phát `supplies_confirmed` (không chen tiếng định kỳ vào lúc đó).
+
+Muốn chạy / dừng phao: xem `STM32F4/README.md` mục 13. Trên giá (`config/bench_demo.yaml`,
+`follow.only_on_route: false`) phao bám người cả khi chưa có lộ trình.
 
 LiDAR chọn bằng `serial.lidar_model` (`lds008`, `ld14`, `none`) hoặc `--no-lidar`. Với
 `vehicle.lidar_required: false`, mất cổng LiDAR chỉ ghi cảnh báo và chạy tiếp, không né vật cản.
@@ -123,13 +154,29 @@ của Pi, `rescue_main.py` giữ từng tia cho autopilot.
 
 ## Kết nối
 
-- STM32: `/dev/serial0`, 115200 8N1, GPIO14/15.
-- LiDAR: `/dev/ttyAMA3`, 115200 8N1. LD14 chỉ cần TX -> Pi GPIO5; LDS-008 cần thêm Pi GPIO4 (TX) -> RX của module để gửi lệnh `startlds$`. Bật `enable_uart=1` và `dtoverlay=uart3` trong boot configuration; tắt serial login console trên UART STM32.
+Phao STM32 (`config/boat_stm32.yaml`), gọi cổng theo **ổ USB** (`/dev/serial/by-path/...`), không theo
+`/dev/ttyUSBn` vì số này đổi giữa các lần khởi động; `tools/port_probe.py` cho biết tên sau khi cắm lại:
+
+- STM32F407: UART4 qua mạch USB-to-TTL ở ổ `usb-0:1.2`, 115200 8N1.
+- LiDAR LD14: mạch USB-to-TTL ở ổ `usb-0:1.1`, 115200 8N1 (LD14P: 230400, đặt `serial.lidar_baud`).
+- Camera: ổ `usb-0:1.3` (trên Pi 4 8 GB chỉ ổ này chạy ổn định webcam), gọi theo số serial `/dev/v4l/by-id/...`.
 - Hiệu chuẩn `vehicle.lidar_yaw_offset_deg` để góc 0 của LD14 đúng hướng mũi phao.
+
+`settings.yaml` vẫn để mặc định cũ (`/dev/serial0` GPIO14/15 cho STM32, `/dev/ttyAMA3` cho LiDAR với
+`dtoverlay=uart3`) cho cách nối dây qua UART của Pi.
+
+Giao thức với F407 ở `STM32F4/README.md` mục 11. Pi đọc thêm:
+
+- `$LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon` mỗi giây: `shore_ok` 0/1, `heard_ago_s` số giây từ
+  lần cuối nghe trạm bờ (-1: chưa nghe), `home_valid` 0/1 và vị trí trạm (6 chữ số thập phân, có thể để trống khi
+  `home_valid` = 0). Firmware chưa có `$LNK`: Pi coi liên lạc bờ luôn tốt và không có nhà.
+- `$SYS` trường thứ 9 `battery_pct` (0..100, -1 không rõ); trường 1 `battery` là volt.
 
 ## Hành vi phát hiện người
 
-AI chỉ tạo target khi lớp COCO `person` đạt confidence cấu hình **và** một cụm LiDAR ở cùng góc camera. Khi khóa được, Pi gửi `TXD,VICTIM_FOUND,lat,lon,confidence` (không ảnh) và điều hướng đến khoảng cách `target_standoff_m`; không ghép được LiDAR thì không tiến lại gần.
+Mỗi người có hướng (camera + góc servo), khoảng cách (chiều cao khung, `camera.distance_source`) và mức rủi ro.
+Pi bám theo người có rủi ro cao nhất, không bao giờ bám người trên thuyền, và báo về bờ
+`TXD,VICTIM_FOUND,lat,lon,confidence,risk` (không gửi ảnh) như mô tả ở mục Bản STM32.
 
 ## Kiểm tra nhanh
 

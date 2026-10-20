@@ -9,8 +9,8 @@ vehicle:
   # none of the bench calibration of settings.yaml applies.
   lidar_yaw_offset_deg: 0.0
   lidar_mask: []
-  # The F407 cannot brake in AUTO (rear ESCs one way, front motor unused): told speed 0 at the
-  # stand-off, the boat coasts about 1 m further on. Stopping at 3 m leaves it about 2 m from the person.
+  # Before the front motor braked (App/front_motor.c) the boat coasted about 1 m past the stand-off;
+  # 3 m was set for that and is kept: braking now leaves it nearer 3 m than 2 m from the person.
   target_standoff_m: 3.0
 mission:
   file: config/mission_sim_central.yaml
