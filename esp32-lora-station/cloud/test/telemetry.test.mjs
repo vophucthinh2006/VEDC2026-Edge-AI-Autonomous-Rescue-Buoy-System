@@ -102,3 +102,59 @@ test("keeps the route progress of a buoy fed over LoRa, drops it when malformed"
     assert.equal(Object.hasOwn(sanitizeBuoy({ ...base, route: bad }), "route"), false);
   }
 });
+
+test("keeps course, speed, battery and lights, drops each one that is out of range", () => {
+  const result = sanitizeBuoy({ ...base, ...attitude, course: 359.97, speed: 1.234, battery_pct: 87, lights: 3 });
+  assert.equal(result.course, 0);
+  assert.equal(result.speed, 1.23);
+  assert.equal(result.battery_pct, 87);
+  assert.equal(result.lights, 3);
+  for (const bad of [{ course: 361 }, { course: -1 }, { speed: -0.1 }, { speed: "1" }, { battery_pct: 101 },
+                     { battery_pct: 50.5 }, { lights: 4 }, { lights: -1 }, { lights: "1" }]) {
+    assert.deepEqual(sanitizeBuoy({ ...base, ...bad }), base);
+  }
+});
+
+test("keeps the stopped flag 0 or 1 only", () => {
+  assert.equal(sanitizeBuoy({ ...base, hold: 1 }).hold, 1);
+  assert.equal(sanitizeBuoy({ ...base, hold: 0 }).hold, 0);
+  for (const bad of [{ hold: 2 }, { hold: true }, { hold: "1" }]) assert.deepEqual(sanitizeBuoy({ ...base, ...bad }), base);
+});
+
+test("accepts mode R (returning to the shore station)", () => {
+  assert.equal(sanitizeBuoy({ ...base, ...attitude, mode: "R" }).mode, "R");
+});
+
+const event = e => ({ id: "PHAO-01", rssi: -80, snr: 6, raw: "EVT", event: e });
+
+test("keeps a valid event of each type", () => {
+  assert.deepEqual(sanitizeBuoy(event({ seq: 4, type: "V", lat: 10.1, lon: 106.2, risk: 3, conf: 0.876, count: 2 })).event,
+                   { seq: 4, type: "V", lat: 10.1, lon: 106.2, risk: 3, conf: 0.88, count: 2 });
+  assert.deepEqual(sanitizeBuoy(event({ seq: 5, type: "V", lat: null, lon: null, risk: 0, conf: 1 })).event,
+                   { seq: 5, type: "V", lat: null, lon: null, risk: 0, conf: 1 });
+  assert.deepEqual(sanitizeBuoy(event({ seq: 6, type: "T", lat: 10.1, lon: 106.2, roll: 120.04, pitch: -12 })).event,
+                   { seq: 6, type: "T", lat: 10.1, lon: 106.2, roll: 120, pitch: -12 });
+  assert.deepEqual(sanitizeBuoy(event({ seq: 65535, type: "C", lat: null, lon: null, presses: 1 })).event,
+                   { seq: 65535, type: "C", lat: null, lon: null, presses: 1 });
+});
+
+test("drops a malformed event and flags it", () => {
+  for (const bad of [
+    { seq: 0, type: "V", lat: null, lon: null, risk: 1, conf: 0.5 },
+    { seq: 65536, type: "C", lat: null, lon: null, presses: 1 },
+    { seq: 1, type: "X", lat: null, lon: null },
+    { seq: 1, type: "V", lat: 91, lon: 106, risk: 1, conf: 0.5 },
+    { seq: 1, type: "V", lat: 10, lon: null, risk: 1, conf: 0.5 },
+    { seq: 1, type: "V", lat: null, lon: null, risk: 4, conf: 0.5 },
+    { seq: 1, type: "V", lat: null, lon: null, risk: 1, conf: 1.5 },
+    { seq: 1, type: "V", lat: null, lon: null, risk: 1, conf: 0.5, count: -1 },
+    { seq: 1, type: "T", lat: null, lon: null, roll: 181, pitch: 0 },
+    { seq: 1, type: "T", lat: null, lon: null, roll: 10 },
+    { seq: 1, type: "C", lat: null, lon: null, presses: 0 },
+    "V",
+  ]) {
+    const result = sanitizeBuoy(event(bad));
+    assert.equal(Object.hasOwn(result, "event"), false, JSON.stringify(bad));
+    assert.equal(result.event_bad, 1);
+  }
+});

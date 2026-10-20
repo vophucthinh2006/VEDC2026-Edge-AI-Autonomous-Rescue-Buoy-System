@@ -54,6 +54,36 @@ function sanitizeSend(m) {
   return { id, loop: m.loop === true, clear: m.clear === true };
 }
 
+// Lệnh đèn: { id: tên phao, lights: 0..3 } (bit0 = đèn 1 PC3, bit1 = đèn 2 PC2)
+function sanitizeLights(m) {
+  if (!m || typeof m !== "object" || typeof m.id !== "string") return null;
+  const id = m.id.replace(/[^\w.\-]/g, "").slice(0, 31);
+  if (!id || !Number.isInteger(m.lights) || m.lights < 0 || m.lights > 3) return null;
+  return { id, lights: m.lights };
+}
+
+// Lệnh dừng: { id: tên phao, hold: true (dừng) | false (chạy tiếp) }
+function sanitizeHold(m) {
+  if (!m || typeof m !== "object" || typeof m.id !== "string") return null;
+  const id = m.id.replace(/[^\w.\-]/g, "").slice(0, 31);
+  if (!id || typeof m.hold !== "boolean") return null;
+  return { id, hold: m.hold };
+}
+
+// Lệnh admin: phiên admin từ trình duyệt (kèm Origin đúng), hoặc Bearer ADMIN_API_TOKEN cho script thử.
+// Trả về { by } nếu được phép, ngược lại { error: Response }.
+async function adminCaller(request, env, session) {
+  const auth = request.headers.get("Authorization") || "";
+  if (auth) {
+    if (env.ADMIN_API_TOKEN && (await secretEquals(auth, "Bearer " + env.ADMIN_API_TOKEN))) return { by: "api" };
+    return { error: json({ error: "unauthorized" }, 401) };
+  }
+  if (!session) return { error: json({ error: "unauthenticated" }, 401) };
+  if (session.role !== "admin") return { error: json({ error: "Chỉ admin được ra lệnh này" }, 403) };
+  if (!originOk(request)) return { error: json({ error: "forbidden origin" }, 403) };
+  return { by: session.email };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -145,12 +175,28 @@ export default {
       return hub().fetch("https://hub/downlink", { method: "PUT", body: JSON.stringify({ ...req, by: session.email }) });
     }
 
+    // ---- Bật/tắt đèn phao, dừng phao, xóa chấm người: admin (hoặc token ADMIN_API_TOKEN) ----
+    if (path === "/api/lights" || path === "/api/hold" || path === "/api/victims/clear") {
+      if (request.method !== "POST") return json({ error: "method" }, 405);
+      const caller = await adminCaller(request, env, session);
+      if (caller.error) return caller.error;
+      if (path === "/api/victims/clear") return hub().fetch("https://hub/victims", { method: "DELETE" });
+      const body = await request.text();
+      if (body.length > MAX_BODY) return json({ error: "too large" }, 413);
+      let req = null;
+      const hold = path === "/api/hold";
+      try { req = (hold ? sanitizeHold : sanitizeLights)(JSON.parse(body)); } catch { /* báo lỗi bên dưới */ }
+      if (!req) return json({ error: "bad request" }, 400);
+      return hub().fetch(hold ? "https://hub/hold" : "https://hub/lights", { method: "PUT", body: JSON.stringify({ ...req, by: caller.by }) });
+    }
+
     // ---- Dữ liệu: cần phiên (khách hoặc admin) ----
-    if (path === "/ws" || path === "/api/state" || path === "/api/mission") {
+    if (path === "/ws" || path === "/api/state" || path === "/api/mission" || path === "/api/victims") {
       if (!session) return json({ error: "unauthenticated" }, 401);
 
       if (path === "/ws") return hub().fetch(request);
       if (path === "/api/state") return hub().fetch("https://hub/state");
+      if (path === "/api/victims") return request.method === "GET" ? hub().fetch("https://hub/victims") : json({ error: "method" }, 405);
 
       if (request.method === "GET") return hub().fetch("https://hub/mission");
       if (request.method === "PUT") {

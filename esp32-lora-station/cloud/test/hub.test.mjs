@@ -107,3 +107,154 @@ test("an empty route (stop) is offered, then delivered like any other", async ()
   await call(hub, "POST", "/ingest", beacon({ rev: 2, have: 0, pi: 1 }));
   assert.deepEqual(await call(hub, "GET", "/downlink"), { rev: 0 });
 });
+
+const victim = (seq, extra = {}) => ({ id: "PHAO-01", fix: 0, rssi: -80, snr: 6, raw: "EVT",
+  event: { seq, type: "V", lat: 10.8834, lon: 106.7961, risk: 1, conf: 0.6, count: 1, ...extra } });
+const alertFrame = event => ({ ...victim(0), event });
+
+test("an event-only frame does not touch the buoy's position or state", async () => {
+  const { hub, sent } = makeHub();
+  await call(hub, "POST", "/ingest", beacon(undefined));
+  await call(hub, "POST", "/ingest", victim(1));
+  const [buoy] = await call(hub, "GET", "/state");
+  assert.equal(buoy.fix, 1);
+  assert.equal(Object.hasOwn(buoy, "event"), false);
+  assert.equal(sent.filter(m => m.id === "PHAO-01" && !m.type).length, 1);
+});
+
+test("a repeated event (same id, seq) is recorded once", async () => {
+  const { hub, sent } = makeHub();
+  assert.equal((await call(hub, "POST", "/ingest", victim(1))).event, "new");
+  assert.equal((await call(hub, "POST", "/ingest", victim(1, { risk: 3 }))).event, "dup");
+  const { victims } = await call(hub, "GET", "/victims");
+  assert.equal(victims.length, 1);
+  assert.equal(victims[0].risk, 1);
+  assert.equal(sent.filter(m => m.type === "victim").length, 1);
+  // Another buoy may use the same seq
+  assert.equal((await call(hub, "POST", "/ingest", { ...victim(1), id: "PHAO-02" })).event, "new");
+});
+
+test("a detection within 5 m of a stored person updates it, farther away adds one", async () => {
+  const { hub, store, sent } = makeHub();
+  await call(hub, "POST", "/ingest", victim(1));
+  // ~3 m north: same person, risk and confidence updated
+  await call(hub, "POST", "/ingest", victim(2, { lat: 10.88343, risk: 3, conf: 0.9 }));
+  let { victims } = await call(hub, "GET", "/victims");
+  assert.equal(victims.length, 1);
+  assert.equal(victims[0].risk, 3);
+  assert.equal(victims[0].conf, 0.9);
+  assert.equal(victims[0].lat, 10.8834);
+  assert.ok(victims[0].last_at >= victims[0].first_at);
+  const update = sent.filter(m => m.type === "victim").at(-1);
+  assert.equal(update.new, false);
+  assert.equal(update.victim.vid, victims[0].vid);
+  // ~11 m away: a second person
+  await call(hub, "POST", "/ingest", victim(3, { lat: 10.8835 }));
+  // Same spot seen by another buoy: kept as its own dot
+  await call(hub, "POST", "/ingest", { ...victim(1), id: "PHAO-02" });
+  ({ victims } = await call(hub, "GET", "/victims"));
+  assert.deepEqual(victims.map(v => v.buoy), ["PHAO-01", "PHAO-01", "PHAO-02"]);
+  // Survives a reload
+  const { hub: reloaded } = makeHub(store);
+  assert.equal((await call(reloaded, "GET", "/victims")).victims.length, 3);
+});
+
+test("overturn, confirm and a person without a position become alerts", async () => {
+  const { hub, sent } = makeHub();
+  await call(hub, "POST", "/ingest", victim(1, { lat: null, lon: null }));
+  await call(hub, "POST", "/ingest", alertFrame({ seq: 2, type: "T", lat: 10.8834, lon: 106.7961, roll: 120, pitch: 5 }));
+  await call(hub, "POST", "/ingest", alertFrame({ seq: 3, type: "C", lat: null, lon: null, presses: 2 }));
+  const { victims, alerts } = await call(hub, "GET", "/victims");
+  assert.equal(victims.length, 0);
+  assert.deepEqual(alerts.map(a => a.type), ["V", "T", "C"]);
+  assert.equal(alerts[1].roll, 120);
+  assert.equal(alerts[1].buoy, "PHAO-01");
+  assert.equal(alerts[2].presses, 2);
+  assert.equal(sent.filter(m => m.type === "alert").length, 3);
+});
+
+test("the alert list is bounded", async () => {
+  const { hub } = makeHub();
+  for (let seq = 1; seq <= 60; seq++) await call(hub, "POST", "/ingest", alertFrame({ seq, type: "C", lat: null, lon: null, presses: 1 }));
+  const { alerts } = await call(hub, "GET", "/victims");
+  assert.equal(alerts.length, 50);
+  assert.equal(alerts[0].seq, 11);
+});
+
+test("clearing removes the dots, a repeated event does not bring one back", async () => {
+  const { hub, sent } = makeHub();
+  await call(hub, "POST", "/ingest", victim(1));
+  assert.deepEqual(await call(hub, "DELETE", "/victims"), { type: "victims", victims: [], alerts: [] });
+  assert.equal(sent.at(-1).type, "victims");
+  await call(hub, "POST", "/ingest", victim(1));
+  assert.equal((await call(hub, "GET", "/victims")).victims.length, 0);
+  await call(hub, "POST", "/ingest", victim(2));
+  assert.equal((await call(hub, "GET", "/victims")).victims.length, 1);
+});
+
+test("light commands ride along the downlink, even with no route", async () => {
+  const { hub, store, sent } = makeHub();
+  const m = await call(hub, "PUT", "/lights", { id: "PHAO-01", lights: 2, by: "admin@example.com" });
+  assert.equal(m.want, 2);
+  assert.equal(m.have, null);
+  assert.equal(sent.at(-1).type, "lights");
+  assert.deepEqual(await call(hub, "GET", "/downlink"), { rev: 0, lights: { "PHAO-01": 2 } });
+  await call(hub, "PUT", "/lights", { id: "PHAO-02", lights: 0 });
+  const { hub: reloaded } = makeHub(store);
+  assert.deepEqual(await call(reloaded, "GET", "/downlink"), { rev: 0, lights: { "PHAO-01": 2, "PHAO-02": 0 } });
+});
+
+test("changing lights does not touch the route's delivered state", async () => {
+  const { hub } = makeHub();
+  await sendRoute(hub);
+  await call(hub, "PUT", "/lights", { id: "PHAO-01", lights: 1 });
+  const dl = await call(hub, "GET", "/downlink");
+  assert.equal(dl.rev, 1);
+  assert.equal(dl.pts.length, 3);
+  assert.deepEqual(dl.lights, { "PHAO-01": 1 });
+  await call(hub, "POST", "/ingest", beacon({ rev: 1, have: 3, pi: 1 }));
+  await call(hub, "PUT", "/lights", { id: "PHAO-01", lights: 3 });
+  assert.deepEqual(await call(hub, "GET", "/downlink"), { rev: 0, lights: { "PHAO-01": 3 } });
+});
+
+test("the dashboard hears when the boat's lights match the command", async () => {
+  const { hub, sent } = makeHub();
+  await call(hub, "PUT", "/lights", { id: "PHAO-01", lights: 1 });
+  await call(hub, "POST", "/ingest", { ...beacon(undefined), lights: 0 });
+  await call(hub, "POST", "/ingest", { ...beacon(undefined), lights: 1 });
+  await call(hub, "POST", "/ingest", { ...beacon(undefined), lights: 1 });   // unchanged: no new message
+  assert.deepEqual(sent.filter(m => m.type === "lights").map(m => [m.want, m.have]), [[1, null], [1, 0], [1, 1]]);
+});
+
+test("a stop command rides along the downlink next to the lights, and survives a reload", async () => {
+  const { hub, store, sent } = makeHub();
+  const m = await call(hub, "PUT", "/hold", { id: "PHAO-01", hold: true, by: "admin@example.com" });
+  assert.deepEqual([m.type, m.want, m.have], ["hold", true, null]);
+  assert.equal(sent.at(-1).type, "hold");
+  await call(hub, "PUT", "/lights", { id: "PHAO-01", lights: 1 });
+  assert.deepEqual(await call(hub, "GET", "/downlink"), { rev: 0, lights: { "PHAO-01": 1 }, hold: { "PHAO-01": 1 } });
+  const { hub: reloaded } = makeHub(store);
+  assert.deepEqual((await call(reloaded, "GET", "/downlink")).hold, { "PHAO-01": 1 });
+  await call(reloaded, "PUT", "/hold", { id: "PHAO-01", hold: false });
+  assert.deepEqual((await call(reloaded, "GET", "/downlink")).hold, { "PHAO-01": 0 });
+});
+
+test("stopping keeps the route: it is still offered, and delivered as before", async () => {
+  const { hub } = makeHub();
+  await sendRoute(hub);
+  await call(hub, "PUT", "/hold", { id: "PHAO-01", hold: true });
+  const dl = await call(hub, "GET", "/downlink");
+  assert.equal(dl.rev, 1);
+  assert.equal(dl.pts.length, 3);
+  await call(hub, "POST", "/ingest", { ...beacon({ rev: 1, have: 3, pi: 1 }), hold: 1 });
+  assert.deepEqual(await call(hub, "GET", "/downlink"), { rev: 0, hold: { "PHAO-01": 1 } });
+});
+
+test("the dashboard hears when the boat has really stopped", async () => {
+  const { hub, sent } = makeHub();
+  await call(hub, "PUT", "/hold", { id: "PHAO-01", hold: true });
+  await call(hub, "POST", "/ingest", { ...beacon(undefined), hold: 0 });
+  await call(hub, "POST", "/ingest", { ...beacon(undefined), hold: 1 });
+  await call(hub, "POST", "/ingest", { ...beacon(undefined), hold: 1 });   // unchanged: no new message
+  assert.deepEqual(sent.filter(m => m.type === "hold").map(m => [m.want, m.have]), [[true, null], [true, false], [true, true]]);
+});
