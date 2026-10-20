@@ -66,6 +66,42 @@ int main(void) {
         assert(!payload.has_route && payload.has_attitude);
     }
 
+    /* Course over ground, speed, battery, lights; R while driving home with the station lost. */
+    frame = "id=PHAO-01,10.883438,106.796019,r=0.4,p=-1.0,y=54.2,t=55.0,m=R,i=1,c=3,q=120,v=2,w=7:12:1,L=3,b=87,g=52.1,s=0.25";
+    assert(strlen(frame) < 120U);
+    assert(lora_payload_parse(frame, &payload));
+    assert(payload.has_attitude && payload.mode == 'R' && payload.has_route);
+    assert(payload.has_lights && payload.lights == 3U && payload.has_battery && payload.battery_pct == 87U);
+    assert(payload.has_course && fabsf(payload.course - 52.1f) < 0.01f && payload.has_speed && fabsf(payload.speed - 0.25f) < 0.001f);
+    assert(lora_payload_parse("id=PHAO-01,NO_FIX,r=0,p=0,y=0,t=-1,m=S,i=0,c=0,q=1,L=4,b=101,g=360.0,s=-1", &payload));
+    assert(payload.has_attitude && !payload.has_lights && !payload.has_battery && !payload.has_course && !payload.has_speed);
+    assert(lora_payload_parse("id=PHAO-01,NO_FIX,r=0,p=0,y=0,t=-1,m=S,i=0,c=0,q=1,H=1,L=0", &payload));
+    assert(payload.has_hold && payload.hold == 1U && !payload.has_route);
+    assert(lora_payload_parse("id=PHAO-01,NO_FIX,r=0,p=0,y=0,t=-1,m=S,i=0,c=0,q=1,H=2", &payload) && !payload.has_hold);
+    assert(lora_payload_parse("id=PHAO-01,NO_FIX,r=0,p=0,y=0,t=-1,m=X,i=0,c=0,q=1", &payload));
+    assert(!payload.has_attitude);
+
+    /* Event frames: a beacon is not one, and an event is not a beacon to the event parser. */
+    lora_event_t ev;
+    assert(!lora_event_parse("id=PHAO-01,10.0,106.0", &ev));
+    assert(lora_event_parse("ev=PHAO-01,5,V,10.883500,106.796100,3,0.87,2", &ev));
+    assert(strcmp(ev.id, "PHAO-01") == 0 && ev.seq == 5U && ev.type == 'V' && ev.has_position);
+    assert(fabs(ev.lat - 10.8835) < 1e-6 && ev.risk == 3U && fabsf(ev.confidence - 0.87f) < 1e-4f && ev.count == 2U);
+    assert(lora_event_parse("ev=PHAO-01,6,V,,,1,0.50,3", &ev) && !ev.has_position && ev.risk == 1U);
+    assert(lora_event_parse("ev=PHAO-01,7,T,-10.5,-106.25,-120.5,4.0", &ev));
+    assert(ev.type == 'T' && ev.has_position && fabsf(ev.roll + 120.5f) < 1e-3f && fabsf(ev.pitch - 4.0f) < 1e-3f);
+    assert(lora_event_parse("ev=PHAO-01,8,C,,,4", &ev) && ev.type == 'C' && ev.presses == 4U && !ev.has_position);
+    const char *bad_event[] = {
+        "ev=PHAO-01,0,C,,,1",            /* eseq 0 is "no event" */
+        "ev=PHAO-01,9,V,,,4,0.5,1",      /* risk past critical */
+        "ev=PHAO-01,9,V,,,1,1.5,1",      /* confidence past 1 */
+        "ev=PHAO-01,9,V,10.0,,1,0.5,1",  /* half a position */
+        "ev=PHAO-01,9,T,,,1.0",          /* pitch missing */
+        "ev=PHAO-01,9,X,,,1",
+        "ev=,9,C,,,1",
+    };
+    for (size_t i = 0; i < sizeof(bad_event) / sizeof(bad_event[0]); i++) assert(!lora_event_parse(bad_event[i], &ev));
+
     puts("lora_payload_test: PASS");
     return 0;
 }
