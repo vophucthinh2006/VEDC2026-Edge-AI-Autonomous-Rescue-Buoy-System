@@ -67,11 +67,20 @@ esp32-lora-station/
 | `GET /ws`, `GET /api/state`, `GET /api/mission` | khách/admin | dữ liệu |
 | `PUT /api/mission` | **admin** | lưu lộ trình `{waypoints, poly, spacing, angle, speed}` (≤ 300 điểm) |
 | `POST /api/mission/send` `{id?, loop?, clear?}` | **admin** | nút "Gửi tới phao": chụp lộ trình đang lưu thành bản gửi xuống phao `id` (mặc định `PHAO-01`) |
-| `GET /api/downlink` | token ESP32 | trạm lấy bản gửi `{rev, id, loop, pts: [[lat, lon]]}` để phát LoRa (`{rev: 0}`: chưa gửi gì) |
+| `GET /api/downlink` | token ESP32 | trạm lấy bản gửi `{rev, id, loop, pts: [[lat, lon]]}` để phát LoRa (`{rev: 0}`: chưa gửi gì). Có lệnh đèn thì thêm `lights: {"<id phao>": mask}` cho mọi phao có lệnh, kể cả khi `rev: 0` |
+| `GET /api/victims` | khách/admin | `{victims: [...], alerts: [...]}`: người phát hiện và cảnh báo (mục "Người phát hiện, cảnh báo, đèn") |
+| `POST /api/victims/clear` | **admin** hoặc `ADMIN_API_TOKEN` | nút "Xoá chấm": xóa mọi chấm người và cảnh báo trên bản đồ |
+| `POST /api/lights` `{id, lights}` | **admin** hoặc `ADMIN_API_TOKEN` | lệnh hai đèn của phao `id`: `lights` 0..3, bit0 = đèn 1 (PC3), bit1 = đèn 2 (PC2) |
 
 Mọi POST/PUT từ trình duyệt phải có header `Origin` trùng chính trang (chống CSRF). Phiên là cookie
 `HttpOnly; Secure; SameSite=Lax` ký HMAC; admin sống 7 ngày, khách 1 ngày. Mỗi request admin kiểm tra lại
 email còn trong `ADMIN_EMAILS`, gỡ email khỏi danh sách là mất quyền ngay.
+
+`/api/lights` và `/api/victims/clear` còn nhận header `Authorization: Bearer <ADMIN_API_TOKEN>` thay cho phiên admin,
+để script thử bật/tắt đèn không cần đăng nhập Google. Không đặt secret `ADMIN_API_TOKEN` thì chỉ phiên admin dùng được.
+```powershell
+curl -X POST http://localhost:8787/api/lights -H "Authorization: Bearer dev-admin-token" -H "Content-Type: application/json" -d "{\"id\":\"PHAO-01\",\"lights\":1}"
+```
 
 ## 1. Tạo Google OAuth Client ID (làm một lần)
 
@@ -94,6 +103,7 @@ npx wrangler login
 npx wrangler secret put INGEST_TOKEN     # chuỗi bí mật dài ngẫu nhiên, ESP32 dùng để gửi dữ liệu
 npx wrangler secret put SESSION_SECRET   # chuỗi ngẫu nhiên >= 32 ký tự, dùng ký cookie phiên
 npx wrangler secret put ADMIN_EMAILS     # email admin, nhiều email thì phân cách bằng dấu phẩy
+npx wrangler secret put ADMIN_API_TOKEN  # tùy chọn: chuỗi bí mật cho script gọi /api/lights, /api/victims/clear
 npx wrangler deploy
 ```
 
@@ -122,6 +132,8 @@ Hành vi firmware:
 
 Giao diện với phao giả, không cần backend: `?mock` (admin giả) hoặc `?mock=guest` (khách giả).
 Bản giả có thêm `SIM-01` báo qua MAVLink để xem HUD, đổi chế độ HOLD → GUIDED → AUTO → RTL mỗi 20 giây.
+Trong 35 giây đầu bản giả lần lượt có người đủ bốn mức nguy hiểm, PHAO-01 lật rồi có người bấm xác nhận;
+PHAO-01 có hướng đi GPS, pin và đèn (bấm công tắc để thấy "đang gửi…"), PHAO-02 quay về trạm từng đợt.
 ```powershell
 cd web
 python -m http.server 8766        # mở http://localhost:8766/?mock
@@ -134,6 +146,7 @@ SESSION_SECRET=<chuỗi ngẫu nhiên>
 ADMIN_EMAILS=admin@example.com
 GOOGLE_CLIENT_ID=test-client-id
 GOOGLE_JWKS_URL=http://127.0.0.1:8799/jwks.json
+ADMIN_API_TOKEN=dev-admin-token
 ```
 ```powershell
 cd cloud
@@ -164,6 +177,31 @@ dữ liệu tư thế. ESP32 và cloud kiểm tra miền Roll `[-180,180]`, Pitc
 (cloud gắn `attitude_bad:1`), vị trí và RSSI/SNR vẫn được lưu và phát.
 Gói GPS-only cũ vẫn được chấp nhận; lịch sử server chỉ tiếp tục lưu RSSI/SNR và vị trí.
 
+### Người phát hiện, cảnh báo, đèn (bản STM32)
+
+Beacon có thể thêm (đều tùy chọn, trường nào sai miền thì chỉ bỏ trường đó):
+- `course` 0..360 độ: hướng đi thực theo GPS (course over ground), `speed` m/s theo GPS,
+- `battery_pct` 0..100, `lights` 0..3: trạng thái **thật** của hai relay (bit0 = đèn 1 PC3, bit1 = đèn 2 PC2),
+- `mode` có thêm `R`: phao không nghe thấy trạm bờ quá 60 giây, tự chạy về trạm.
+
+Bản tin sự kiện có `id/rssi/snr/raw` và nhóm `event`, không có nhóm tư thế; nó **không** đổi vị trí hay trạng thái phao:
+```json
+{"id":"PHAO-01","rssi":-90,"snr":6.5,"raw":"...","event":{"seq":12,"type":"V","lat":10.7651,"lon":106.6612,"risk":3,"conf":0.88,"count":2}}
+```
+- `seq` 1..65535. Phao gửi lặp tới khi trạm ACK, nên cùng `(id, seq, type)` trong 10 phút chỉ được ghi một lần
+  (`/api/ingest` trả `"event":"new"` hoặc `"dup"`).
+- `type` `V` = phát hiện người: `risk` 0 an toàn, 1 trung bình, 2 cao, 3 nguy kịch; `conf` 0..1; `count` tổng số người phao đã báo.
+  Một `V` cách chấm cũ của cùng phao dưới 5 m thì cập nhật chấm đó (`risk`, `conf`, `last_at`), xa hơn thì thêm chấm.
+  `V` có `lat/lon` null (phao chưa có GPS) chỉ thành cảnh báo.
+- `type` `T` = lật/nghiêng lớn: `lat/lon` là GPS phao lúc đó, thêm `roll`, `pitch`. `type` `C` = người gặp nạn bấm nút
+  xác nhận đã nhận đồ cứu hộ, thêm `presses`.
+- Server giữ tối đa 200 chấm người `{vid, buoy, lat, lon, risk, conf, first_at, last_at}` và 50 cảnh báo gần nhất
+  `{type, buoy, seq, at, lat, lon, ...}` (khóa `events` trong Durable Object).
+
+Lệnh đèn (`POST /api/lights`) lưu riêng cho từng phao (khóa `lights`), không đụng tới bản gửi lộ trình: đổi đèn không làm
+trạm gửi lại lộ trình đã giao. Trạm đọc lệnh trong `GET /api/downlink` (trường `lights`) và phát xuống phao; phao báo
+trạng thái thật trong `lights` của beacon. Lệnh giữ nguyên tới khi admin đổi, nên phao khởi động lại vẫn được bật lại đèn.
+
 ### Nguồn MAVLink (cầu nối, giả lập)
 
 `tools/mavlink_bridge.py` đọc MAVLink của ArduPilot và gửi cùng định dạng, với `"link":"mavlink"`,
@@ -191,6 +229,9 @@ python3 tools/mavlink_bridge.py --url http://127.0.0.1:8787/api/ingest --id SIM-
 Server → trình duyệt (`/ws`): cùng định dạng, thêm `age_s` (giây kể từ lúc server nhận). Khi mở trang,
 server phát lại vị trí cuối của từng phao rồi bản tin lộ trình `{"type":"mission","rev":N,...}`.
 Mỗi lần admin lưu, mọi trình duyệt nhận lại bản tin `mission` mới (bản của chính tab vừa lưu bị bỏ qua nhờ `cid`).
+Thêm các bản tin: `{"type":"victims","victims":[...],"alerts":[...]}` (lúc mở trang và sau khi xóa chấm),
+`{"type":"victim","victim":{...},"new":true|false}`, `{"type":"alert","alert":{...}}`, và
+`{"type":"lights","id","want","have","by","at"}` (khi admin ra lệnh và khi đèn thật của phao đổi; `have` = `lights` của beacon cuối).
 
 ## Giao diện
 
@@ -213,6 +254,14 @@ Phong cách "trung tâm điều hành": nền tối, số liệu monospace, mộ
 - **Trạm bờ (màu đỏ):** trạm có GPS riêng (ATK-S1216 ở UART1, GPIO17 TX / GPIO18 RX, 38400 baud), báo vị trí lên `/api/station`.
   Dashboard vẽ marker đỏ "TRẠM BỜ", chip "Trạm bờ" trên thanh trạng thái (số vệ tinh, chưa có GPS, mất tín hiệu quá 60 giây),
   đường nét đứt tới phao đang chọn, và "Cách trạm bờ" (khoảng cách + phương vị) trong thẻ viễn trắc. Mất fix thì giữ vị trí cuối.
+- **Người phát hiện:** chấm tròn màu theo mức nguy hiểm (xanh an toàn, vàng trung bình, cam cao, đỏ nguy kịch), bấm
+  vào xem mức, độ tin cậy, lúc thấy lần đầu/lần cuối, phao báo. Chú thích ở góc dưới trái bản đồ (thu gọn sẵn trên điện thoại),
+  có nút **Xoá chấm** cho admin.
+- **Cảnh báo:** phao lật = thông báo đỏ, dấu cảnh báo tại vị trí và dòng nhật ký; nút xác nhận = thông báo xanh và dòng nhật ký.
+- **Thuyền:** mũi tên liền là hướng mũi (yaw IMU), mũi tên nét đứt là hướng đi thực theo GPS (ẩn khi tốc độ dưới 0.2 m/s).
+  Thẻ phao có pin %, tốc độ, hướng đi, và dải "Đang quay về trạm" khi `mode` = `R`.
+- **Đèn:** hai công tắc "Đèn 1 (PC3)", "Đèn 2 (PC2)" trong thẻ phao (phao LoRa). Admin bấm thì hiện "đang gửi…" tới khi
+  `lights` phao báo khớp lệnh, rồi Bật/Tắt. Khách chỉ xem.
 - Chỉ hiển thị dữ liệu thật của hệ thống; không nội suy chuyển động của IMU khi mất gói.
 
 ## Bố cục đáp ứng (responsive)

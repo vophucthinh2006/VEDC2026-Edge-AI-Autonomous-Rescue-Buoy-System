@@ -62,6 +62,21 @@ Trạm chờ 50 ms rồi phát; ở SF9/BW125 beacon 100 byte mất khoảng 0.7
 - cùng `rev`: chỉ nhận khi `first = have`. Nối các điểm, `have` tăng.
 - `total > 300`, tọa độ ngoài miền, `first` lệch: bỏ cả khung. Một khung mất thì lần sau trạm gửi lại từ `have`.
 
+**Trạm trả lời mọi khung khác bằng ACK** (đèn, liên lạc, điểm về; [stm32-system.md](stm32-system.md)):
+
+```
+ACK,<id>,<eseq>,<lệnh>,<lat trạm>,<lon trạm>*CS
+ACK,PHAO-01,0,1,10.883438,106.796019*64
+```
+
+- `eseq`: khung sự kiện được nhận (`ev=...`, `STM32F4/App/event_queue.h`), 0 với beacon.
+- `lệnh`: lệnh admin, bit 0 đèn 1 (PC3), bit 1 đèn 2 (PC2), bit 2 DỪNG (F407 khóa motor, lộ trình giữ nguyên);
+  `GET /api/downlink` mang chúng trong `lights: {id: mask}` và `hold: {id: 0|1}` (`POST /api/lights`, `POST /api/hold`).
+- lat/lon: GPS của trạm, điểm về của phao; trống khi trạm chưa có fix.
+- Trạm gửi RTE thay cho ACK chỉ khi khung là beacon, phao còn thiếu lộ trình **và** `L=`, `H=` của beacon đã đúng lệnh;
+  sai thì ACK trước, lộ trình chậm thêm một lượt. Lệnh dừng vì vậy không phải chờ truyền xong lộ trình.
+- Phao coi mọi khung của trạm (RTE hay ACK) là còn liên lạc; im 60 s là mất, Pi đưa thuyền về trạm.
+
 Mỗi lượt hỏi-đáp khoảng 1.6 s. Lộ trình 40 điểm: 10 lượt, khoảng 20 s (cộng tối đa 5 s chờ beacon đầu và 5 s trạm hỏi Worker). 300 điểm: khoảng 2 phút.
 Đo trong giả lập: 23 điểm tới Pi sau 13 s; 3 điểm sau 5 s kể từ lúc trạm thấy bản gửi.
 
