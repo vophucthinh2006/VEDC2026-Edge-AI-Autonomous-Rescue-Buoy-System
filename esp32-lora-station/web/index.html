@@ -73,6 +73,7 @@
           </div>
           <div id="detail-body" hidden>
             <div id="d-head"><span id="d-id"></span><span id="d-badge" class="badge"></span></div>
+            <p id="d-return" class="return-banner" role="status" hidden><i class="ph ph-arrow-u-up-left" aria-hidden="true"></i>Đang quay về trạm<small>Phao không nghe thấy trạm bờ quá 60 giây, tự chạy về.</small></p>
 
             <div class="coord">
               <div class="cell"><div class="k">Vĩ độ</div><div class="v mono" id="d-lat">-</div></div>
@@ -80,6 +81,23 @@
             </div>
             <div class="cell rel" id="d-rel" hidden><div class="k">Cách trạm bờ</div><div class="v mono"><span id="d-rel-dist">-</span><em>|</em><span id="d-rel-brg">-</span></div></div>
             <p class="note" id="d-lat-stale" hidden>Đang hiển thị vị trí cuối cùng, phao hiện chưa có GPS.</p>
+
+            <div class="boat-cells" id="d-boat" hidden>
+              <div class="cell"><div class="k">Pin</div><div class="v mono" id="d-batt">-</div></div>
+              <div class="cell"><div class="k">Tốc độ (GPS)</div><div class="v mono" id="d-speed">-</div></div>
+              <div class="cell"><div class="k">Hướng đi (GPS)</div><div class="v mono" id="d-course">-</div></div>
+            </div>
+
+            <section id="d-hold" class="hold" aria-label="Dừng phao" hidden>
+              <button id="d-hold-btn" class="btn hold-btn stop" type="button">DỪNG PHAO</button>
+              <div class="hold-info"><span id="d-hold-state" class="hold-state">-</span><small class="guest-only">Chỉ admin ra lệnh</small></div>
+            </section>
+
+            <section id="d-lights" class="lights" aria-label="Đèn trên phao" hidden>
+              <div class="lights-head"><span class="h">Đèn chiếu sáng</span><small class="guest-only">Chỉ admin bật/tắt</small></div>
+              <label class="light-row"><span>Đèn 1 (PC3)</span><span id="d-light1-state" class="light-state">-</span><input id="d-light1" class="switch" type="checkbox" role="switch" aria-label="Đèn 1 (PC3)"></label>
+              <label class="light-row"><span>Đèn 2 (PC2)</span><span id="d-light2-state" class="light-state">-</span><input id="d-light2" class="switch" type="checkbox" role="switch" aria-label="Đèn 2 (PC2)"></label>
+            </section>
 
             <!-- HUD kiểu Mission Planner: chỉ hiện với phao báo qua MAVLink (có nhóm nav) -->
             <section id="d-hud" class="hud" aria-label="Bảng lái HUD" hidden>

@@ -1,12 +1,15 @@
 // Điểm vào của dashboard: bản đồ, phao, lộ trình, đăng nhập, WebSocket.
 // Các panel phụ (thanh trạng thái, viễn trắc, nhật ký, tiện ích bản đồ) nằm trong js/features/.
-import { state, emit, statusOf, STATUS_TEXT, pushHistory } from './state.js';
+import { state, emit, statusOf, STATUS_TEXT, pushHistory, isReturning } from './state.js';
 import { distM, bearingDeg, surveyPath } from './util/geo.js';
 import { fmtDist, fmtDur, fmtAgeSec, sigLevel } from './util/format.js';
 import { initStatusbar, refreshStatusbar } from './features/statusbar.js';
 import { initEventLog, clearUnseen } from './features/eventlog.js';
 import { initTelemetry, renderDetail } from './features/telemetry.js';
 import { initMapFx, updateTrail, fx, stopMeasuring } from './features/mapfx.js';
+import { initVictims, onVictimsSnapshot, onVictimMessage, onAlertMessage } from './features/victims.js';
+import { initLights, onLightsMessage, revertLights, noteLights } from './features/lights.js';
+import { initHold, onHoldMessage, revertHold, noteHold } from './features/hold.js';
 
 const $ = id => document.getElementById(id);
 const DEFAULT_VIEW = [10.762622, 106.660172];
@@ -25,9 +28,10 @@ const isAdmin = () => state.role === 'admin';
 // ?mock (admin giả) hoặc ?mock=guest (khách giả): chạy không cần máy chủ
 const MOCK = (() => { const q = new URLSearchParams(location.search); return q.has('mock') ? (q.get('mock') || 'admin') : null; })();
 
-function toast(msg) {
-  const t = $('toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2400);
+// kind: 'bad' (đỏ, cảnh báo người/lật) hoặc 'ok' (xanh); cảnh báo hiện lâu hơn
+function toast(msg, kind = '') {
+  const t = $('toast'); t.textContent = msg; t.dataset.kind = kind; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), kind ? 6000 : 2400);
 }
 
 // ================= BẢN ĐỒ =================
@@ -64,9 +68,11 @@ function pinIcon(id, b) {
   const active = id === state.selected;
   // Mũi tên hướng mũi phao khi có yaw (giống biểu tượng phương tiện trên Mission Planner)
   const arrow = b.hasAttitude ? `<b class="hdg" style="transform:rotate(${b.yaw}deg)"></b>` : '';
+  // Mũi tên nét đứt: hướng đi thực theo GPS. Đứng yên thì hướng GPS vô nghĩa nên không vẽ
+  const cog = b.course !== null && (b.speed === null || b.speed >= 0.2) ? `<b class="cog" style="transform:rotate(${b.course}deg)"></b>` : '';
   return L.divIcon({
     className: '', iconSize: [22, 22], iconAnchor: [11, 11],
-    html: `<div class="pin ${statusOf(b)}${active ? ' active' : ''}">${arrow}<i></i></div>`,
+    html: `<div class="pin ${statusOf(b)}${active ? ' active' : ''}">${cog}${arrow}<i></i></div>`,
   });
 }
 
@@ -76,7 +82,7 @@ const linkLabel = b => b.rssi === null ? 'MAVLink' : `${b.rssi} dBm`;
 function updateMarker(id) {
   const b = state.buoys.get(id);
   if (!b || !b.hasPos) return;
-  const label = `${id} ${linkLabel(b)}`;
+  const label = `${id} ${linkLabel(b)}` + (b.speed !== null ? ` | ${b.speed.toFixed(1)} m/s` : '') + (isReturning(b) ? ' | VỀ TRẠM' : '');
   if (b.marker) {
     b.marker.setLatLng([b.lat, b.lon]).setIcon(pinIcon(id, b));
     b.marker.setTooltipContent(label);
@@ -111,6 +117,8 @@ function renderList() {
     const name = document.createElement('div'); name.className = 'name'; name.textContent = id;
     const sub = document.createElement('div'); sub.className = 'sub';
     sub.textContent = `${STATUS_TEXT[statusOf(b)]} | ${fmtAgeSec((Date.now() - b.lastSeen) / 1000)} | ${linkLabel(b)}`
+      + (isReturning(b) ? ' | Đang quay về trạm' : '')
+      + (b.battery !== null ? ` | Pin ${b.battery}%` : '')
       + (b.victims > 0 ? ` | Đã báo ${b.victims} người` : '');
     meta.append(name, sub);
     let br;
@@ -550,7 +558,7 @@ function onMissionMessage(m) {
 function onBuoyMessage(m) {
   const id = String(m.id || 'PHAO-01');
   const existed = state.buoys.get(id);
-  const prev = existed ? { fix: existed.fix, imuOk: existed.imuOk, nav: existed.nav, victims: existed.victims } : null;
+  const prev = existed ? { fix: existed.fix, imuOk: existed.imuOk, nav: existed.nav, victims: existed.victims, returning: isReturning(existed) } : null;
   const b = existed || { hasPos: false, marker: null };
   const snapshot = (Number(m.age_s) || 0) > 0;   // bản phát lại lúc mở trang, không phải gói mới
   b.fix = m.fix;
@@ -566,9 +574,15 @@ function onBuoyMessage(m) {
   if (Number.isInteger(m.victims)) b.victims = m.victims;
   // Tiến độ nhận lộ trình gửi qua LoRa (bản STM32). Beacon LoRa không có w= là phao không giữ lộ trình
   // nào (F407 vừa khởi động lại); bản tin MAVLink không bao giờ có nhóm này nên giữ trạng thái cũ
+  // Hướng đi và tốc độ theo GPS, % pin, trạng thái thật hai đèn (bản STM32); gói không có thì để trống
+  b.course = Number.isFinite(m.course) ? m.course : null;
+  b.speed = Number.isFinite(m.speed) ? m.speed : null;
+  b.battery = Number.isInteger(m.battery_pct) ? m.battery_pct : null;
+  b.lights = Number.isInteger(m.lights) ? m.lights : null;
+  b.hold = m.hold === 1 ? true : m.hold === 0 ? false : null;
   if (m.route && Number.isInteger(m.route.rev)) b.route = { rev: m.route.rev, have: m.route.have, pi: m.route.pi };
   else if (b.link === 'lora') b.route = null;
-  const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S'].includes(m.mode);
+  const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S', 'R'].includes(m.mode);
   if (attitudeValid) {
     b.hasAttitude = true;
     b.roll = Number(m.roll); b.pitch = Number(m.pitch); b.yaw = Number(m.yaw);
@@ -579,6 +593,8 @@ function onBuoyMessage(m) {
   // Chỉ ghi đè vị trí khi bản tin có tọa độ hợp lệ; NO_FIX giữ vị trí cũ
   if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { b.lat = m.lat; b.lon = m.lon; b.hasPos = true; }
   state.buoys.set(id, b);
+  noteLights(id);
+  noteHold(id);
   if (!state.selected) state.selected = id;
   if (downlink && downlink.id === id) renderSendStatus();
   state.lastRx = Math.max(state.lastRx, b.lastSeen);
@@ -593,7 +609,7 @@ function onBuoyMessage(m) {
     pushHistory(id, s);
   }
   emit('buoy', { id, prev, b, snapshot });
-  if (!snapshot && prev && Number.isInteger(prev.victims) && b.victims > prev.victims) toast(`${id} phát hiện người`);
+  if (!snapshot && prev && Number.isInteger(prev.victims) && b.victims > prev.victims && !state.eventBuoys.has(id)) toast(`${id} phát hiện người`, 'bad');
 
   $('empty').hidden = true;
   updateMarker(id);
@@ -655,8 +671,43 @@ function connect() {
     else if (m.type === 'downlink') onDownlinkMessage(m);
     else if (m.type === 'history') onHistoryMessage(m);
     else if (m.type === 'station') onStationMessage(m);
+    else if (m.type === 'victims') onVictimsSnapshot(m);
+    else if (m.type === 'victim') onVictimMessage(m);
+    else if (m.type === 'alert') onAlertMessage(m);
+    else if (m.type === 'lights') onLightsMessage(m);
+    else if (m.type === 'hold') onHoldMessage(m);
     else onBuoyMessage(m);
   };
+}
+
+// ================= LỆNH ADMIN: ĐÈN, XOÁ CHẤM =================
+async function sendLights(id, lights, prev) {
+  if (MOCK) { window.mockServer?.setLights(id, lights); return; }
+  try {
+    const res = await jsonPost('/api/lights', { id, lights });
+    if (res.ok) { onLightsMessage(await res.json()); return; }
+    toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không gửi được lệnh đèn');
+  } catch { toast('Mất kết nối, chưa gửi được lệnh đèn'); }
+  revertLights(id, prev);
+}
+
+async function sendHold(id, hold, prev) {
+  if (MOCK) { window.mockServer?.setHold(id, hold); return; }
+  try {
+    const res = await jsonPost('/api/hold', { id, hold });
+    if (res.ok) { onHoldMessage(await res.json()); return; }
+    toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không gửi được lệnh dừng');
+  } catch { toast('Mất kết nối, chưa gửi được lệnh dừng'); }
+  revertHold(id, prev);
+}
+
+async function clearVictims() {
+  if (MOCK) { window.mockServer?.clearVictims(); return; }
+  try {
+    const res = await jsonPost('/api/victims/clear');
+    if (res.ok) onVictimsSnapshot(await res.json());
+    else toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không xoá được chấm');
+  } catch { toast('Mất kết nối, chưa xoá được chấm'); }
 }
 
 // ================= ĐĂNG NHẬP =================
@@ -724,6 +775,9 @@ async function boot() {
   initStatusbar();
   initEventLog();
   initTelemetry({ onCenter: centerOn, toast });
+  initVictims(map, { toast, onClear: clearVictims });
+  initLights({ onSet: sendLights });
+  initHold({ onSet: sendHold });
   applyStyleBtn(); applyFollowBtn();
   setMode('monitor');
   renderDetail();

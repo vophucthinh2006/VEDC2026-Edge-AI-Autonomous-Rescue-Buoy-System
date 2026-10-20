@@ -1,5 +1,5 @@
 // Nhật ký sự kiện, suy ra ở phía trình duyệt từ bản tin WebSocket và chuyển trạng thái phao.
-import { state, on, statusOf, stationStatus } from '../state.js';
+import { state, on, statusOf, stationStatus, isReturning } from '../state.js';
 import { hms } from '../util/format.js';
 
 const MAX_LINES = 300;
@@ -77,8 +77,11 @@ export function initEventLog() {
     if (!prev) log('ok', `Phát hiện phao mới: ${id}`);
     if (prev && prev.fix === 1 && b.fix !== 1) log('warn', `${id} mất GPS, giữ vị trí cuối`);
     if (prev && prev.fix !== 1 && b.fix === 1) log('ok', `${id} có lại GPS`);
+    if (prev && !prev.returning && isReturning(b)) log('warn',`${id} không nghe thấy trạm bờ quá 60 giây, đang tự quay về trạm`);
+    if (prev && prev.returning && b.hasAttitude && !isReturning(b)) log('ok', `${id} đã nghe lại trạm bờ, thôi quay về`);
     // Số đếm tăng so với gói trước: phao vừa báo thêm người. Phao khởi động lại thì đếm lại từ 0.
-    if (prev && Number.isInteger(prev.victims) && b.victims > prev.victims) {
+    // Phao đã gửi sự kiện chi tiết (victims.js) thì không ghi thêm dòng này.
+    if (prev && Number.isInteger(prev.victims) && b.victims > prev.victims && !state.eventBuoys.has(id)) {
       log('err', `${id} PHÁT HIỆN NGƯỜI (lần ${b.victims}) tại ${b.hasPos ? `${b.lat.toFixed(5)}, ${b.lon.toFixed(5)}` : 'vị trí chưa rõ'}`);
     }
     if (b.link === 'mavlink') {

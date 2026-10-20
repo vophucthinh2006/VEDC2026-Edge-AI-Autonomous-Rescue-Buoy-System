@@ -13,6 +13,9 @@ export const state = {
   selected: null,
   lastRx: 0,             // thời điểm nhận gói LoRa gần nhất (ms)
   station: null,         // trạm bờ: { lat, lon, hasPos, fix, sats, hdop, lastSeen } (GPS của trạm, báo lên qua /api/station)
+  lights: new Map(),     // id -> lệnh đèn của admin (mask 0..3); trạng thái thật nằm ở buoys.get(id).lights
+  hold: new Map(),       // id -> lệnh DỪNG của admin (true = dừng); trạng thái thật ở buoys.get(id).hold
+  eventBuoys: new Set(), // phao đã gửi sự kiện người/lật/xác nhận: không báo thêm theo số đếm `victims`
 };
 
 const handlers = new Map();
@@ -39,6 +42,8 @@ export function stationStatus() {
 }
 
 export const STATUS_TEXT = { online: 'Trực tuyến', stale: 'Mất tín hiệu', nofix: 'Chưa có GPS' };
+// mode R: phao không nghe thấy trạm bờ quá 60 giây, tự chạy về trạm
+export const isReturning = b => b.hasAttitude === true && b.headingMode === 'R';
 
 export function pushHistory(id, sample) {
   let arr = state.history.get(id);

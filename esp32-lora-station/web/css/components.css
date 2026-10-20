@@ -397,3 +397,62 @@ body[data-mode="mission"] #empty{ display:none; }
 /* Mũi tên hướng mũi phao trên bản đồ */
 .pin .hdg{ position:absolute; left:50%; top:50%; width:0; height:0; z-index:1; transform-origin:0 0; pointer-events:none; }
 .pin .hdg::before{ content:''; position:absolute; left:-5px; top:-22px; border-left:5px solid transparent; border-right:5px solid transparent; border-bottom:10px solid var(--pin,#34D399); filter:drop-shadow(0 1px 1px rgba(0,0,0,.7)); }
+.pin .hdg::after{ content:''; position:absolute; left:-1.5px; top:-14px; width:3px; height:7px; background:var(--pin,#34D399); }
+/* Mũi tên nét đứt: hướng đi thực theo GPS (course over ground) */
+.pin .cog{ position:absolute; left:50%; top:50%; width:0; height:0; transform-origin:0 0; pointer-events:none; filter:drop-shadow(0 0 1.5px rgba(0,0,0,.9)); }
+.pin .cog::before{ content:''; position:absolute; left:-1px; top:-36px; height:26px; border-left:2px dashed #F8FAFC; }
+.pin .cog::after{ content:''; position:absolute; left:-4px; top:-37px; width:8px; height:8px; border-left:2px solid #F8FAFC; border-top:2px solid #F8FAFC; transform:rotate(45deg); }
+
+/* Người phát hiện, cảnh báo lật, chú thích bản đồ */
+.alert-pin{ width:28px; height:28px; display:flex; align-items:center; justify-content:center; background:var(--bad); border:2px solid #fff; border-radius:50%; color:#1A0606; font-size:16px; box-shadow:0 0 0 4px rgba(248,113,113,.35), 0 2px 8px rgba(0,0,0,.6); }
+.map-legend{ background:rgba(13,20,28,.92); border:1px solid var(--line-2); border-radius:var(--r); padding:7px 9px; color:var(--text); font-size:11.5px; line-height:1.6; box-shadow:0 2px 10px rgba(0,0,0,.5); }
+.map-legend .t{ display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; padding:0; border:0; background:none; color:var(--muted); font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+.map-legend .t .ph{ font-size:12px; transition:transform .15s; }
+.map-legend.collapsed .t .ph{ transform:rotate(-90deg); }
+.map-legend.collapsed > :not(.t){ display:none; }
+.map-legend div{ display:flex; align-items:center; gap:7px; }
+.map-legend .dot{ width:11px; height:11px; border-radius:50%; border:1.5px solid #F8FAFC; flex:none; }
+.map-legend .warn-ic{ color:var(--bad); font-size:13px; width:11px; }
+.map-legend .hdg, .map-legend .cog{ width:11px; height:0; border-top:2px solid var(--ok); }
+.map-legend .cog{ border-top:2px dashed #F8FAFC; }
+.map-legend .btn{ width:100%; min-height:30px; margin-top:6px; padding:4px 8px; font-size:12px; }
+.leaflet-popup.pop .leaflet-popup-content-wrapper, .leaflet-popup.pop .leaflet-popup-tip{ background:var(--panel); color:var(--text); border:1px solid var(--line-2); }
+.leaflet-popup.pop .leaflet-popup-content{ margin:10px 12px; }
+.map-pop b{ display:block; margin-bottom:5px; font-size:13px; }
+.map-pop dl{ display:grid; grid-template-columns:auto auto; gap:2px 10px; margin:0; font-size:12px; }
+.map-pop dt{ color:var(--muted); }
+.map-pop dd{ margin:0; font-family:var(--mono); }
+#toast[data-kind="bad"]{ background:#7F1D1D; border-color:var(--bad); color:#FFF1F1; }
+#toast[data-kind="ok"]{ background:#064E3B; border-color:var(--ok); color:#ECFDF5; }
+
+/* Thẻ phao: quay về trạm, pin/tốc độ/hướng đi, hai đèn */
+.return-banner{ display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin:0 0 10px; padding:8px 10px; border:1px solid var(--warn); border-radius:var(--r-card); background:rgba(251,191,36,.1); color:var(--warn); font-weight:700; font-size:13px; }
+.return-banner small{ flex-basis:100%; color:var(--muted); font-weight:500; font-size:11.5px; }
+.boat-cells{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px; }
+.boat-cells .v{ font-size:15px; }
+/* Nút dừng phao (bản STM32): F407 khóa motor tới khi bấm "Chạy tiếp" */
+.hold{ display:flex; align-items:center; gap:10px; margin:0 0 12px; padding:9px 10px; background:var(--panel-2); border:1px solid var(--line); border-radius:var(--r-card); }
+.hold-btn{ min-width:120px; min-height:40px; font-weight:800; letter-spacing:.04em; }
+.hold-btn.stop{ background:var(--bad); border-color:var(--bad); color:#fff; }
+.hold-btn.resume{ background:var(--ok); border-color:var(--ok); color:#0b1220; }
+.btn.hold-btn.stop:hover:not(:disabled){ background:#EF4444; border-color:#EF4444; }
+.btn.hold-btn.resume:hover:not(:disabled){ background:#10B981; border-color:#10B981; }
+.hold-btn:disabled{ opacity:.55; cursor:not-allowed; }
+.hold-info{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.hold-info small{ color:var(--dim); font-size:11px; }
+.hold-state{ font:700 12px var(--mono); }
+.hold-state.stopped{ color:var(--bad); } .hold-state.running{ color:var(--ok); } .hold-state.pending{ color:var(--accent); }
+.lights{ margin:0 0 12px; padding:9px 10px; background:var(--panel-2); border:1px solid var(--line); border-radius:var(--r-card); }
+.lights-head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:4px; }
+.lights-head .h{ margin:0; }
+.lights-head small{ color:var(--dim); font-size:11px; }
+.light-row{ display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:10px; min-height:36px; font-size:13px; }
+.light-state{ font:700 12px var(--mono); }
+.light-state.on{ color:var(--warn); } .light-state.off{ color:var(--dim); } .light-state.pending{ color:var(--accent); }
+.switch{ appearance:none; -webkit-appearance:none; position:relative; width:40px; height:22px; margin:0; border-radius:999px; background:var(--panel-3); border:1px solid var(--line-2); cursor:pointer; transition:background .15s; }
+.switch::after{ content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--muted); transition:transform .15s, background .15s; }
+.switch:checked{ background:rgba(251,191,36,.3); border-color:var(--warn); }
+.switch:checked::after{ transform:translateX(18px); background:var(--warn); }
+.switch:disabled{ cursor:default; opacity:.7; }
+body[data-role="guest"] .admin-only{ display:none !important; }
+body[data-role="admin"] .guest-only{ display:none !important; }

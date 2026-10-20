@@ -1,9 +1,11 @@
 // Thẻ viễn trắc của phao đang chọn: tọa độ, RSSI/SNR, tuổi gói, đồ thị lịch sử.
-import { state, statusOf, ageSec, attitudeAgeSec, ATTITUDE_STALE_SEC, STATUS_TEXT } from '../state.js';
+import { state, statusOf, ageSec, attitudeAgeSec, ATTITUDE_STALE_SEC, STATUS_TEXT, isReturning } from '../state.js';
 import { fmtAgeSec, rssiClass, NONE } from '../util/format.js';
 import { toDMS, distM, bearingDeg } from '../util/geo.js';
 import { fmtDist } from '../util/format.js';
 import { renderHud } from './hud.js';
+import { renderLights } from './lights.js';
+import { renderHold } from './hold.js';
 
 const $ = id => document.getElementById(id);
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -45,7 +47,7 @@ function renderAttitude(b) {
   $('d-pitch').textContent = b.pitch.toFixed(1);
   $('d-yaw').textContent = b.yaw.toFixed(1);
   $('d-target-yaw').textContent = b.targetYaw === null ? NONE : b.targetYaw.toFixed(1);
-  $('d-heading-mode').textContent = ({ A: 'AUTO', M: 'MANUAL', S: 'STOP' })[b.headingMode] || NONE;
+  $('d-heading-mode').textContent = ({ A: 'AUTO', M: 'MANUAL', S: 'STOP', R: 'VỀ TRẠM' })[b.headingMode] || NONE;
   $('d-imu-status').textContent = b.imuOk ? 'OK' : 'LỖI';
   $('d-imu-status').className = b.imuOk ? 'ok' : 'bad';
   $('d-calib').textContent = `${b.calib}/3`;
@@ -143,6 +145,19 @@ export function renderDetail() {
     $('d-rel-brg').textContent = Math.round(bearingDeg(stn, b)) + ' độ';
   }
   $('d-lat-stale').hidden = !(b.hasPos && b.fix !== 1);   // tọa độ là vị trí cuối, không phải bản tin hiện tại
+  $('d-return').hidden = !isReturning(b);
+
+  // Pin, tốc độ và hướng đi thực theo GPS (bản STM32 qua LoRa)
+  const hasBoat = b.battery !== null || b.speed !== null || b.course !== null;
+  $('d-boat').hidden = !hasBoat;
+  if (hasBoat) {
+    $('d-batt').textContent = b.battery === null ? NONE : b.battery + '%';
+    $('d-batt').className = 'v mono ' + (b.battery === null ? '' : b.battery < 20 ? 'bad' : b.battery < 40 ? 'warn' : 'ok');
+    $('d-speed').textContent = b.speed === null ? NONE : b.speed.toFixed(1) + ' m/s';
+    $('d-course').textContent = b.course === null ? NONE : Math.round(b.course) + '°';
+  }
+  renderHold(b, state.selected);
+  renderLights(b, state.selected);
 
   // MAVLink: HUD thay cho thẻ tư thế, không có RSSI/SNR nên ẩn khối tín hiệu LoRa
   const hud = renderHud(b);
