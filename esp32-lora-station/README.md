@@ -249,7 +249,8 @@ Nền tối cố định, chữ Be Vietnam Pro, một màu nhấn cyan, icon Pho
   "x phút trước". Sắp theo mức rủi ro rồi thời gian; bấm là bản đồ bay tới chấm. Admin có nút "Xoá hết".
 - **Thẻ phao đang chọn:** tên và một nhãn trạng thái lớn suy ra từ dữ liệu, theo thứ tự ưu tiên:
   "Mất tín hiệu" (quá 30 giây không có gói), "Bị lật" (cảnh báo `T` trong 60 giây), "ĐÃ DỪNG" (`hold`),
-  "Đang quay về trạm" (`mode` = `R`), "Đang tuần tra" (Pi đã nhận đủ lộ trình), "Chờ lộ trình".
+  "Đang quay về trạm" (`mode` = `R`), "Đang tuần tra" (`mode` = `A`: Pi đang lái phao), "Chờ lộ trình" (`mode` = `S`: không có lộ trình, hoặc `main.py` trên Pi chưa chạy).
+  Phao chuyển từ đứng yên sang được lái thì hiện popup "PHAO-01 bắt đầu chạy lộ trình" (ghi cả vào Sự kiện); lái xong hoặc bị bỏ lộ trình thì "đứng yên, chờ lộ trình mới".
   Dưới đó: tín hiệu bằng 4 vạch và một chữ Mạnh/Khá/Yếu/Mất (mạnh: RSSI ≥ -90 dBm và SNR ≥ 5; yếu: RSSI < -110
   hoặc SNR < 0; trễ quá 12 giây thì tụt một mức; không hiện số), pin (thanh + %, đỏ dưới 20 %), một câu tốc độ và
   khoảng cách tới trạm, nút lớn **DỪNG PHAO / CHẠY TIẾP**, hai công tắc đèn, một dòng tiến độ gửi lộ trình,
