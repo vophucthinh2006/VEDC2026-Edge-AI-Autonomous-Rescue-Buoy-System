@@ -109,9 +109,18 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 | IMU BNO055 | I2C1 | PB8 SCL, PB9 SDA | Fast Mode 400 kHz | địa chỉ 0x29 (ADR thả nổi) |
 | Pin INA226 | I2C1 (chung với BNO055) | PB8 SCL, PB9 SDA | 0x40 (A0 = A1 = GND) | IN+ / IN− nối tiếp đường pin; đo shunt của module rồi đặt `INA226_SHUNT_OHM` |
 | Reset BNO055 | GPIO_Output | PB5 | mức cao khi chạy | chân nRESET của module |
-| ESC sau trái | TIM2_CH1 | PA5 | PWM 50 Hz, một chiều, dừng = 1000 µs, chạy 1500–2000 µs | chỉ dây signal + GND |
-| ESC sau phải | TIM2_CH4 | PA3 | PWM 50 Hz, một chiều, dừng = 1000 µs, chạy 1500–2000 µs | chỉ dây signal + GND |
-| ESC trước | TIM2_CH2 | PA1 | PWM 50 Hz, **hai chiều**, dừng = 1500 µs, **tiến < 1500 µs** (`ESC_FRONT_DIR -1`) | chỉ dây signal + GND |
+| ESC sau trái | TIM2_CH1 | PA5 | PWM 50 Hz, một chiều, **dừng và kích hoạt = 1500 µs**, **ga 1550–2000 µs** | chỉ dây signal + GND |
+| ESC sau phải | TIM2_CH4 | PA3 | PWM 50 Hz, một chiều, **dừng và kích hoạt = 1500 µs**, **ga 1550–2000 µs** | chỉ dây signal + GND |
+| ESC trước | TIM2_CH2 | PA1 | PWM 50 Hz, **hai chiều**, dừng = 1500 µs, **tiến < 1500 µs** (`ESC_FRONT_DIR -1`), kích hoạt chậm hơn hai ESC sau 2–3 s | chỉ dây signal + GND |
+
+**Ngưỡng ESC đã chốt trên giá (2026-10-20), không đổi khi chưa thử lại trên giá:**
+- ESC sau: dừng và kích hoạt **1500 µs** (`ESC_REAR_STOP_US`), ga **1550–2000 µs** (`ESC_REAR_START_US`,
+  `ESC_REAR_MAX_US`). **Không bao giờ kích hoạt ESC sau bằng 1000 µs**: kích hoạt từ 1000 µs thì ESC sau
+  phải không nhận lệnh, nên chỉ motor sau trái quay.
+- `ESC_REAR_STOP_US` chỉ là mức dừng của ESC sau. Giới hạn dưới chung của cả ba ESC là `ESC_MIN_US` (1000 µs),
+  vì ESC trước đẩy tới bằng xung dưới 1500 µs: đừng dùng mức dừng của ESC sau để kẹp xung ESC trước.
+- ESC trước (ZTW Shark) cần đứng ở trung tính lâu hơn mới kích hoạt: tới 2–3 s sau hai ESC sau. Sau khi bật nguồn
+  hay nạp lại F407, đợi khoảng 6 s rồi mới cho chạy (`test_motor.bat` tự đợi).
 | Servo camera | TIM3_CH1 | PA6 | PWM 50 Hz, 1500 µs ± 11 µs/độ, 600–2400 µs (±80°) | cấp nguồn servo độc lập |
 | Bánh lái trước | TIM3_CH2 | PA7 | PWM 50 Hz, tâm `SERVO_CENTER_FRONT_US` | cấp nguồn servo độc lập |
 | Bánh lái trái | TIM3_CH3 | PB0 | PWM 50 Hz, tâm `SERVO_CENTER_LEFT_US` | cấp nguồn servo độc lập |
@@ -137,7 +146,7 @@ APB1 chạy 42 MHz, hệ số chia khác 1 nên **timer clock của APB1 là 84 
 
 Giá trị compare vì vậy viết thẳng bằng micro-giây:
 `__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 1500)` cho ra xung 1500 µs. Các hằng số
-`ESC_STOP_US`, `SERVO_CENTER_US` trong `App/app_config.h` dùng trực tiếp, không phải quy đổi.
+`ESC_REAR_STOP_US`, `SERVO_CENTER_US` trong `App/app_config.h` dùng trực tiếp, không phải quy đổi.
 
 ---
 
@@ -515,7 +524,7 @@ Tăng ga bị giới hạn tốc độ (`ESC_RAMP_PER_S`), giảm ga có hiệu 
 - Hai ESC sau chạy một chiều nên không tự phanh được. Muốn tắt motor trước như cũ: đặt `GAIN` và `LEVEL` bằng 0.
 - Chỉnh trên nước: phao phải dừng trong khoảng một thân mà không lùi lại.
 
-**Trước khi bật `ACTUATORS_ENABLED`**, thử từng motor và bánh lái trên gá bằng `..\motor_test.bat`
+**Trước khi bật `ACTUATORS_ENABLED`**, thử từng motor và bánh lái trên gá bằng `..\scripts\stm32\test_motor.bat`
 (preset `HwTest`, `App/hw_test.c`): đúng chiều quay, đúng chân PA1 / PA3 / PA5. Sau đó với Pi chạy
 `config/bench_demo.yaml`, đứng lệch sang phải camera thì bánh lái phải kéo mũi sang phải (sai thì đổi dấu
 `RUDDER_DIR_FRONT` / `RUDDER_DIR_REAR`).

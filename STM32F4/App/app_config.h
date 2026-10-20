@@ -70,12 +70,16 @@
 #define HEADING_DIFF_GAIN          0.30f
 #define HEADING_DIFF_DIR           (+1)
 
-/* Rear ESCs: unbranded 30 A, one direction, PWM 50 Hz (TIM2_CH1 PA5, TIM2_CH4 PA3). Their
-   throttle range is fixed (no calibration): stepped on the bench (2026-10-18) they stay still up to
-   1490 us and turn from 1500 us; 1500..2000 us is the range settled on after the motor phase swap.
-   Any rear demand above zero is spread over START..REAR_MAX. */
-#define ESC_STOP_US                1000U
-#define ESC_REAR_START_US          1500U
+/* Rear ESCs: unbranded 30 A, one direction, PWM 50 Hz (TIM2_CH1 PA5, TIM2_CH4 PA3). FIXED, set on
+   the bench 2026-10-20, do not change without trying them on the stand again:
+     stop and arm  1500 us   the front ESC's neutral. Never 1000 us: armed from 1000 us at power-up
+                             the rear right ESC never took a command.
+     throttle      1550..2000 us   any rear demand above zero is spread over START..REAR_MAX.
+   ESC_REAR_STOP_US is only the rear stop: the lowest pulse of all three ESCs is ESC_MIN_US (the
+   front one pushes forward below 1500 us), so never clamp the front with the rear stop. */
+#define ESC_REAR_STOP_US           1500U
+#define ESC_MIN_US                 1000U   /* lowest pulse sent to any ESC: front full forward */
+#define ESC_REAR_START_US          1550U
 #define ESC_REAR_MAX_US            2000U
 #define ESC_MAX_US                 2000U
 /* Front ESC (ZTW Shark G2 50A) is bidirectional: 1500 us is stop, 1000 and 2000 us
@@ -124,7 +128,7 @@
 
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
    instead of the control loop. ESC output is capped and time-limited. The first three
-   can be set from the build: the HwTest preset (motor_test.bat) does. */
+   can be set from the build: the HwTest preset (scripts/stm32/test_motor.bat) does. */
 #ifndef HW_TEST_ENABLED
 #define HW_TEST_ENABLED            0
 #endif
@@ -135,7 +139,7 @@
 #define HW_TEST_ESC_FRONT_SPAN_US  150U    /* front ESC: neutral +/- this, about 30 % each way; water-cooled, keep runs short */
 #endif
 #define HW_TEST_ESC_MAX_RUN_MS     60000U  /* motors on a stand; a lost debugger still stops them */
-#define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (1000 us rear, neutral front) so the ESCs arm */
+#define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (1500 us on all three) so the ESCs arm */
 #define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */
 
 /* Camera pan servo (SERVO_CAMERA, TIM3_CH1) follows the CAM packet from the Pi.

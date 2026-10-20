@@ -19,7 +19,7 @@ static const uint32_t esc_channel[ESC_COUNT] = {
     TIM_CHANNEL_4,  /* PA3 right motor */
     TIM_CHANNEL_1,  /* PA5 left motor */
 };
-static const uint16_t esc_stop[ESC_COUNT] = { ESC_FRONT_NEUTRAL_US, ESC_STOP_US, ESC_STOP_US };
+static const uint16_t esc_stop[ESC_COUNT] = { ESC_FRONT_NEUTRAL_US, ESC_REAR_STOP_US, ESC_REAR_STOP_US };
 
 volatile actuator_debug_t actuator_debug;
 
@@ -42,7 +42,7 @@ void Actuators_WriteServo(servo_id_t id, uint32_t us) {
 
 void Actuators_WriteEsc(esc_id_t id, uint32_t us) {
     if (!escs_started) return;
-    __HAL_TIM_SET_COMPARE(&htim2, esc_channel[id], clamp_u32(us, ESC_STOP_US, ESC_MAX_US));
+    __HAL_TIM_SET_COMPARE(&htim2, esc_channel[id], clamp_u32(us, ESC_MIN_US, ESC_MAX_US));
 }
 
 void Actuators_Init(void) {
@@ -94,7 +94,7 @@ static void write_rudder(servo_id_t id, float steer, int dir, float gain) {
 /* Rear demand 0..1 to a pulse: 0 stops, anything above starts where the ESC turns (ESC_REAR_START_US)
    and full demand stays below where it loses sync (ESC_REAR_MAX_US). */
 static uint16_t rear_us(float out) {
-    if (out <= 0.0f) return (uint16_t)ESC_STOP_US;
+    if (out <= 0.0f) return (uint16_t)ESC_REAR_STOP_US;
     return (uint16_t)((float)ESC_REAR_START_US + clamp_f(out, 0.0f, 1.0f) * (float)(ESC_REAR_MAX_US - ESC_REAR_START_US));
 }
 

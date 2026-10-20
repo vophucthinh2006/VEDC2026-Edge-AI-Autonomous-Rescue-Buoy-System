@@ -29,7 +29,7 @@
             "inherits": "default",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "VEDC_DEFINES": "HW_TEST_ENABLED=1;HW_TEST_ESC_MAX_US=1800U;HW_TEST_ESC_FRONT_SPAN_US=300U"
+                "VEDC_DEFINES": "HW_TEST_ENABLED=1;HW_TEST_ESC_MAX_US=2000U;HW_TEST_ESC_FRONT_SPAN_US=500U"
             }
         }
     ],
