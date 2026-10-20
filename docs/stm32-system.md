@@ -60,7 +60,7 @@ khớp thân dưới → **Trung bình** (vàng); dưới nước → **Cao** (c
 | 2 | pin INA226 | `test_battery.bat` | + INA226 | áp lệch đồng hồ < 0.1 V, `%` hợp lý |
 | 3 | LoRa, ACK, mất liên lạc | `test_lora.bat` | + RA-02 + trạm | `ACK` tăng, `home` = GPS trạm; tắt trạm 60 s: `station LOST` |
 | 4 | trạm bờ | `test_station.bat` | ESP32 | log `[NHAN]`, `[ACK]`, `[CLOUD] da gui` |
-| 5 | Worker + dashboard | `test_cloud.bat [mock]` | Node.js | `npm test` đạt; `?mock` có chấm người 4 màu, mũi tên, pin, đèn |
+| 5 | Worker + dashboard | `test_cloud.bat [mock]` | Node.js | `npm test` đạt (cả tìm địa chỉ); `?mock` có khối Người cần cứu, nhãn trạng thái đủ 6 loại, tín hiệu bằng vạch, pin, đèn, tìm địa chỉ |
 | 6 | Pi ↔ F407 | `test_pi_link.bat` | Pi + F407 | `$IMU/$GPS/$SYS` 10/s, `$LNK` 1/s, `PASS` |
 | 7 | loa | `test_audio.bat` | Pi + loa | nghe cả hai câu |
 | 8 | camera, quét ±45°, mức rủi ro | `test_camera.bat` | Pi + camera + F407 | viewer `:8090`: camera quét; đứng trước: khung + mức rủi ro, servo bám |
@@ -73,15 +73,17 @@ khớp thân dưới → **Trung bình** (vàng); dưới nước → **Cao** (c
 **`run_all.bat`**: test trên máy tính → nạp F407 → nạp trạm (cửa sổ log riêng) → `boat stm32 deploy` → `main.py`
 trên Pi (cửa sổ riêng, `--viewer`) → mở dashboard và viewer. Sau đó:
 
-1. Dashboard: `PHAO-01` online, % pin, mũi tên mũi tàu (IMU) và hướng đi (GPS). Pi: `IDLE`, thuyền đứng yên.
-2. Vẽ lộ trình, **Gửi tới phao**: 5–40 s sau thuyền chạy (`PATROL`), camera quét ±45°, loa "Đây là tàu cứu hộ" mỗi 100 s.
-3. Đứng trước camera: chấm màu theo mức rủi ro trên bản đồ, kèm độ tin cậy; thuyền bám theo (`FOLLOW`).
-4. Nhấn PE4: loa "Đã xác nhận lấy đồ", dashboard báo xanh, thuyền về lộ trình.
-5. Nghiêng phao > 35°: motor dừng, dashboard báo lật kèm vị trí.
-6. Tắt trạm 60 s: thuyền tự chạy về trạm (`RETURN`, beacon `m=R`), tới nơi thì đứng (`HOME_HOLD`).
-7. Bật đèn trên dashboard: relay đóng sau ≤ 10 s, thẻ phao báo "đã bật".
-8. Bấm **DỪNG PHAO**: motor khóa sau 5–10 s (F407 tự chặn, kể cả khi Pi vẫn ra lệnh chạy), thẻ phao báo "ĐÃ DỪNG";
+1. Dashboard: thẻ `PHAO-01` ghi **Chờ lộ trình**, tín hiệu Mạnh/Khá, % pin, mũi tên mũi tàu (IMU) và hướng đi (GPS). Pi: `IDLE`, thuyền đứng yên.
+2. Chế độ Lộ trình: chạm bản đồ đặt waypoint, **Gửi tới phao**: dòng tiến độ đi từ "đang chờ phao nhận" tới "Phao đã nhận lộ trình", nhãn thành **Đang tuần tra**; 5–40 s sau thuyền chạy (`PATROL`), camera quét ±45°, loa "Đây là tàu cứu hộ" mỗi 100 s.
+3. Đứng trước camera: khối **Người cần cứu** thêm một dòng (mức rủi ro, độ tin cậy, phao báo), chấm màu trên bản đồ; thuyền bám theo (`FOLLOW`).
+4. Nhấn PE4: loa "Đã xác nhận lấy đồ", dashboard báo xanh và ghi vào dòng Sự kiện, thuyền về lộ trình.
+5. Nghiêng phao > 35°: motor dừng, nhãn **Bị lật** (60 s), dấu cảnh báo tại vị trí.
+6. Tắt trạm 60 s: thuyền tự chạy về trạm (`RETURN`, beacon `m=R`), tới nơi thì đứng (`HOME_HOLD`). Trạm tắt thì dashboard không có gói mới, sau 30 s nhãn là **Mất tín hiệu**; nhãn **Đang quay về trạm** hiện khi trạm vẫn nhận được beacon `m=R` (phao không nghe được trạm nhưng trạm nghe được phao).
+7. Bật đèn trên dashboard: công tắc ghi "đang gửi", relay đóng sau ≤ 10 s, công tắc sáng vàng.
+8. Bấm **DỪNG PHAO**: motor khóa sau 5–10 s (F407 tự chặn, kể cả khi Pi vẫn ra lệnh chạy), nhãn **ĐÃ DỪNG**;
    **CHẠY TIẾP** đi tiếp lộ trình đang dở. Gửi lộ trình rỗng: bỏ hẳn lộ trình.
+9. Khách (nút "Xem với tư cách khách"): nhập một địa chỉ gần chỗ thử hoặc bấm "Vị trí của tôi": thấy vòng 2 km, `PHAO-01`
+   kèm khoảng cách và hướng, số người cần cứu gần đó; khách không có nút ra lệnh.
 
 ## 4. Giao thức mới (tóm tắt)
 
