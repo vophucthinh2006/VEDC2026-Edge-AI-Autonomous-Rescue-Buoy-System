@@ -1,9 +1,9 @@
 // Nút DỪNG PHAO / CHẠY TIẾP (bản STM32). Admin bấm, máy chủ giữ lệnh, trạm phát xuống phao trong ACK;
 // F407 khóa motor ngay khi nhận, kể cả khi Pi vẫn ra lệnh chạy. Lộ trình giữ nguyên: "Chạy tiếp" đi
 // tiếp waypoint đang dở. want = lệnh admin, have = phao báo trong beacon (H=1 đang dừng).
-// Lệnh tới phao sau 5–10 s (trạm hỏi máy chủ 5 s một lần, phao phát beacon 5 s một lần).
+// Lệnh tới phao sau 5 đến 10 s (trạm hỏi máy chủ 5 s một lần, phao phát beacon 5 s một lần).
 import { state } from '../state.js';
-import { log } from './eventlog.js';
+import { log } from './timeline.js';
 
 const $ = id => document.getElementById(id);
 let onSet = () => {};
@@ -21,8 +21,8 @@ export function renderHold(b, id) {
   btn.className = 'btn hold-btn ' + (stopped ? 'resume' : 'stop');
   btn.disabled = state.role !== 'admin';
   const st = $('d-hold-state');
-  st.textContent = pending ? (want ? 'đang gửi lệnh dừng…' : 'đang gửi lệnh chạy…')
-    : have === null ? 'chưa rõ' : have ? 'ĐÃ DỪNG: motor khóa' : 'đang được phép chạy';
+  st.textContent = pending ? (want ? 'Đang gửi lệnh dừng, phao nhận sau 5 đến 10 giây' : 'Đang gửi lệnh chạy, phao nhận sau 5 đến 10 giây')
+    : have ? 'Motor đã khoá. Bấm Chạy tiếp để đi tiếp lộ trình.' : '';
   st.className = 'hold-state ' + (pending ? 'pending' : have ? 'stopped' : 'running');
 }
 
@@ -33,7 +33,8 @@ export function onHoldMessage(m) {
   if (typeof m.want === 'boolean') state.hold.set(id, m.want);
   const b = state.buoys.get(id);
   if (b && typeof m.have === 'boolean') b.hold = m.have;
-  if (typeof m.want === 'boolean' && prev !== null && m.want !== prev) log(m.want ? 'bad' : 'info', `${id}: ${m.by || 'admin'} ${m.want ? 'ra lệnh DỪNG' : 'cho chạy tiếp'}`);
+  // Another admin's command (this tab logged its own on click). No email: guests read the timeline too
+  if (typeof m.want === 'boolean' && prev !== null && m.want !== prev) log(m.want ? 'stop' : 'run', `Admin ra lệnh ${m.want ? 'dừng' : 'chạy tiếp'} ${id}`);
   noteHold(id);
   if (id === state.selected && b) renderHold(b, id);
 }
@@ -47,7 +48,7 @@ export function noteHold(id) {
   const known = seen.has(id), before = seen.get(id);
   seen.set(id, have);
   if (known && have !== null && have !== before && have === state.hold.get(id)) {
-    log(have ? 'bad' : 'ok', have ? `${id} đã DỪNG, motor khóa` : `${id} được chạy tiếp`);
+    log(have ? 'stop' : 'run', have ? `${id} đã dừng, motor khoá` : `${id} chạy tiếp`);
   }
 }
 
@@ -66,10 +67,10 @@ export function initHold({ onSet: fn }) {
     const prev = state.hold.has(id) ? state.hold.get(id) : null;
     const stopped = prev !== null ? prev : b.hold === true;
     const want = !stopped;
-    if (want && !confirm(`Dừng ${id}? Motor khóa tới khi bấm "Chạy tiếp" (lệnh tới phao sau 5–10 s).`)) return;
+    if (want && !confirm(`Dừng ${id}? Motor khoá tới khi bấm "Chạy tiếp" (lệnh tới phao sau 5 đến 10 giây).`)) return;
     state.hold.set(id, want);   // hiện "đang gửi…" ngay
     renderHold(b, id);
-    log(want ? 'bad' : 'info', `${id}: gửi lệnh ${want ? 'DỪNG' : 'chạy tiếp'}`);
+    log(want ? 'stop' : 'run', `Gửi lệnh ${want ? 'dừng' : 'chạy tiếp'} tới ${id}`);
     onSet(id, want, prev);
   });
 }
