@@ -31,21 +31,28 @@ class NavCommand:
 
 CREEP = 0.3   # share of max_speed_mps kept near an obstacle the commanded course leads away from
 FACE_INSIDE_M = 0.3   # this far inside the stand-off the boat no longer creeps to turn its bow to the person
+# Hysteresis, so that a reading jittering round a threshold does not flip the command every 100 ms
+# (each flip from a speed to STOP used to brake with the front motor):
+STOP_RELEASE_M = 0.20       # stopped for an obstacle: going on once it is this much past the stop distance
+STANDOFF_RELEASE_M = 0.50   # holding at the stand-off: closing in again only this much beyond it (a box range is +-30 %)
+STANDOFF_ARRIVE_M = 0.15    # within stand-off + this the boat stops next to the person
 
 
 class BapfNavigator:
     def __init__(self, vehicle: dict, planner: dict) -> None:
         self.v = vehicle
         self.p = planner
+        self._blocked = False      # the last plan stopped for an obstacle on the course
+        self._at_standoff = False  # the last plan held next to the person
 
-    def _course_blocked(self, obstacles: tuple[Obstacle, ...], heading_body_deg: float) -> bool:
-        """True when an obstacle inside the stop distance lies on the commanded course: held, the
-        course would bring the boat's inflated hull onto it (closest point of approach, as in
-        Jo et al. 2022, eq. 16)."""
+    def _course_blocked(self, obstacles: tuple[Obstacle, ...], heading_body_deg: float, extra_m: float = 0.0) -> bool:
+        """True when an obstacle inside the stop distance (plus extra_m) lies on the commanded
+        course: held, the course would bring the boat's inflated hull onto it (closest point of
+        approach, as in Jo et al. 2022, eq. 16)."""
         inflated_radius = float(self.v["boat_radius_m"]) + float(self.v["safety_margin_m"])
         v_fwd, v_right = cos(radians(heading_body_deg)), sin(radians(heading_body_deg))
         for obstacle in obstacles:
-            if obstacle.distance_m - inflated_radius - obstacle.width_m / 2 > float(self.v["stop_distance_m"]):
+            if obstacle.distance_m - inflated_radius - obstacle.width_m / 2 > float(self.v["stop_distance_m"]) + extra_m:
                 continue
             angle = radians(obstacle.bearing_body_deg)
             tcpa, dcpa = cpa(obstacle.distance_m * cos(angle), obstacle.distance_m * sin(angle), v_fwd, v_right)
@@ -83,7 +90,8 @@ class BapfNavigator:
             desired_body = target.bearing_body_deg
             remaining = target.distance_m - float(self.v["target_standoff_m"])
             desired_heading = (imu.yaw_deg + desired_body) % 360.0
-            desired_speed = float(self.v["approach_speed_mps"]) if remaining > 0.15 else 0.0
+            self._at_standoff = remaining <= (STANDOFF_RELEASE_M if self._at_standoff else STANDOFF_ARRIVE_M)
+            desired_speed = 0.0 if self._at_standoff else float(self.v["approach_speed_mps"])
             reason = "human_standoff" if desired_speed == 0 else "approach_human"
             # The bow follows the camera: turn to the person first, then go to them, and keep the
             # bow on them at the stand-off. The STM32 only steers while it is given a speed, so the
@@ -92,6 +100,7 @@ class BapfNavigator:
                 desired_speed = min(float(self.v["approach_speed_mps"]), float(self.v.get("face_speed_mps", 0.15)))
                 reason = "face_human"
         elif goal is not None:
+            self._at_standoff = False
             desired_heading = bearing_deg(gps.lat_deg, gps.lon_deg, goal[0], goal[1])
             remaining = haversine_m(gps.lat_deg, gps.lon_deg, goal[0], goal[1])
             desired_speed = float(self.v["max_speed_mps"])
@@ -99,6 +108,7 @@ class BapfNavigator:
             if remaining <= float(self.v["arrive_radius_m"]):
                 return NavCommand("STOP", 0.0, imu.yaw_deg, "arrived")
         else:
+            self._at_standoff = self._blocked = False
             return NavCommand("STOP", 0.0, imu.yaw_deg, "no_goal")
 
         # Desired global vector, then add obstacle forces transformed from body to world.
@@ -117,9 +127,13 @@ class BapfNavigator:
         # could not turn, so it never left the obstacle again. A course that leads away from it is
         # now followed at a creep.
         creep = min(desired_speed, CREEP * float(self.v["max_speed_mps"]))
+        # Stopped for an obstacle, the boat goes on only once the course is clear by STOP_RELEASE_M more.
+        self._blocked = clearance < float(self.v["slow_distance_m"]) + (STOP_RELEASE_M if self._blocked else 0.0) and \
+            self._course_blocked(snapshot.obstacles, signed_angle_deg(heading - imu.yaw_deg),  # type: ignore[arg-type]
+                                 STOP_RELEASE_M if self._blocked else 0.0)
+        if self._blocked:
+            return NavCommand("STOP", 0.0, heading, "obstacle_too_close")
         if clearance < float(self.v["slow_distance_m"]):
-            if self._course_blocked(snapshot.obstacles, signed_angle_deg(heading - imu.yaw_deg)):  # type: ignore[arg-type]
-                return NavCommand("STOP", 0.0, heading, "obstacle_too_close")
             scale = clamp((clearance - float(self.v["stop_distance_m"])) / (float(self.v["slow_distance_m"]) - float(self.v["stop_distance_m"])), 0.0, 1.0)
             speed = max(speed * scale, creep)
             if clearance <= float(self.v["stop_distance_m"]):

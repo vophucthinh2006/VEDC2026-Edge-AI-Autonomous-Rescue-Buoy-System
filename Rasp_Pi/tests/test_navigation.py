@@ -63,6 +63,29 @@ class NavigationTest(unittest.TestCase):
         command = navigator.plan(self._person(-40.0, 1.0))
         self.assertEqual((command.reason, command.speed_mps), ("human_standoff", 0.0))
 
+    def test_a_stop_for_an_obstacle_holds_until_it_is_clearly_behind_the_stop_distance(self) -> None:
+        # Boxed in: STOP. Hull 0.75 m + half the width 0.1 m: a ring at d leaves d - 0.85 m clear.
+        navigator = BapfNavigator(self.vehicle, {**self.planner, "bias_gain": 0.0})
+        ring = lambda d: [Obstacle(float(b), d, 0.2) for b in range(-180, 180, 30)]   # noqa: E731
+        self.assertEqual(navigator.plan(self._snap(ring(0.8))).reason, "obstacle_too_close")
+        # 0.1 m past the stop distance (0.8 m): a fresh plan would go on; this one stays stopped.
+        just_past = 0.8 + 0.85 + 0.1
+        self.assertEqual(BapfNavigator(self.vehicle, {**self.planner, "bias_gain": 0.0}).plan(self._snap(ring(just_past))).mode, "AUTO")
+        self.assertEqual(navigator.plan(self._snap(ring(just_past))).reason, "obstacle_too_close")
+        # Clear by more than the release margin: on again.
+        self.assertEqual(navigator.plan(self._snap(ring(0.8 + 0.85 + 0.3))).mode, "AUTO")
+
+    def test_the_standoff_holds_while_the_range_jitters(self) -> None:
+        navigator = BapfNavigator(self.vehicle, self.planner)
+        # Stand-off 1.5 m: arrived at 1.6 m.
+        self.assertEqual(navigator.plan(self._person(3.0, 1.6)).reason, "human_standoff")
+        # A box range reading 0.4 m further does not start the approach again...
+        self.assertEqual(navigator.plan(self._person(3.0, 1.9)).reason, "human_standoff")
+        self.assertEqual(BapfNavigator(self.vehicle, self.planner).plan(self._person(3.0, 1.9)).reason, "approach_human")
+        # ...a person really moving off does.
+        self.assertEqual(navigator.plan(self._person(3.0, 2.1)).reason, "approach_human")
+        self.assertEqual(navigator.plan(self._person(3.0, 1.9)).reason, "approach_human")
+
     def test_far_obstacle_changes_nothing(self) -> None:
         command = BapfNavigator(self.vehicle, self.planner).plan(self._snap([Obstacle(0, 6.0, 0.2)]))
         self.assertEqual((command.mode, command.reason), ("AUTO", "waypoint"))

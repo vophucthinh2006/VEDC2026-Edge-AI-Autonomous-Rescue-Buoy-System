@@ -13,6 +13,12 @@ def wrap_deg(angle: float) -> float:
     return angle % 360.0
 
 
+def heading_tenths(angle: float) -> str:
+    """A heading as the $NAV field: 0.1 deg, rounded before it is wrapped. 359.96 would print as
+    "360.0", which the STM32F407 refuses (heading < 360), dropping the whole NAV packet."""
+    return f"{round(angle, 1) % 360.0 + 0.0:.1f}"
+
+
 def signed_angle_deg(angle: float) -> float:
     """Normalize to [-180, 180). Positive means clockwise/right turn."""
     return (angle + 180.0) % 360.0 - 180.0

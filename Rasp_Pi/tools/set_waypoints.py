@@ -23,7 +23,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from utils.config import load_config            # noqa: E402
-from utils.nmea_packet import decode            # noqa: E402
+from utils.nmea_packet import FIX_TYPE_3D, decode, gga_fix_type   # noqa: E402
 
 
 def read_route(path: Path) -> dict:
@@ -49,7 +49,8 @@ def gps_here(port: str, baud: int, seconds: float = 5.0) -> tuple[float, float]:
     with serial.Serial(port, baud, timeout=0.2) as link:
         while monotonic() < end:
             packet = decode(link.readline())
-            if packet and packet.command == "GPS" and len(packet.fields) >= 4 and int(packet.fields[3]) >= 3:
+            # fields[3] is the GGA fix quality: 1 for a plain GPS fix, which ">= 3" used to refuse.
+            if packet and packet.command == "GPS" and len(packet.fields) >= 4 and gga_fix_type(int(packet.fields[3])) == FIX_TYPE_3D:
                 if not fixes:
                     end = monotonic() + seconds    # the first fix: average from here
                 fixes.append((float(packet.fields[1]), float(packet.fields[2])))
