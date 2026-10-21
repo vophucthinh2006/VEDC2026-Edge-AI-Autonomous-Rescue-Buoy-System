@@ -37,6 +37,7 @@ from lora_radio import BEACON_PORT, DOWNLINK_PORT, StationRoute, airtime_s
 
 POLL_S = 5.0                 # DOWNLINK_POLL_MS
 TURNAROUND_S = 0.05          # LORA_TURNAROUND_MS
+STATION_REPORT_S = 10.0      # STATION_REPORT_MS
 
 
 def log(text: str) -> None:
@@ -129,6 +130,17 @@ def main() -> int:
             time.sleep(POLL_S if not args.route_file else 1.0)
 
     threading.Thread(target=poll, daemon=True).start()
+
+    def report_position() -> None:
+        # main.c gui_vi_tri_tram: the station's own GPS to /api/station every STATION_REPORT_MS, for the
+        # dashboard's station marker and its LoRa coverage circles.
+        body = {"fix": 1, "lat": station_pos[0], "lon": station_pos[1], "sats": 12, "hdop": 0.8}
+        while True:
+            post(args.cloud.rstrip("/") + "/api/station", token, body)
+            time.sleep(STATION_REPORT_S)
+
+    if args.cloud and station_pos:
+        threading.Thread(target=report_position, daemon=True).start()
     rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     rx.bind(("127.0.0.1", BEACON_PORT))
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
