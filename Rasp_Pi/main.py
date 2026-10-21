@@ -17,6 +17,7 @@ from time import monotonic, sleep
 
 from modules.ai_vision import VisionWorker
 from modules.announcer import Announcer
+from modules.drive_log import DriveLog
 from modules.lidar_serial import SerialLidar
 from modules.mission import Mission
 from modules.navigation import BapfNavigator, NavCommand
@@ -26,12 +27,23 @@ from modules.state_store import RISK_NAMES, HumanTarget, StateStore
 from modules.uart_comm import Stm32Uart
 from modules.waypoints import Route, start_route
 from utils.config import load_config
-from utils.geometry import bearing_deg
+from utils.geometry import bearing_deg, heading_tenths
+from utils.log_files import run_log_path
 
 
-def configure_logging(config: dict) -> None:
-    Path(config["logging"]["directory"]).mkdir(exist_ok=True)
-    logging.basicConfig(level=getattr(logging, config["logging"]["level"].upper()), format="%(asctime)s %(levelname)s %(threadName)s %(name)s: %(message)s")
+def configure_logging(config: dict) -> Path:
+    """The terminal and a file of this run's own (utils/log_files.py), returned."""
+    settings = config["logging"]
+    path = run_log_path(Path(settings["directory"]), "main", int(settings.get("keep_runs", 30)))
+    logging.basicConfig(level=getattr(logging, settings["level"].upper()), format="%(asctime)s %(levelname)s %(threadName)s %(name)s: %(message)s",
+                        handlers=[logging.StreamHandler(), logging.FileHandler(path, encoding="utf-8")])
+
+    def thread_failed(args: threading.ExceptHookArgs) -> None:
+        # A worker that dies (vision, LiDAR, viewer) said so on stderr only.
+        logging.getLogger("main").critical("thread %s failed", args.thread.name if args.thread else "?",
+                                           exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+    threading.excepthook = thread_failed
+    return path
 
 
 def main() -> int:
@@ -46,8 +58,9 @@ def main() -> int:
                         help="serve the live view (camera, LiDAR, route) on this port, 8090 if no port is given")
     args = parser.parse_args()
     config = load_config(args.config, args.overlay)
-    configure_logging(config)
+    log_path = configure_logging(config)
     log = logging.getLogger("main")
+    log.info("log file: %s", log_path)
     stop_event = threading.Event()
     state = StateStore()
     uart = Stm32Uart(config["serial"]["stm32_port"], int(config["serial"]["stm32_baud"]), state, stop_event)
@@ -114,12 +127,20 @@ def main() -> int:
     for worker in workers:
         worker.start()
 
-    def request_stop(*_unused: object) -> None:
+    stop_why = {"text": ""}
+
+    def request_stop(signum: int, _frame: object = None) -> None:
+        stop_why["text"] = f"signal {signal.Signals(signum).name}"
         stop_event.set()
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
+    # The ssh window of run_all.bat closed: stop as on Ctrl+C, and say so. Left ignored under nohup
+    # (tools/bench_demo.sh).
+    if hasattr(signal, "SIGHUP") and signal.getsignal(signal.SIGHUP) is not signal.SIG_IGN:
+        signal.signal(signal.SIGHUP, request_stop)
     log.info("RedgeSCUE started")
     last_text = ""
+    drive_log = DriveLog()
     try:
         while not stop_event.is_set():
             sequence = (sequence + 1) & 0xFFFF
@@ -158,7 +179,7 @@ def main() -> int:
                 # The admin pressed DỪNG PHAO: the F407 keeps the motors off whatever comes; say so too, so
                 # the viewer and the log show why the boat stands. The route and the mission carry on.
                 command = NavCommand("STOP", 0.0, command.heading_deg, "dashboard_hold")
-            uart.send("NAV", sequence, command.mode, f"{command.speed_mps:.2f}", f"{command.heading_deg:.1f}", config["vehicle"]["nav_ttl_ms"])
+            uart.send("NAV", sequence, command.mode, f"{command.speed_mps:.2f}", heading_tenths(command.heading_deg), config["vehicle"]["nav_ttl_ms"])
             # 4th field: the LoRa route revision running, so the STM32 stops resending it (docs/lora-route-downlink.md)
             uart.send("HBT", sequence, command.reason, lora_rev)
             goal = planned.waypoint
@@ -173,11 +194,19 @@ def main() -> int:
             if text != last_text:
                 log.info("%s", status["text"])
                 last_text = text
+            for line in drive_log.update(command, snapshot, now):
+                log.warning("%s", line)
             sleep(0.10)
+    except Exception:
+        stop_why["text"] = "the main loop failed"
+        log.exception("main loop failed: the boat stops (the F407 stops the motors without $NAV)")
+        raise
     finally:
         # Send best-effort STOP. STM32 TTL remains the independent guaranteed stop.
         uart.send("NAV", sequence + 1, "STOP", "0.00", "0.0", config["vehicle"]["nav_ttl_ms"])
         sleep(0.05)
+        # Signal, the main loop's failure, or a worker that cannot go on (a required LiDAR).
+        log.warning("RedgeSCUE stopping: %s", stop_why["text"] or "a worker stopped the program")
         stop_event.set()
         for worker in workers:
             worker.join(timeout=1.0)

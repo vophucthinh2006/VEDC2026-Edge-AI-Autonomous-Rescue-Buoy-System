@@ -257,3 +257,5 @@ avoidance:
 logging:
   level: INFO
   directory: logs
+  # main.py: a file per run, logs/main_YYYYmmdd_HHMMSS.log, as well as the terminal; the newest kept.
+  keep_runs: 30
