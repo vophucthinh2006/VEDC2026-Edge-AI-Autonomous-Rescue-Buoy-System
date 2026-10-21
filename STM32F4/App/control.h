@@ -75,3 +75,5 @@ extern volatile heading_debug_t heading_debug;
 void Control_Init(controller_t *control);
 void Camera_Tick(const pi_command_t *pi, uint32_t now_ms);
 void Control_Tick(controller_t *control, const pi_command_t *pi, const bno055_euler_t *imu, uint32_t now_ms);
+/* Every motor off at once, rudders centred, no braking: before the main loop blocks (an IMU re-init). */
+void Control_Stop(controller_t *control);
