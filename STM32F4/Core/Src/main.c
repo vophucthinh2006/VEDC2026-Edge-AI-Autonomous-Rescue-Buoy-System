@@ -35,6 +35,8 @@
 #include "control.h"
 #include "gps_nmea.h"
 #include "imu.h"
+#include "imu_watchdog.h"
+#include "i2c_bus.h"
 #include "hw_test.h"
 #include "lora_beacon.h"
 #include "uart_protocol.h"
@@ -64,6 +66,7 @@ static pi_command_t pi_command;
 static gps_state_t gps;
 static bno055_euler_t imu;
 static controller_t control;
+imu_watchdog_t imu_watchdog;   /* not static: read live over ST-LINK */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -79,7 +82,10 @@ static void send_telemetry(uint16_t sequence)
 {
   char payload[128];
   uint32_t now = HAL_GetTick();
-  bool imu_ok = imu.valid && (uint32_t)(now - control.last_imu_ms) <= IMU_TIMEOUT_MS;
+  /* Same freshness rule as Control_Tick: a good read within IMU_TIMEOUT_MS. Not imu.valid, which a
+     single failed I2C read clears for one tick: the Pi stopped the boat on it (safety.py imu_stale)
+     and the front motor braked, while the F407 itself stayed armed. */
+  bool imu_ok = control.last_imu_ms != 0U && (uint32_t)(now - control.last_imu_ms) <= IMU_TIMEOUT_MS;
 
   snprintf(payload, sizeof(payload), "%u,%.2f,%.2f,%.2f,%u,%u", sequence, imu.pitch_deg, imu.roll_deg, imu.heading_deg, imu_ok ? 1U : 0U, control.overturned ? 1U : 0U);
   Protocol_Send(&huart4, "IMU", payload);
@@ -171,7 +177,7 @@ int main(void)
   Buzzer_Init();
   Buzzer_Beep(1U);         /* firmware is up */
 #endif
-  (void)IMU_Init();
+  ImuWatchdog_Init(&imu_watchdog, IMU_Init(), HAL_GetTick());   /* a failed init is tried again */
   Battery_Init(&hi2c1);    /* INA226 on the BNO055's bus */
 
   HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
@@ -196,8 +202,32 @@ int main(void)
     if ((uint32_t)(now - last_control) >= CONTROL_PERIOD_MS)
     {
       last_control = now;
-      if (IMU_Read(&imu)) control.last_imu_ms = now;
-      Battery_Tick(now);   /* same bus as the IMU, after it, never during */
+      /* A stuck I2C bus is recovered instead of read: each transfer on it waited 25 ms for nothing. */
+      bool bus_ok = I2cBus_Ready(&hi2c1, now);
+      bool imu_read = bus_ok && IMU_Read(&imu);
+      if (imu_read) control.last_imu_ms = now;
+      else if (!bus_ok) imu.valid = false;
+      ImuWatchdog_OnRead(&imu_watchdog, imu_read, now);
+      if (bus_ok) Battery_Tick(now);   /* same bus as the IMU, after it, never during */
+#if !HW_TEST_ENABLED
+      /* The BNO055 lost, or reset by itself: started again. That blocks ~0.7..2 s, so every motor is
+         stopped first (HwTest never does it: its motor time limit would stall meanwhile). A lost
+         IMU has disarmed the boat already; only BENCH_IGNORE_IMU drives on without one, and the
+         stand is then left driving. A sensor that reset itself reads zeros that look fresh: that
+         one is stopped and started again whatever the boat does. */
+      if (bus_ok && ImuWatchdog_CheckDue(&imu_watchdog, now))
+        ImuWatchdog_OnModeCheck(&imu_watchdog, IMU_SensorReset(), now);
+      bool driving = control.operating_mode == 'A';
+      if (ImuWatchdog_ReinitDue(&imu_watchdog, now) && (!driving || imu_watchdog.cause == IMU_CAUSE_MODE))
+      {
+        Control_Stop(&control);
+        if (!bus_ok) I2cBus_Recover(&hi2c1);
+        bool ok = IMU_Init();
+        now = HAL_GetTick();
+        ImuWatchdog_OnReinit(&imu_watchdog, ok, now);
+        imu.valid = false;     /* fresh again only after the next good read */
+      }
+#endif
 #if HW_TEST_ENABLED
       HwTest_Tick(now);
 #else
@@ -209,16 +239,16 @@ int main(void)
 #endif
       /* SOS output (old PD13) has no pin in Pinout (Hy) yet. */
 
-      if (pi_command.txd_pending)
+      /* Every TXD queued since the last tick: several come back to back when people are confirmed together. */
+      txd_event_t txd;
+      while (TxdQueue_Pop(&pi_command.txd, &txd))
       {
         char ack[40];
-        snprintf(ack, sizeof(ack), "%u,TXD,ACCEPTED", pi_command.txd_sequence);
+        snprintf(ack, sizeof(ack), "%u,TXD,ACCEPTED", txd.sequence);
         Protocol_Send(&huart4, "ACK", ack);
-        pi_command.txd_pending = false;
-        LoraBeacon_SetVictims(pi_command.victim_count, now);
-        if (pi_command.victim_report)
-          LoraBeacon_ReportVictim(pi_command.victim_has_pos, pi_command.victim_lat_e6, pi_command.victim_lon_e6,
-                                  pi_command.victim_risk, pi_command.victim_confidence_pct, now);
+        LoraBeacon_SetVictims(txd.victims, now);
+        if (txd.victim_report)
+          LoraBeacon_ReportVictim(txd.has_pos, txd.lat_e6, txd.lon_e6, txd.risk, txd.confidence_pct, now);
       }
     }
 

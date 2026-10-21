@@ -34,6 +34,13 @@
 #if ACTUATORS_ENABLED && BENCH_IGNORE_IMU
 #warning "AUTO runs without a fresh IMU: boat on the stand only."
 #endif
+/* BNO055 started again when lost (App/imu_watchdog.h): after this many failed reads in a row
+   (control ticks), or when it is found out of its fusion mode (checked every IMU_MODE_CHECK_MS).
+   A failed re-init is tried again after IMU_REINIT_FIRST_MS, doubling up to IMU_REINIT_MAX_MS. */
+#define IMU_REINIT_AFTER_FAILS     50U
+#define IMU_MODE_CHECK_MS          1000U
+#define IMU_REINIT_FIRST_MS        2000U
+#define IMU_REINIT_MAX_MS          30000U
 #define MAX_PITCH_DEG              35.0f
 #define MAX_ROLL_DEG               35.0f
 
@@ -125,6 +132,9 @@
 #define FRONT_BRAKE_MIN_DROP       0.05f
 #define FRONT_BRAKE_MS_PER_THROTTLE 2000U
 #define FRONT_BRAKE_MAX_MS         1000U
+/* Only a throttle held this long is braked off (App/front_motor.h): the Pi flickering between two
+   speeds, or a blip of throttle between two stops, no longer reverses the front motor each time. */
+#define FRONT_BRAKE_HOLD_MS        1000U
 
 /* Bench test (App/hw_test.c): servos, ESCs and buzzer driven from the debugger
    instead of the control loop. ESC output is capped and time-limited. The first three

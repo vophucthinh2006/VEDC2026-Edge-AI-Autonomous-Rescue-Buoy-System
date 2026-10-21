@@ -1,6 +1,7 @@
 #pragma once
 
 #include "main.h"
+#include "txd_queue.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -15,18 +16,12 @@ typedef struct {
     uint32_t last_hbt_ms;
     bool pi_link_ok;
     bool sos_on;
-    bool txd_pending;             /* Event accepted from Pi, to be acknowledged by the main loop. */
-    uint16_t txd_sequence;
     uint8_t victim_count;         /* VICTIM_FOUND events since boot, stops at 255; sent to shore in the LoRa beacon */
-    /* The last VICTIM_FOUND (a new person) or VICTIM_UPDATE (the one followed: new risk or position):
+    /* Events accepted from the Pi, each acknowledged by the main loop and, for a VICTIM_FOUND (a new
+       person) or VICTIM_UPDATE (the one followed: new risk or position), handed to the LoRa beacon:
        $TXD,seq,VICTIM_FOUND|VICTIM_UPDATE,lat,lon,confidence[,risk]. lat = lon = 0 is "no
        position" (the Pi had no GPS fix). risk 0 safe .. 3 critical; an older Pi sends none: 2 (high). */
-    bool victim_report;           /* this TXD was a VICTIM_FOUND, for the LoRa event */
-    bool victim_has_pos;
-    int32_t victim_lat_e6;
-    int32_t victim_lon_e6;
-    uint8_t victim_confidence_pct;
-    uint8_t victim_risk;
+    txd_queue_t txd;
     float cam_pan_deg;            /* camera servo angle from the bow, positive right */
     uint32_t last_cam_ms;         /* 0 until the first CAM packet */
     uint16_t route_rev;           /* LoRa route the Pi reports in $HBT, 0 = none (App/route_link.h) */

@@ -456,6 +456,30 @@ BNO055_Status_t BNO055_ReadGyro(BNO055_HandleTypeDef *hbno, BNO055_Gyro_t *gyro)
 /**
   * @brief  Read CALIB_STAT (4.3.54). Heading from NDOF is reliable once mag >= 2 / sys = 3.
   */
+/**
+  * @brief  Check the device is still in hbno->mode. A BNO055 that reset itself (brown-out) comes
+  *         back in CONFIGMODE, where the fusion registers read as zero without any I2C error.
+  * @retval BNO055_OK, BNO055_ERR_MODE when it answered in another mode, or the I2C error.
+  */
+BNO055_Status_t BNO055_CheckMode(BNO055_HandleTypeDef *hbno)
+{
+  uint8_t value;
+  BNO055_Status_t status;
+
+  if (hbno == NULL)
+  {
+    return BNO055_ERR_PARAM;
+  }
+
+  status = BNO055_ReadReg(hbno, BNO055_REG_OPR_MODE, &value, 1U);
+  if (status != BNO055_OK)
+  {
+    return status;
+  }
+
+  return ((value & BNO055_OPR_MODE_MASK) == (uint8_t)hbno->mode) ? BNO055_OK : BNO055_ERR_MODE;
+}
+
 BNO055_Status_t BNO055_ReadCalibStatus(BNO055_HandleTypeDef *hbno, BNO055_CalibStatus_t *calib)
 {
   uint8_t value;

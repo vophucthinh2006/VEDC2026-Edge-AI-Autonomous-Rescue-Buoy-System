@@ -60,6 +60,7 @@ ESC_RAMP_PER_S = 2.0
 # App/front_motor.c: the bidirectional front motor pushes with the rear ones and brakes on a throttle cut.
 FRONT_THRUST_GAIN, FRONT_BRAKE_LEVEL, FRONT_BRAKE_MIN_DROP = 1.0, 0.40, 0.05
 FRONT_BRAKE_S_PER_THROTTLE, FRONT_BRAKE_MAX_S, ESC_FRONT_REVERSE_DELAY_S = 2.0, 1.0, 0.2
+FRONT_BRAKE_HOLD_S = 1.0
 CAM_PAN_LIMIT_DEG = 80.0
 AUTO_THROTTLE_MAX = 0.50
 TILT_REPEAT_S = 30.0
@@ -131,20 +132,27 @@ class FrontMotor:
     """App/front_motor.c, line for line: front command -1..1, positive pushes forward."""
 
     def __init__(self) -> None:
+        self.window_start = 0.0
         self.reset()
 
     def reset(self) -> None:
         self.last, self.until, self.braking = 0.0, 0.0, False
+        self.floor = self.window_min = 0.0
 
     def command(self, throttle: float, now: float) -> float:
         throttle = max(throttle, 0.0)
-        drop = self.last - throttle
+        # Only the throttle held for a whole FRONT_BRAKE_HOLD_S window is braked off.
+        drop = min(self.floor, self.last) - throttle
         if drop >= FRONT_BRAKE_MIN_DROP:
             self.until = now + ESC_FRONT_REVERSE_DELAY_S + min(drop * FRONT_BRAKE_S_PER_THROTTLE, FRONT_BRAKE_MAX_S)
             self.braking = True
         elif throttle > self.last:
             self.braking = False
         self.last = throttle
+        self.floor = min(self.floor, throttle)
+        self.window_min = min(self.window_min, throttle)
+        if now - self.window_start >= FRONT_BRAKE_HOLD_S:
+            self.floor, self.window_min, self.window_start = self.window_min, throttle, now
         if self.braking:
             if now < self.until:
                 return -FRONT_BRAKE_LEVEL

@@ -125,6 +125,7 @@ typedef struct
 BNO055_Status_t BNO055_Init(BNO055_HandleTypeDef *hbno);
 BNO055_Status_t BNO055_ReadEuler(BNO055_HandleTypeDef *hbno, BNO055_Euler_t *euler);
 BNO055_Status_t BNO055_ReadGyro(BNO055_HandleTypeDef *hbno, BNO055_Gyro_t *gyro);
+BNO055_Status_t BNO055_CheckMode(BNO055_HandleTypeDef *hbno);
 BNO055_Status_t BNO055_ReadCalibStatus(BNO055_HandleTypeDef *hbno, BNO055_CalibStatus_t *calib);
 BNO055_Status_t BNO055_ReadCalibProfile(BNO055_HandleTypeDef *hbno, uint8_t *profile);
 BNO055_Status_t BNO055_WriteCalibProfile(BNO055_HandleTypeDef *hbno, const uint8_t *profile);

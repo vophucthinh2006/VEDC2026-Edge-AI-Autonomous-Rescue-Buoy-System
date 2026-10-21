@@ -58,7 +58,8 @@ for _ in $(seq 120); do
 done
 sleep 5
 
-export VEDC_ROUTE_FILE="$T/route.yaml" VEDC_STATION_POS="$HOME_LL" STM32_SIM_ARGS="--gps-fix 2"
+# The board's GPS reports GGA quality 1, a plain fix, as the boat's receiver does.
+export VEDC_ROUTE_FILE="$T/route.yaml" VEDC_STATION_POS="$HOME_LL"
 source "$REPO/sim/tools/hw_standins.sh"
 start_stm32_standins "$T" "$HOME_LL" vedc_central || exit 1
 # The dashboard's route, the pool's (empty) geofence: as on the boat, nothing moves until the route comes.

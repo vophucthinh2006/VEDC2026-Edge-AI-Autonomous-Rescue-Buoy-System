@@ -1,6 +1,12 @@
 import unittest
 
-from utils.nmea_packet import decode, encode
+from utils.nmea_packet import FIX_TYPE_3D, decode, encode, gga_fix_type
+
+
+class GgaFixTest(unittest.TestCase):
+    def test_measured_positions_are_a_fix_estimates_are_not(self) -> None:
+        self.assertEqual([gga_fix_type(q) for q in range(10)], [0, 3, 3, 3, 3, 3, 0, 0, 0, 0])
+        self.assertEqual(gga_fix_type(1), FIX_TYPE_3D)   # a plain GPS fix, the usual one
 
 
 class PacketTest(unittest.TestCase):

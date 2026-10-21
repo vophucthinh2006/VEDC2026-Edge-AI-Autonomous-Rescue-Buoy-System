@@ -1,0 +1,136 @@
+/* The guest page (index.html, js/guest.js): light and calm, for relatives reading it on a phone. The
+   admin console (admin.html) keeps its own dark theme in tokens.css. */
+:root{
+  --bg:#F4F7F9; --card:#FFFFFF; --line:#E2E8F0; --line-2:#CBD5E1;
+  --text:#0F172A; --muted:#475569; --dim:#64748B;
+  --accent:#0E7490; --accent-bg:#E0F2F7;
+  --ok:#15803D; --ok-bg:#DCFCE7; --warn:#B45309; --warn-bg:#FEF3C7;
+  --bad:#B91C1C; --bad-bg:#FEE2E2; --idle:#475569; --idle-bg:#EEF2F6; --lost:#64748B; --lost-bg:#F1F5F9;
+  --home:#7C3AED; --station:#0E7490;
+  --r:12px; --shadow:0 1px 2px rgba(15,23,42,.06), 0 4px 14px rgba(15,23,42,.06);
+}
+*{ box-sizing:border-box; }
+html,body{ height:100%; margin:0; }
+body{ background:var(--bg); color:var(--text); font:15px/1.55 'Be Vietnam Pro', system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+button{ font:inherit; color:inherit; cursor:pointer; }
+h1,h2,h3{ margin:0; line-height:1.3; }
+h1{ font-size:20px; font-weight:700; }
+h2{ font-size:16px; font-weight:700; }
+h3{ font-size:14px; font-weight:600; margin-top:14px; color:var(--muted); }
+
+.g-top{ height:60px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 18px;
+  background:var(--card); border-bottom:1px solid var(--line); }
+.g-brand{ display:flex; align-items:center; gap:10px; color:inherit; text-decoration:none; min-width:0; }
+.g-brand img{ border-radius:8px; flex:none; }
+.g-brand span{ display:flex; flex-direction:column; min-width:0; }
+.g-brand b{ font-size:16px; }
+.g-brand small{ color:var(--dim); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.g-live{ display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:var(--dim); white-space:nowrap; }
+.g-live i{ width:9px; height:9px; border-radius:50%; background:var(--lost); }
+.g-live[data-up="true"]{ color:var(--ok); }
+.g-live[data-up="true"] i{ background:#22C55E; box-shadow:0 0 0 0 rgba(34,197,94,.5); animation:pulse 2s infinite; }
+@keyframes pulse{ 70%{ box-shadow:0 0 0 7px rgba(34,197,94,0); } 100%{ box-shadow:0 0 0 0 rgba(34,197,94,0); } }
+
+.g-main{ display:grid; grid-template-columns:minmax(340px, 420px) 1fr; height:calc(100% - 60px); }
+.g-scroll{ overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:14px; }
+.g-mapwrap{ position:relative; }
+#map{ position:absolute; inset:0; background:#E5EBF0; }
+
+.g-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:16px; box-shadow:var(--shadow); }
+.g-hint{ margin:6px 0 0; color:var(--dim); font-size:13px; }
+.g-msg{ margin:10px 0 0; font-size:13px; color:var(--muted); }
+
+.g-search{ display:flex; align-items:center; gap:8px; margin-top:12px; padding:4px 4px 4px 12px; border:1.5px solid var(--line-2);
+  border-radius:10px; background:#fff; }
+.g-search:focus-within{ border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-bg); }
+.g-search .ph{ color:var(--dim); font-size:18px; }
+.g-search input{ flex:1; min-width:0; border:0; outline:0; font:inherit; font-size:16px; padding:8px 0; background:none; }
+.g-search button{ border:0; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; padding:9px 16px; }
+.g-choices{ list-style:none; margin:10px 0 0; padding:0; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.g-choices li + li{ border-top:1px solid var(--line); }
+.g-choices button{ display:flex; align-items:flex-start; gap:10px; width:100%; text-align:left; border:0; background:#fff; padding:10px 12px; }
+.g-choices button:hover{ background:var(--accent-bg); }
+.g-choices .ph{ color:var(--accent); margin-top:3px; }
+.g-choices span{ display:flex; flex-direction:column; font-weight:600; }
+.g-choices small{ font-weight:400; color:var(--dim); font-size:12.5px; }
+
+.g-area{ border-color:var(--accent); }
+.g-area-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.g-area-head small{ color:var(--dim); font-size:12.5px; }
+.g-link{ border:0; background:none; color:var(--accent); font-weight:600; padding:2px 4px; }
+.g-lead{ margin:12px 0 0; padding:12px 14px; border-radius:10px; font-size:15.5px; font-weight:500; background:var(--idle-bg); }
+.g-lead[data-tone="ok"]{ background:var(--ok-bg); color:#14532D; }
+.g-lead[data-tone="bad"]{ background:var(--bad-bg); color:#7F1D1D; }
+.g-facts{ list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:8px; font-size:14px; color:var(--muted); }
+.g-facts li{ display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.g-facts li > .ph{ color:var(--accent); flex:none; position:relative; top:2px; }
+.g-facts li > span:not(.g-pill){ flex:1; min-width:180px; }
+
+.g-pill{ display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:12.5px; font-weight:600; white-space:nowrap;
+  background:var(--idle-bg); color:var(--idle); }
+.g-pill[data-tone="ok"]{ background:var(--ok-bg); color:var(--ok); }
+.g-pill[data-tone="warn"]{ background:var(--warn-bg); color:var(--warn); }
+.g-pill[data-tone="bad"]{ background:var(--bad-bg); color:var(--bad); }
+.g-pill[data-tone="lost"]{ background:var(--lost-bg); color:var(--lost); }
+
+.g-people, .g-buoys{ list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.g-people button, .g-buoys button{ display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:1px solid var(--line);
+  border-radius:10px; background:#fff; padding:9px 12px; }
+.g-people button:hover, .g-buoys button:hover{ border-color:var(--accent); }
+.g-people span, .g-bname{ display:flex; flex-direction:column; flex:1; min-width:0; }
+.g-people small, .g-bname small{ color:var(--dim); font-size:12.5px; }
+.g-dot{ width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line-2); flex:none; }
+
+.g-stats{ display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-top:12px; }
+.g-stats div{ background:var(--bg); border-radius:10px; padding:10px; display:flex; flex-direction:column; }
+.g-stats b{ font-size:22px; line-height:1.2; }
+.g-stats span{ font-size:12px; color:var(--muted); }
+
+.g-feed{ list-style:none; margin:8px 0 0; padding:0; }
+.g-feed li{ display:grid; grid-template-columns:22px 1fr auto; gap:8px; align-items:baseline; padding:9px 4px; border-bottom:1px solid var(--line); font-size:14px; }
+.g-feed li:last-child{ border-bottom:0; }
+.g-feed li .ph{ position:relative; top:2px; color:var(--idle); }
+.g-feed li[data-tone="bad"] .ph{ color:var(--bad); }
+.g-feed li[data-tone="ok"] .ph{ color:var(--ok); }
+.g-feed li[data-tone="warn"] .ph{ color:var(--warn); }
+.g-feed li.go{ cursor:pointer; border-radius:8px; }
+.g-feed li.go:hover, .g-feed li.go:focus-visible{ background:var(--accent-bg); outline:0; }
+.g-feed time{ color:var(--dim); font-size:12.5px; font-variant-numeric:tabular-nums; }
+
+.g-foot{ padding:4px 4px 20px; color:var(--dim); font-size:12.5px; }
+.g-foot p{ margin:0 0 8px; }
+.g-foot a{ display:inline-flex; align-items:center; gap:6px; color:var(--muted); text-decoration:none; }
+.g-foot a:hover{ color:var(--accent); }
+
+/* Map */
+.g-pin{ width:36px; height:36px; border-radius:50%; display:grid; place-items:center; color:#fff; font-size:20px; border:3px solid #fff;
+  box-shadow:0 2px 6px rgba(15,23,42,.35); background:var(--idle); }
+.g-pin[data-tone="ok"]{ background:#16A34A; }
+.g-pin[data-tone="warn"]{ background:#D97706; }
+.g-pin[data-tone="bad"]{ background:#DC2626; }
+.g-pin[data-tone="lost"]{ background:#94A3B8; }
+.g-station{ width:28px; height:28px; border-radius:7px; display:grid; place-items:center; background:var(--station); color:#fff; font-size:16px;
+  border:2px solid #fff; box-shadow:0 2px 6px rgba(15,23,42,.3); }
+.g-home{ width:30px; height:38px; display:grid; place-items:start center; color:var(--home); font-size:32px; filter:drop-shadow(0 2px 2px rgba(15,23,42,.35)); }
+.leaflet-tooltip.g-tip{ background:#fff; color:var(--text); border:1px solid var(--line); border-radius:8px; box-shadow:var(--shadow); font:13px/1.4 'Be Vietnam Pro', sans-serif; }
+.g-popup .leaflet-popup-content-wrapper{ border-radius:10px; }
+.g-pop{ display:flex; flex-direction:column; gap:3px; font:13px/1.45 'Be Vietnam Pro', sans-serif; color:var(--muted); }
+.g-pop b{ color:var(--text); font-size:14px; }
+.g-risk{ font-weight:600; color:var(--text); }
+.g-risk::before{ content:''; display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--c); margin-right:6px; }
+.g-legend{ position:absolute; left:12px; bottom:12px; z-index:500; display:flex; flex-wrap:wrap; gap:6px 14px; max-width:calc(100% - 70px);
+  background:rgba(255,255,255,.94); border:1px solid var(--line); border-radius:10px; padding:7px 12px; font-size:12.5px; color:var(--muted); box-shadow:var(--shadow); }
+.g-legend span{ display:inline-flex; align-items:center; gap:6px; }
+.g-legend i{ width:12px; height:12px; border-radius:50%; flex:none; }
+.lg-buoy{ background:#16A34A; border:2px solid #fff; box-shadow:0 0 0 1px #16A34A; }
+.lg-person{ background:#F97316; border:2px solid #fff; box-shadow:0 0 0 1px #F97316; }
+.lg-station{ background:var(--station); border-radius:3px !important; }
+.lg-cover{ border:1.5px solid var(--station); background:rgba(14,116,144,.08); }
+
+@media (max-width: 820px){
+  .g-main{ display:flex; flex-direction:column-reverse; height:auto; }
+  .g-mapwrap{ height:46vh; min-height:280px; }
+  .g-scroll{ overflow:visible; padding:12px; }
+  .g-brand small{ display:none; }
+  .g-stats b{ font-size:19px; }
+}

@@ -61,6 +61,10 @@ bool IMU_Init(void) {
     return bno055_init_status == BNO055_OK;
 }
 
+bool IMU_SensorReset(void) {
+    return bno055_init_status == BNO055_OK && BNO055_CheckMode(&hbno055) == BNO055_ERR_MODE;
+}
+
 bool IMU_Read(bno055_euler_t *out) {
     if (bno055_init_status != BNO055_OK) {
         out->valid = false;

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test test/telemetry.test.mjs test/hub.test.mjs test/geocode.test.mjs",
+    "test": "node --test test/telemetry.test.mjs test/hub.test.mjs test/geocode.test.mjs test/devsignin.test.mjs",
     "test:auth": "node test/auth.test.mjs",
     "test:telemetry": "node --test test/telemetry.test.mjs",
     "test:hub": "node --test test/hub.test.mjs",

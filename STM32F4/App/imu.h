@@ -40,4 +40,11 @@ bool IMU_Init(void);
   */
 bool IMU_Read(bno055_euler_t *out);
 
+/**
+  * @brief Whether the sensor answered out of its fusion mode: it reset itself and
+  *        reads zeros. An I2C error is not counted here (IMU_Read sees it).
+  *        Call IMU_Init() again to bring it back (App/imu_watchdog.h).
+  */
+bool IMU_SensorReset(void);
+
 #endif /* IMU_H */

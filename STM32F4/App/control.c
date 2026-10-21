@@ -42,6 +42,8 @@ static void stop_heading(controller_t *control) {
     Actuators_Stop();
 }
 
+void Control_Stop(controller_t *control) { stop_heading(control); }
+
 /* Told to stop (NAV STOP, the Pi silent, STOP from the dashboard): rear motors off, and the front
    motor brakes the boat for a moment (App/front_motor.c) before it rests too. */
 static void stop_braking(controller_t *control, uint32_t now_ms) {

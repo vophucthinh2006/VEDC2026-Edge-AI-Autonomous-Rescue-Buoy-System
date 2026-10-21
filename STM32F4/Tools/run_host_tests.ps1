@@ -33,6 +33,26 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to compile confirm_button_test' }
 & $buttonExe
 if ($LASTEXITCODE -ne 0) { throw 'confirm_button_test failed' }
 
+$txdExe = Join-Path $testDir 'txd_queue_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'STM32F4/App') `
+  (Join-Path $repo 'STM32F4/Tests/txd_queue_test.c') `
+  (Join-Path $repo 'STM32F4/App/txd_queue.c') `
+  -o $txdExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile txd_queue_test' }
+& $txdExe
+if ($LASTEXITCODE -ne 0) { throw 'txd_queue_test failed' }
+
+$imuExe = Join-Path $testDir 'imu_watchdog_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror -Wno-error=cpp `
+  -I (Join-Path $repo 'STM32F4/App') `
+  (Join-Path $repo 'STM32F4/Tests/imu_watchdog_test.c') `
+  (Join-Path $repo 'STM32F4/App/imu_watchdog.c') `
+  -o $imuExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile imu_watchdog_test' }
+& $imuExe
+if ($LASTEXITCODE -ne 0) { throw 'imu_watchdog_test failed' }
+
 $parserExe = Join-Path $testDir 'lora_payload_test.exe'
 & gcc -std=c11 -Wall -Wextra -Werror `
   -I (Join-Path $repo 'esp32-lora-station/main') `

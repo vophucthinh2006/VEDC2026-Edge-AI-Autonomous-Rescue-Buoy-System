@@ -1,17 +1,12 @@
 // Người phao phát hiện (chấm màu theo mức nguy hiểm), khối "Người cần cứu" ở cột trái,
 // và cảnh báo lật phao / xác nhận nhận đồ cứu hộ.
 // Máy chủ đã bỏ bản phao gửi lặp và gộp phát hiện gần nhau (5 m), ở đây chỉ vẽ và báo.
-import { state } from '../state.js';
+import { state, RISKS, LORA_GOOD_M, LORA_WEAK_M } from '../state.js';
 import { hm, fmtAgo } from '../util/format.js';
 import { distM } from '../util/geo.js';
 import { log } from './timeline.js';
 
-export const RISKS = [
-  { name: 'An toàn', color: '#22C55E' },
-  { name: 'Trung bình', color: '#FACC15' },
-  { name: 'Cao', color: '#F97316' },
-  { name: 'Nguy kịch', color: '#EF4444' },
-];
+export { RISKS };
 const LIST_MAX = 3;   // rows shown before "Xem thêm"
 
 const $ = id => document.getElementById(id);
@@ -193,6 +188,9 @@ function legendControl() {
     for (const r of RISKS) item(el('dot', r.color), r.name);
     item(el('lg-buoy'), 'Phao');
     item(el('lg-station'), 'Trạm bờ');
+    const km = m => (m / 1000).toLocaleString('vi-VN', { maximumFractionDigits: 1 });
+    item(el('lora'), `LoRa tốt (≤ ${km(LORA_GOOD_M)} km)`);
+    item(el('lora weak'), `LoRa yếu (${km(LORA_GOOD_M)}–${km(LORA_WEAK_M)} km)`);
     item(el('ph-fill ph-warning warn-ic'), 'Phao lật');
     item(el('hdg'), 'Mũi tàu');
     item(el('cog'), 'Hướng đi');

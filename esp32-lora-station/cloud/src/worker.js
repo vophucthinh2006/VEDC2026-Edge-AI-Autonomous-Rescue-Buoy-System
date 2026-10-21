@@ -1,5 +1,5 @@
 import { json, num, secretEquals } from "./util.js";
-import { adminEmails, makeSession, originOk, readSession, sessionCookie, verifyGoogleToken } from "./auth.js";
+import { adminEmails, devSignInUrl, makeSession, originOk, readSession, sessionCookie, verifyGoogleToken } from "./auth.js";
 import { sanitizeBuoy } from "./telemetry.js";
 
 export { Hub } from "./hub.js";
@@ -131,7 +131,7 @@ export default {
     }
 
     // ---- API công khai: cấu hình, trạng thái phiên, đăng nhập/đăng xuất ----
-    if (path === "/api/config") return json({ googleClientId: env.GOOGLE_CLIENT_ID || "" });
+    if (path === "/api/config") return json({ googleClientId: env.GOOGLE_CLIENT_ID || "", devSignIn: devSignInUrl(env) });
 
     const session = await readSession(request, env);
 

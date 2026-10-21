@@ -14,28 +14,35 @@ static I2C_HandleTypeDef *bus;
 static uint32_t last_read_ms;
 static uint32_t last_init_ms;
 static bool filtered;
+static bool searching;         /* looking for the module, one address a call */
+static uint8_t probe;          /* how many addresses this search has tried */
+static uint8_t first_address = INA226_ADDRESS;   /* where it answered last, tried first */
 #endif
 
 /* Resting voltage of a LiPo cell against charge, from the usual discharge curve. */
 static const float cell_volts[] = { 3.27f, 3.61f, 3.69f, 3.71f, 3.73f, 3.77f, 3.79f, 3.84f, 3.92f, 4.02f, 4.20f };
 
 #if INA226_ENABLED
-/* INA226_ADDRESS first, then every address the A0/A1 straps give (0x40..0x4F): modules are sold
-   strapped differently. The BNO055 (0x28/0x29) is outside that range. */
-static bool find_ina226(void)
+/* The address the last one answered on (INA226_ADDRESS at first), then every address the A0/A1
+   straps give (0x40..0x4F): modules are sold strapped differently. The BNO055 (0x28/0x29) is outside
+   that range. One address a call: the whole search in one call took ~0.4 s of the main loop when
+   the bus was stuck (25 ms of HAL busy wait each), and stopped the IMU, the LoRa and the telemetry. */
+static void search_step(void)
 {
-    if (INA226_Init(&ina, bus, INA226_ADDRESS, INA226_SHUNT_OHM, INA226_MAX_A)) {
-        battery_debug.address = INA226_ADDRESS;
-        return true;
+    uint8_t address = probe == 0U ? first_address : (uint8_t)(0x40U + probe - 1U);
+    probe++;
+    if ((probe == 1U || address != first_address) && INA226_Init(&ina, bus, address, INA226_SHUNT_OHM, INA226_MAX_A)) {
+        battery_debug.address = address;
+        battery_debug.ok = 1U;
+        first_address = address;
+        searching = false;
+        return;
     }
-    for (uint8_t address = 0x40U; address <= 0x4FU; address++) {
-        if (address != INA226_ADDRESS && INA226_Init(&ina, bus, address, INA226_SHUNT_OHM, INA226_MAX_A)) {
-            battery_debug.address = address;
-            return true;
-        }
+    if (probe > 16U) {
+        battery_debug.address = 0U;
+        searching = false;
+        last_init_ms = HAL_GetTick();
     }
-    battery_debug.address = 0U;
-    return false;
 }
 #endif
 
@@ -60,7 +67,8 @@ void Battery_Init(I2C_HandleTypeDef *hi2c)
 #if INA226_ENABLED
     bus = hi2c;
     last_init_ms = HAL_GetTick();
-    battery_debug.ok = find_ina226() ? 1U : 0U;
+    searching = true;   /* from the first Battery_Tick on */
+    probe = 0U;
 #else
     (void)hi2c;
 #endif
@@ -70,9 +78,12 @@ void Battery_Tick(uint32_t now_ms)
 {
 #if INA226_ENABLED
     if (!battery_debug.ok) {
-        if ((uint32_t)(now_ms - last_init_ms) < RETRY_INIT_MS) return;
-        last_init_ms = now_ms;
-        battery_debug.ok = find_ina226() ? 1U : 0U;
+        if (!searching) {
+            if ((uint32_t)(now_ms - last_init_ms) < RETRY_INIT_MS) return;
+            searching = true;
+            probe = 0U;
+        }
+        search_step();
         return;
     }
     if ((uint32_t)(now_ms - last_read_ms) < BATTERY_READ_PERIOD_MS) return;

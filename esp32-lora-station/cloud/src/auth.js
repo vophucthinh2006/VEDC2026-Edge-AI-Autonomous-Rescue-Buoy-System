@@ -93,6 +93,17 @@ async function getJwks(env) {
 }
 
 // Ném lỗi nếu token không hợp lệ; trả về email (chữ thường) nếu hợp lệ.
+// `wrangler dev` with the test sign-in (test/dev-idp.mjs): GOOGLE_JWKS_URL on this machine. Google refuses the
+// made-up client id of .dev.vars (401 invalid_client), so the dashboard signs the admin in through the test sign-in
+// instead, at this URL. "" on the deployed Worker: its tokens are checked against Google's keys, which no token of
+// the test sign-in matches anyway.
+export function devSignInUrl(env) {
+  let jwks;
+  try { jwks = new URL(env.GOOGLE_JWKS_URL || ""); } catch { return ""; }
+  if (jwks.hostname !== "127.0.0.1" && jwks.hostname !== "localhost") return "";
+  return `${jwks.protocol}//${jwks.hostname}:8798/token`;
+}
+
 export async function verifyGoogleToken(credential, env) {
   if (!env.GOOGLE_CLIENT_ID) throw new Error("GOOGLE_CLIENT_ID chưa được cấu hình");
   if (typeof credential !== "string" || credential.length > 4096) throw new Error("token sai định dạng");
