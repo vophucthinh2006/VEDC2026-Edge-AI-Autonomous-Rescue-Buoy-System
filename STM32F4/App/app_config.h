@@ -132,6 +132,9 @@
 #ifndef HW_TEST_ENABLED
 #define HW_TEST_ENABLED            0
 #endif
+/* Only a throttle held this long is braked off (App/front_motor.h): the Pi flickering between two
+   speeds, or a blip of throttle between two stops, no longer reverses the front motor each time. */
+#define FRONT_BRAKE_HOLD_MS        1000U
 #ifndef HW_TEST_ESC_MAX_US
 #define HW_TEST_ESC_MAX_US         1500U   /* props stay on: half throttle */
 #endif

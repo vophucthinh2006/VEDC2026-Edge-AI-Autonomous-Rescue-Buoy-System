@@ -12,6 +12,10 @@
  *                                  ESC to rest at neutral before it turns the other way
  *   speeding up again              the brake ends at once
  *
+ * The drop is measured from the throttle held for a whole FRONT_BRAKE_HOLD_MS (the floor), not from
+ * the last command: the Pi flickering between STOP and a creep, or between approach and stand-off,
+ * reversed the front motor every 100 ms, and a blip of throttle gives the boat no speed to brake off.
+ *
  * Not used when the boat is overturned or its IMU is gone: every motor stops then (App/control.c).
  * Plain C, no HAL: host test in Tests/. */
 
@@ -20,6 +24,9 @@
 
 typedef struct {
     float last_throttle;       /* rear throttle of the last call, 0..1 */
+    float floor;               /* least throttle of the last whole hold window: what the boat has picked up */
+    float window_min;          /* least throttle since window_start_ms */
+    uint32_t window_start_ms;
     uint32_t brake_until_ms;
     bool braking;
 } front_motor_t;
