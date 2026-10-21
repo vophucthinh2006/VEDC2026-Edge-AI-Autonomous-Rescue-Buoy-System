@@ -309,8 +309,9 @@ Bo ảo theo **đúng** firmware, kể cả những chỗ có thể chưa đúng
 - `$SYS` trường `auto` luôn là 1 (không còn công tắc SwB), không phải "Pi đang gửi AUTO": phao đứng chờ thì camera vẫn quét.
 - `boat_stm32.yaml` không lấy waypoint của file: phao đứng yên tới khi `shore_station_sim.py` chuyển xuống
   một lộ trình gửi từ dashboard, và đứng lại khi nhận lộ trình rỗng hoặc đi hết lộ trình.
-- `$GPS` trường `fix` là chất lượng GGA chuyển nguyên: GPS thường là **1**. `safety.py` chặn lệnh
-  `waypoint` khi `fix < 2`, nên trên phao thật đi waypoint sẽ bị dừng `gps_stale_or_no_fix`.
+- `$GPS` trường `fix` là chất lượng GGA chuyển nguyên: GPS thường là **1**. Pi (`uart_comm.py`,
+  `utils/nmea_packet.py gga_fix_type`) đổi 1..5 thành fix 3D, 0 và 6..8 (ước lượng, nhập tay, giả lập) thành không
+  fix. Trước đây Pi coi 1 là chưa có fix và `safety.py` dừng mọi lệnh `waypoint` (`gps_stale_or_no_fix`).
 - `$NAV` có `seq` không mới hơn gói trước thì bị bỏ, nhưng chỉ khi luồng NAV còn sống (≤ 300 ms): `main.py`
   khởi động lại đếm từ 1 vẫn được nhận. Gói bị bỏ được ghi "dropped" vào `stm32_events.log`.
 
@@ -333,14 +334,14 @@ npx wrangler dev --port 8787       # .dev.vars có INGEST_TOKEN=dev-token
 ```
 
 ```bash
-wsl -d Ubuntu-24.04 -- env VEDC_INGEST_TOKEN=dev-token STM32_SIM_ARGS="--gps-fix 2" \
+wsl -d Ubuntu-24.04 -- env VEDC_INGEST_TOKEN=dev-token STM32_PI_ARGS="--viewer" \
     bash /mnt/d/EMBEDDED/Competition/TKDT_2026/VEDC_2026/sim/run_boat.sh --stm32
 ```
 
 Mở http://localhost:8787, đăng nhập admin, tab **Lộ trình**: đặt điểm rồi bấm **Gửi tới phao**. Bảng dưới nút
 hiện "đang chờ phao nhận" → "phao đang nhận k/n" → "Pi đã nhận lộ trình và đang chạy theo nó". Không cần
 Worker thì cho trạm đọc file: `VEDC_ROUTE_FILE=route.yaml` (`waypoints: [[lat, lon], ...]`, `loop`, `id`); mỗi
-lần sửa file là một bản gửi mới. `--gps-fix 2` vì `safety.py` chặn lệnh `waypoint` khi GPS báo fix 1 (xem trên).
+lần sửa file là một bản gửi mới. GPS của bo báo fix 1 như GPS thật; Pi đổi chất lượng GGA sang fix 3D (xem trên).
 
 Log thêm: `station_sim.log` (bản gửi trạm thấy, mỗi khung `RTE` đã phát), trong `stm32_events.log` các dòng
 `LoRa RTE taken: rev r, k/n points` và `RTE rev r to the Pi`, trong `pi.log` dòng `route from the dashboard (rev r)`.
