@@ -1,4 +1,4 @@
-// Giả lập máy chủ để xem thử giao diện trên máy: mở index.html?mock (admin) hoặc ?mock=guest (khách).
+// Giả lập máy chủ để xem thử trạm điều hành trên máy: mở admin.html?mock (admin) hoặc ?mock=guest (khách).
 // Covers every status label: PHAO-01 patrols its route, PHAO-02 returns to the station in bursts and
 // capsizes after ~18 s, PHAO-03 waits for a route then goes silent after ~36 s, PHAO-04 is stopped with
 // a weak link and a low battery, SIM-01 is a Pixhawk over MAVLink. Address search is answered here too.

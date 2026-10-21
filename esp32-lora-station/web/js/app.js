@@ -1,6 +1,7 @@
 // Điểm vào của dashboard: bản đồ, phao, lộ trình, đăng nhập, WebSocket.
 // Các panel phụ (thẻ phao, người cần cứu, dòng sự kiện, tìm địa chỉ, tiện ích bản đồ) nằm trong js/features/.
-import { state, emit, pushHistory, isReturning, buoyStatus, STATUS, signalOf, SIGNAL, batteryOf, stationStatus } from './state.js';
+import { state, emit, pushHistory, readBuoy, isReturning, buoyStatus, STATUS, signalOf, SIGNAL, batteryOf, stationStatus,
+  LORA_GOOD_M, LORA_WEAK_M } from './state.js';
 import { distM } from './util/geo.js';
 import { fmtDist } from './util/format.js';
 import { initTimeline, clearUnseen, log } from './features/timeline.js';
@@ -153,6 +154,11 @@ function showBuoy(id) {
 const STATION_RED = '#EF4444';
 const stationLine = L.polyline([], { color: STATION_RED, weight: 1.5, opacity: .8, dashArray: '2 6', interactive: false }).addTo(map);
 let stationMarker = null;
+// LoRa coverage round the station (state.js LORA_GOOD_M, LORA_WEAK_M). Not clickable: taps go on to the map (route points).
+const loraGood = L.circle([0, 0], { radius: LORA_GOOD_M, color: STATION_RED, weight: 2.5, opacity: .95,
+  fillColor: STATION_RED, fillOpacity: .07, interactive: false });
+const loraWeak = L.circle([0, 0], { radius: LORA_WEAK_M, color: STATION_RED, weight: 2.5, opacity: .9,
+  dashArray: '10 8', fillColor: STATION_RED, fillOpacity: .04, interactive: false });
 
 function stationLabel() {
   const ss = stationStatus();
@@ -176,6 +182,7 @@ function updateStation() {
         .addTo(map)
         .on('click', () => map.setView([s.lat, s.lon], Math.max(map.getZoom(), 16)));
     }
+    for (const c of [loraWeak, loraGood]) { c.setLatLng([s.lat, s.lon]); if (!map.hasLayer(c)) c.addTo(map); }
   }
   const b = state.buoys.get(state.selected);
   stationLine.setLatLngs(s && s.hasPos && b && b.hasPos ? [[s.lat, s.lon], [b.lat, b.lon]] : []);
@@ -491,36 +498,7 @@ function onBuoyMessage(m) {
   const prev = existed ? { fix: existed.fix, nav: existed.nav, victims: existed.victims, returning: isReturning(existed), routeDone: routeDone(id, existed.route) } : null;
   const b = existed || { hasPos: false, marker: null };
   const snapshot = (Number(m.age_s) || 0) > 0;   // bản phát lại lúc mở trang, không phải gói mới
-  b.fix = m.fix;
-  // Cầu nối MAVLink không đi qua LoRa nên không có RSSI/SNR: để null
-  b.link = m.link === 'mavlink' ? 'mavlink' : 'lora';
-  b.rssi = Number.isFinite(m.rssi) ? m.rssi : null;
-  b.snr = Number.isFinite(m.snr) ? m.snr : null;
-  b.lastSeen = Date.now() - (Number(m.age_s) || 0) * 1000;
-  // Nhóm điều hướng (ARMED, chế độ, tốc độ, ga, waypoint, pin, GPS) chỉ có ở MAVLink
-  b.nav = m.nav && typeof m.nav === 'object' ? m.nav : null;
-  // Số người phao đã báo phát hiện (bản STM32, qua LoRa); gói không có trường này thì giữ số cũ
-  if (Number.isInteger(m.victims)) b.victims = m.victims;
-  // Hướng đi và tốc độ theo GPS, % pin, trạng thái thật hai đèn, cờ dừng (bản STM32); gói không có thì để trống
-  b.course = Number.isFinite(m.course) ? m.course : null;
-  b.speed = Number.isFinite(m.speed) ? m.speed : null;
-  b.battery = Number.isInteger(m.battery_pct) ? m.battery_pct : null;
-  b.lights = Number.isInteger(m.lights) ? m.lights : null;
-  b.hold = m.hold === 1 ? true : m.hold === 0 ? false : null;
-  // Tiến độ nhận lộ trình gửi qua LoRa (bản STM32). Beacon LoRa không có w= là phao không giữ lộ trình
-  // nào (F407 vừa khởi động lại); bản tin MAVLink không bao giờ có nhóm này nên giữ trạng thái cũ
-  if (m.route && Number.isInteger(m.route.rev)) b.route = { rev: m.route.rev, have: m.route.have, pi: m.route.pi };
-  else if (b.link === 'lora') b.route = null;
-  const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S', 'R'].includes(m.mode);
-  if (attitudeValid) {
-    b.hasAttitude = true;
-    b.roll = Number(m.roll); b.pitch = Number(m.pitch); b.yaw = Number(m.yaw);
-    b.targetYaw = Number(m.target_yaw) < 0 ? null : Number(m.target_yaw);
-    b.headingMode = m.mode; b.imuOk = m.imu_ok === 1; b.calib = Number(m.calib); b.sequence = Number(m.seq);
-    b.attitudeLastSeen = b.lastSeen;
-  }
-  // Chỉ ghi đè vị trí khi bản tin có tọa độ hợp lệ; NO_FIX giữ vị trí cũ
-  if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { b.lat = m.lat; b.lon = m.lon; b.hasPos = true; }
+  readBuoy(b, m);
   state.buoys.set(id, b);
   noteHold(id);
   if (!state.selected) state.selected = id;
@@ -679,20 +657,32 @@ function loadGoogle(clientId) {
   document.head.appendChild(s);
 }
 
+// The Worker on this computer (wrangler dev) with the test sign-in (cloud/test/dev-idp.mjs): Google refuses the
+// made-up client id of .dev.vars (invalid_client), so the admin signs in with a token of the test sign-in.
+function showDevSignIn(url) {
+  const box = $('g-btn');
+  box.classList.add('login-dev');
+  box.innerHTML = '<input id="dev-email" type="email" value="admin@example.com" aria-label="Email admin (ADMIN_EMAILS của .dev.vars)">'
+    + '<button id="btn-dev" type="button" class="btn primary"><i class="ph ph-key" aria-hidden="true"></i>Đăng nhập admin (thử nghiệm)</button>';
+  $('btn-dev').addEventListener('click', async () => {
+    loginError('');
+    let credential;
+    try {
+      credential = await fetch(url + '?email=' + encodeURIComponent($('dev-email').value.trim())).then(r => r.text());
+    } catch { loginError('Không gọi được IdP thử (npm run dev:idp trong esp32-lora-station/cloud)'); return; }
+    await onGoogleCredential({ credential });
+  });
+}
+
 async function showLogin() {
   $('login').hidden = false;
   const cfg = await fetch('/api/config').then(r => r.json()).catch(() => ({}));
-  if (cfg.googleClientId) loadGoogle(cfg.googleClientId);
+  if (cfg.devSignIn) showDevSignIn(cfg.devSignIn);
+  else if (cfg.googleClientId) loadGoogle(cfg.googleClientId);
   else $('g-btn').textContent = 'Đăng nhập Google chưa được cấu hình';
 }
 
-$('btn-guest').addEventListener('click', async () => {
-  loginError('');
-  try {
-    const res = await jsonPost('/api/auth/guest');
-    if (res.ok) enter(await res.json()); else loginError('Không vào được chế độ khách');
-  } catch { loginError('Không kết nối được máy chủ'); }
-});
+// Guests have a page of their own (/, js/guest.js): the sign-in screen links there instead of letting them in here.
 $('btn-logout').addEventListener('click', async () => {
   if (!MOCK) await jsonPost('/api/auth/logout').catch(() => { /* vẫn tải lại trang */ });
   location.reload();
@@ -719,7 +709,8 @@ async function boot() {
     document.head.appendChild(s);
     return;
   }
+  // The console is the admin's: a guest session (from the guest page) signs in here like no session at all
   const me = await fetch('/api/me').then(r => r.json()).catch(() => null);
-  if (me && me.role) enter(me); else showLogin();
+  if (me && me.role === 'admin') enter(me); else showLogin();
 }
 boot();

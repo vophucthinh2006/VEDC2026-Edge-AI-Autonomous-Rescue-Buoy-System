@@ -4,6 +4,22 @@ export const STALE_SEC = 30;      // quá ngưỡng này không có gói mới t
 export const ATTITUDE_STALE_SEC = 12; // hai chu kỳ beacon 5 giây cộng dung sai
 export const HISTORY_MAX = 300;   // số mẫu giữ trong bộ nhớ cho mỗi phao
 export const CAPSIZE_SHOW_SEC = 60;   // a capsize alert labels the buoy "Bị lật" for this long
+// LoRa coverage of the shore station, drawn round it on the map. Estimated, not measured: RA-02 (SX1278) at both ends,
+// 433 MHz, SF9 BW125 CR4/5, 17 dBm (STM32F4/App/app_config.h, esp32-lora-station/main/main.c); sensitivity -129 dBm,
+// 2 dBi whips, 2 dB lost in cables: 148 dB of path loss at most. Over water or flat open ground, the boat's antenna
+// 0.5 m and the station's 2 m up, the two-ray model loses 40 log10(d m): 133 dB, 15 dB kept for fading and the
+// waves, at about 2 km; all 148 dB at about 5 km. Trees and buildings in the way shorten both a lot.
+// Set both from a test on the water.
+export const LORA_GOOD_M = 2000;   // solid circle: the link holds
+export const LORA_WEAK_M = 5000;   // dashed circle: frames get lost between the two, none get through beyond
+
+// Risk of a person the buoy found, index = the risk level of the event (0 safe .. 3 critical). Both pages.
+export const RISKS = [
+  { name: 'An toàn', color: '#22C55E' },
+  { name: 'Trung bình', color: '#FACC15' },
+  { name: 'Cao', color: '#F97316' },
+  { name: 'Nguy kịch', color: '#EF4444' },
+];
 const SIGNAL_LATE_SEC = 12;       // two missed 5 s beacons: signal drops one level
 
 export const state = {
@@ -101,6 +117,42 @@ export function speedOf(b) {
   if (Number.isFinite(b.speed)) return b.speed;
   if (b.nav && Number.isFinite(b.nav.gs)) return b.nav.gs;
   return null;
+}
+
+// The fields of one buoy message (the Hub's broadcast of a beacon or a MAVLink frame) onto b, the buoy's
+// record in state.buoys. Shared by the admin console and the guest page; side effects stay with them.
+export function readBuoy(b, m) {
+  b.fix = m.fix;
+  // Cầu nối MAVLink không đi qua LoRa nên không có RSSI/SNR: để null
+  b.link = m.link === 'mavlink' ? 'mavlink' : 'lora';
+  b.rssi = Number.isFinite(m.rssi) ? m.rssi : null;
+  b.snr = Number.isFinite(m.snr) ? m.snr : null;
+  b.lastSeen = Date.now() - (Number(m.age_s) || 0) * 1000;
+  // Nhóm điều hướng (ARMED, chế độ, tốc độ, ga, waypoint, pin, GPS) chỉ có ở MAVLink
+  b.nav = m.nav && typeof m.nav === 'object' ? m.nav : null;
+  // Số người phao đã báo phát hiện (bản STM32, qua LoRa); gói không có trường này thì giữ số cũ
+  if (Number.isInteger(m.victims)) b.victims = m.victims;
+  // Hướng đi và tốc độ theo GPS, % pin, trạng thái thật hai đèn, cờ dừng (bản STM32); gói không có thì để trống
+  b.course = Number.isFinite(m.course) ? m.course : null;
+  b.speed = Number.isFinite(m.speed) ? m.speed : null;
+  b.battery = Number.isInteger(m.battery_pct) ? m.battery_pct : null;
+  b.lights = Number.isInteger(m.lights) ? m.lights : null;
+  b.hold = m.hold === 1 ? true : m.hold === 0 ? false : null;
+  // Tiến độ nhận lộ trình gửi qua LoRa (bản STM32). Beacon LoRa không có w= là phao không giữ lộ trình
+  // nào (F407 vừa khởi động lại); bản tin MAVLink không bao giờ có nhóm này nên giữ trạng thái cũ
+  if (m.route && Number.isInteger(m.route.rev)) b.route = { rev: m.route.rev, have: m.route.have, pi: m.route.pi };
+  else if (b.link === 'lora') b.route = null;
+  const attitudeValid = [m.roll, m.pitch, m.yaw, m.target_yaw, m.imu_ok, m.calib, m.seq].every(Number.isFinite) && ['A', 'M', 'S', 'R'].includes(m.mode);
+  if (attitudeValid) {
+    b.hasAttitude = true;
+    b.roll = Number(m.roll); b.pitch = Number(m.pitch); b.yaw = Number(m.yaw);
+    b.targetYaw = Number(m.target_yaw) < 0 ? null : Number(m.target_yaw);
+    b.headingMode = m.mode; b.imuOk = m.imu_ok === 1; b.calib = Number(m.calib); b.sequence = Number(m.seq);
+    b.attitudeLastSeen = b.lastSeen;
+  }
+  // Chỉ ghi đè vị trí khi bản tin có tọa độ hợp lệ; NO_FIX giữ vị trí cũ
+  if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { b.lat = m.lat; b.lon = m.lon; b.hasPos = true; }
+  return b;
 }
 
 export function pushHistory(id, sample) {

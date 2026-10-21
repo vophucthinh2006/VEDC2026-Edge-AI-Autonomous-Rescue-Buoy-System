@@ -33,11 +33,13 @@ esp32-lora-station/
 ├── components/sx127x/       Driver LoRa SX1276/78
 │   ├── include/sx127x.h
 │   └── src/sx127x.c
-├── web/                     Giao diện (HTML + CSS + JS thuần, ES module), responsive
-│   ├── index.html, img/logo.png
-│   ├── css/                 tokens.css (biến), layout.css, components.css, login.css
-│   ├── js/app.js            khởi động, bản đồ, phao, lộ trình, đăng nhập, WebSocket
-│   ├── js/state.js          trạng thái dùng chung + bus sự kiện
+├── web/                     Giao diện (HTML + CSS + JS thuần, ES module), responsive, hai trang:
+│   ├── index.html           / : trang theo dõi cho người thân (sáng, đọc trên điện thoại, không ra lệnh gì)
+│   ├── admin.html           /admin : trạm điều hành (tối, đăng nhập Google, lệnh và lộ trình); img/logo.png
+│   ├── css/                 guest.css (trang người thân); tokens.css, layout.css, components.css, login.css (admin)
+│   ├── js/guest.js          trang người thân: quê nhà, tình hình trong 5 km, diễn biến, các phao
+│   ├── js/app.js            trạm điều hành: khởi động, bản đồ, phao, lộ trình, đăng nhập, WebSocket
+│   ├── js/state.js          trạng thái dùng chung + bus sự kiện, đọc gói tin phao, mức nguy hiểm, vùng LoRa
 │   ├── js/util/             geo.js (khoảng cách, phương vị, hướng 8 chữ), format.js
 │   ├── js/features/         telemetry (thẻ phao), victims (người cần cứu, chú giải), timeline (dòng sự kiện),
 │   │                        search (tìm địa chỉ), hold, lights, mapfx (thang tỷ lệ, vệt),
@@ -159,12 +161,11 @@ cd cloud
 npx wrangler dev --port 8787      # mở http://localhost:8787
 npm run test:auth                 # 50 kiểm thử (Worker phải đang chạy, khởi động lại wrangler dev trước mỗi lần chạy)
 ```
-Thử đăng nhập admin trên trình duyệt mà không cần Google thật: chạy `npm run dev:idp`, rồi trong console của trang:
-```js
-const t = await fetch('http://127.0.0.1:8798/token?email=admin@example.com').then(r => r.text());
-await fetch('/api/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: t }) });
-location.reload();
-```
+Đăng nhập admin trên trình duyệt mà không cần Google thật: chạy `npm run dev:idp`, mở http://localhost:8787 và bấm
+**Đăng nhập admin (thử nghiệm)** (email phải có trong `ADMIN_EMAILS`). Nút này thay nút Google khi `GOOGLE_JWKS_URL`
+trỏ về máy này (`/api/config` trả `devSignIn`); nút Google với `GOOGLE_CLIENT_ID=test-client-id` luôn bị Google chặn
+(`401 invalid_client`). Worker đã deploy không bao giờ hiện nút này: nó kiểm token bằng khóa của Google.
+`scripts\stm32\sim_central.bat` chạy cả Worker, IdP giả và mô phỏng.
 Đổi `.dev.vars` xong phải khởi động lại `wrangler dev`. Gửi thử một gói như ESP32:
 ```powershell
 curl -X POST http://localhost:8787/api/ingest -H "Authorization: Bearer dev-token" -d "{\"fix\":1,\"lat\":10.7626,\"lon\":106.6602,\"rssi\":-88,\"snr\":7.5,\"raw\":\"test\"}"

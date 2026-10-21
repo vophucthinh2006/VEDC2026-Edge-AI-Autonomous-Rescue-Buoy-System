@@ -347,6 +347,8 @@ body[data-mode="mission"] #empty{ display:none; }
 .map-legend .warn-ic{ color:var(--bad); font-size:13px; width:11px; }
 .map-legend .hdg,.map-legend .cog{ width:11px; height:0; border-top:2px solid var(--ok); flex:none; }
 .map-legend .cog{ border-top:2px dashed #F8FAFC; }
+.map-legend .lora{ width:11px; height:11px; border-radius:50%; border:1.5px solid var(--station); background:rgba(239,68,68,.12); flex:none; }
+.map-legend .lora.weak{ border-style:dashed; background:none; }
 .leaflet-popup.pop .leaflet-popup-content-wrapper,.leaflet-popup.pop .leaflet-popup-tip{ background:var(--panel); color:var(--text); border:1px solid var(--line-2); }
 .leaflet-popup.pop .leaflet-popup-content{ margin:10px 12px; }
 .leaflet-popup.pop a.leaflet-popup-close-button{ color:var(--muted); }
