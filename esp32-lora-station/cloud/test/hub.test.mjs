@@ -258,3 +258,22 @@ test("the dashboard hears when the boat has really stopped", async () => {
   await call(hub, "POST", "/ingest", { ...beacon(undefined), hold: 1 });   // unchanged: no new message
   assert.deepEqual(sent.filter(m => m.type === "hold").map(m => [m.want, m.have]), [[true, null], [true, false], [true, true]]);
 });
+
+test("a diagnostics frame is kept beside the buoy, never in place of its beacon", async () => {
+  const { hub, store, sent } = makeHub();
+  await call(hub, "POST", "/ingest", beacon());
+  const diag = { reason: "obstacle_too_close", mission: "P", wp: 2, wp_total: 5, arm: 0, drive: 2, volts: 11.84, amps: -0.35, i2c: 0, imu: 0 };
+  const result = await call(hub, "POST", "/ingest", { id: "PHAO-01", fix: 0, rssi: -80, snr: 7, raw: "", diag });
+  assert.equal(result.diag, "stored");
+  assert.equal(store.get("buoys")["PHAO-01"].msg.lat, 10.8834);         // the beacon is untouched
+  assert.deepEqual(sent.at(-1), { type: "diag", id: "PHAO-01", ...diag, age_s: 0 });
+  assert.deepEqual(store.get("diag")["PHAO-01"].d, diag);
+  // A page opened later gets it with the rest
+  const later = makeHub(store);
+  const opened = [];
+  later.hub.ctx.acceptWebSocket = () => {};
+  globalThis.WebSocketPair ??= class { constructor() { return { 0: {}, 1: { send: s => opened.push(JSON.parse(s)) } }; } };
+  const res = await later.hub.fetch(new Request("https://hub/ws", { headers: { Upgrade: "websocket" } })).catch(() => null);
+  void res;
+  assert.ok(opened.some(m => m.type === "diag" && m.id === "PHAO-01" && m.reason === "obstacle_too_close"));
+});

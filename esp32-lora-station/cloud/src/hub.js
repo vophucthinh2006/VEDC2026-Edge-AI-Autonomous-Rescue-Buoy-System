@@ -26,6 +26,9 @@ function distM(a, b) {
 
 // Bản tin chỉ chở sự kiện (không có nhóm tư thế) không phải beacon: không đổi vị trí, trạng thái hay lịch sử phao
 const eventOnly = msg => (!!msg.event || !!msg.event_bad) && msg.yaw === undefined && !msg.attitude_bad;
+// A diagnostics frame (dg=, telemetry.js sanitizeDiag) carries no beacon fields: kept beside the buoy, never
+// in place of its last beacon
+const diagOnly = msg => (!!msg.diag || !!msg.diag_bad) && msg.yaw === undefined && msg.lat === undefined && !msg.event;
 
 // Bản tin cho trình duyệt: không kèm tọa độ (đã có trong bản tin mission)
 const downlinkSummary = d => ({ type: "downlink", rev: d.rev, id: d.id, loop: d.loop, n: d.pts.length, mission_rev: d.mission_rev, by: d.by, at: d.at, delivered: d.delivered || null });
@@ -52,6 +55,7 @@ export class Hub extends DurableObject {
   events = null;
   lights = null;    // id -> { want, by, at }: lệnh đèn của admin, tách khỏi bản gửi lộ trình
   hold = null;      // id -> { want, by, at }: lệnh DỪNG của admin (want true = F407 khóa motor), như đèn
+  diag = null;      // id -> { d, t }: khung chẩn đoán mới nhất của phao (lý do dừng, nhiệm vụ Pi, pin)
   geocoder = null;  // address search cache and rate limits (memory only, rebuilt after eviction)
 
   async loadBuoys() {
@@ -95,6 +99,12 @@ export class Hub extends DurableObject {
     const l = (await this.loadLights())[id];
     const have = (await this.loadBuoys())[id]?.msg.lights;
     return { type: "lights", id, want: l ? l.want : null, have: have ?? null, by: l?.by ?? null, at: l?.at ?? null };
+  }
+
+  // id -> { d, t }: the latest diagnostics frame of each buoy (telemetry.js sanitizeDiag)
+  async loadDiag() {
+    if (!this.diag) this.diag = (await this.ctx.storage.get("diag")) || {};
+    return this.diag;
   }
 
   async loadHold() {
@@ -176,6 +186,9 @@ export class Hub extends DurableObject {
       if (ev.victims.length || ev.alerts.length) server.send(JSON.stringify({ type: "victims", victims: ev.victims, alerts: ev.alerts }));
       for (const id of Object.keys(await this.loadLights())) server.send(JSON.stringify(await this.lightsMessage(id)));
       for (const id of Object.keys(await this.loadHold())) server.send(JSON.stringify(await this.holdMessage(id)));
+      for (const [id, x] of Object.entries(await this.loadDiag())) {
+        server.send(JSON.stringify({ type: "diag", id, ...x.d, age_s: Math.round((now - x.t) / 1000) }));
+      }
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -284,6 +297,14 @@ export class Hub extends DurableObject {
       const buoys = await this.loadBuoys();
       if (!buoys[msg.id] && Object.keys(buoys).length >= MAX_BUOYS) return json({ error: "too many buoys" }, 429);
       const now = Date.now();
+      if (diagOnly(msg)) {
+        if (!msg.diag) return json({ ok: true, diag: "bad" });
+        const all = await this.loadDiag();
+        all[msg.id] = { d: msg.diag, t: now };
+        await this.ctx.storage.put("diag", all);
+        this.broadcast({ type: "diag", id: msg.id, ...msg.diag, age_s: 0 });
+        return json({ ok: true, diag: "stored" });
+      }
       // Trạm ACK sự kiện cho phao; bản lặp (cùng id, seq) chỉ được ghi nhận một lần
       const fresh = msg.event ? await this.recordEvent(msg.id, msg.event, now) : null;
       const result = { ok: true, clients: this.ctx.getWebSockets().length };
