@@ -1,0 +1,9 @@
+# The STM32 boat on its stand in a small room for the judges, after config/boat_stm32.yaml
+# (scripts\stm32\run_all.bat stand, or demo_stand.bat; the service vedc-boat runs it with no viewer):
+#   ./run.sh stm32 --overlay config/stand_demo.yaml
+# Everything as on the water (a route from the dashboard over LoRa, the camera, the servo following
+# people, the shore link, the lights, DUNG PHAO) but the obstacle avoidance: the LiDAR is read and
+# drawn, and the walls, the table and the people close round the stand never stop the motors.
+# NEVER ON THE WATER: nothing avoids anything.
+vehicle:
+  lidar_avoidance: false      # modules/navigation.py: the LiDAR steers, slows and stops nothing

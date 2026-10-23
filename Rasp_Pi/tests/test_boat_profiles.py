@@ -40,6 +40,58 @@ class ConfigTest(unittest.TestCase):
         self.assertTrue((CONFIG.parent / boat["camera"]["model_path"]).is_file())
 
 
+class StandDemoTest(unittest.TestCase):
+    """config/stand_demo.yaml (run_all.bat stand): the boat on its stand in a small room. Everything as
+    on the water but the obstacle avoidance: walls and people close round the stand never stop it."""
+
+    def setUp(self):
+        from modules.navigation import BapfNavigator
+        from modules.safety import SafetyArbiter
+        self.water = load_config(CONFIG / "settings.yaml", [CONFIG / "boat_stm32.yaml"])
+        self.config = load_config(CONFIG / "settings.yaml", [CONFIG / "boat_stm32.yaml", CONFIG / "stand_demo.yaml"])
+        self.navigator = BapfNavigator(self.config["vehicle"], self.config["planner"])
+        self.safety = SafetyArbiter(self.config["vehicle"])
+
+    def drive(self, person=None):
+        from modules.state_store import HumanTarget
+        from modules.perception import Obstacle
+        now = monotonic()
+        # No GPS fix, a route from the dashboard, the table and the stand all round within 0.3-0.8 m.
+        ring = tuple(Obstacle(float(b), 0.3 + 0.5 * (b % 60 == 0), 0.3) for b in range(-180, 180, 30))
+        target = HumanTarget(person[0], person[1], 0.7, now) if person else None
+        snap = Snapshot(ImuState(yaw_deg=40.0, imu_ok=True, timestamp=now), GpsState(fix=0, timestamp=now),
+                        SysState(timestamp=now), ring, now, (10.8834335, 106.7962386), target)
+        return self.safety.check(snap, self.navigator.plan(snap))
+
+    def test_only_the_obstacle_avoidance_differs_from_the_water(self):
+        stand = {**self.config, "vehicle": {k: v for k, v in self.config["vehicle"].items() if k != "lidar_avoidance"}}
+        self.assertEqual(stand, self.water)
+        self.assertFalse(self.config["vehicle"]["lidar_avoidance"])
+        self.assertTrue(self.water["vehicle"].get("lidar_avoidance", True))
+
+    def test_the_route_runs_whatever_the_lidar_sees(self):
+        command = self.drive()
+        self.assertEqual((command.mode, command.reason), ("AUTO", "bow_no_gps"))
+        self.assertGreater(command.speed_mps, 0.0)
+        self.assertAlmostEqual(command.heading_deg, 40.0)
+
+    def test_a_person_is_gone_to_with_the_stand_boxed_in(self):
+        # 4 m away, 25 deg to starboard: the bow turns to them and the motors run.
+        command = self.drive((25.0, 4.0))
+        self.assertEqual(command.mode, "AUTO")
+        self.assertGreater(command.speed_mps, 0.0)
+        self.assertAlmostEqual(command.heading_deg, 65.0)
+        # The bow 2 m off the person, as on the water: a range of 2.25 m from the LiDAR and camera.
+        self.assertAlmostEqual(self.navigator.standoff_m, 2.25)
+        self.assertEqual(self.drive((2.0, 2.2)).reason, "human_standoff")
+        self.assertEqual(self.drive((2.0, 2.8)).reason, "approach_human")
+
+    def test_the_water_holds_2_m_off_the_bow_too(self):
+        from modules.navigation import BapfNavigator
+        water = BapfNavigator(self.water["vehicle"], self.water["planner"])
+        self.assertAlmostEqual(water.standoff_m - self.water["vehicle"]["bow_ahead_m"], 2.0)
+
+
 class SerialLidarTest(unittest.TestCase):
     def test_angles_turn_to_the_boat_frame(self):
         scan = (LidarPoint(10.0, 2.0, 50), LidarPoint(350.0, 3.0, 50))

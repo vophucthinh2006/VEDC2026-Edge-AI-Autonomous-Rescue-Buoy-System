@@ -68,7 +68,9 @@ exit /b 0
 
 :run
 call :pi_address || exit /b 1
-ssh -t %PI_HOST% "cd %PI_DIR% && ./run.sh %BOAT%%REST%"
+rem In this window, by hand: the service vedc-boat (tools/install_service.sh) is stopped first, or it
+rem would fight this main.py for the UART. It starts again at the next boot or run_all.bat.
+ssh -t %PI_HOST% "cd %PI_DIR% && bash tools/install_service.sh --stop; ./run.sh %BOAT%%REST%"
 exit /b %ERRORLEVEL%
 
 :test
