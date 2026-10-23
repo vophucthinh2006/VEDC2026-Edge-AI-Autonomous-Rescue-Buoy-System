@@ -12,3 +12,6 @@ Rasp_Pi/.boat_profile
 
 # Local state of wrangler dev when it is started from here (.claude/launch.json)
 .wrangler/
+
+# Run logs main.py writes on every start (Rasp_Pi/logs/main_*.log)
+Rasp_Pi/logs/
