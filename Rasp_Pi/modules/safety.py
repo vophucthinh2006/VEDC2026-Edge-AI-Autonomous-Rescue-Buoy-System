@@ -24,12 +24,19 @@ class SafetyArbiter:
         # the STM32F407 built with BENCH_IGNORE_IMU: the heading is then the last one the IMU read.
         if self.v.get("imu_required", True) and (not snapshot.imu.imu_ok or now - snapshot.imu.timestamp > self.v["imu_stale_s"]):
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "imu_stale")
-        if proposed.mode == "AUTO" and self.v.get("lidar_required", True) and now - snapshot.scan_timestamp > self.v["lidar_stale_s"]:
+        # BACK (backing off an obstacle, navigation.py) drives too: the same LiDAR and fence checks, no GPS one.
+        driven = proposed.mode in ("AUTO", "BACK")
+        if driven and self.v.get("lidar_required", True) and now - snapshot.scan_timestamp > self.v["lidar_stale_s"]:
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "lidar_stale")
-        if proposed.reason == "waypoint" and (snapshot.gps.fix < 2 or now - snapshot.gps.timestamp > self.v["gps_stale_s"]):
+        # Anything driven but a person (the camera's bearing needs no GPS) goes to a position: a
+        # waypoint or home. It used to be stopped only for reason "waypoint", so with an obstacle near
+        # (leaving_obstacle, overspeed) the boat drove on with no fix, to a bearing reckoned from 0, 0.
+        # vehicle.gps_required false (indoors): the navigator then drives along the bow (bow_no_gps).
+        if (proposed.mode == "AUTO" and snapshot.human_target is None and self.v.get("gps_required", True)
+                and (snapshot.gps.fix < 2 or now - snapshot.gps.timestamp > self.v["gps_stale_s"])):
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "gps_stale_or_no_fix")
         # Outside the fence the boat stops where it is: without a LiDAR, a way back could lead onto the pool wall.
-        if (proposed.mode == "AUTO" and self.inside_fence is not None and snapshot.gps.fix >= 2
+        if (driven and self.inside_fence is not None and snapshot.gps.fix >= 2
                 and not self.inside_fence(snapshot.gps.lat_deg, snapshot.gps.lon_deg)):
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "outside_geofence")
         return proposed

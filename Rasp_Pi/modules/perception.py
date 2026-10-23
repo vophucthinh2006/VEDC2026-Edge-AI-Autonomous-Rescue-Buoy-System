@@ -15,8 +15,17 @@ class Obstacle:
     width_m: float
 
 
-def cluster_scan(points: tuple[LidarPoint, ...], min_distance_m: float = 0.15, max_distance_m: float = 8.0, gap_m: float = 0.25) -> tuple[Obstacle, ...]:
-    """Cluster adjacent polar points. Angle 0 is assumed aligned to the bow after installation calibration."""
+def _chord_m(a: LidarPoint, b: LidarPoint) -> float:
+    angle = abs(signed_angle_deg(a.angle_deg - b.angle_deg))
+    return (a.distance_m ** 2 + b.distance_m ** 2 - 2 * a.distance_m * b.distance_m * cos(radians(angle))) ** 0.5
+
+
+def cluster_scan(points: tuple[LidarPoint, ...], min_distance_m: float = 0.15, max_distance_m: float = 8.0, gap_m: float = 0.25,
+                 max_width_m: float = 0.5) -> tuple[Obstacle, ...]:
+    """Cluster adjacent polar points. Angle 0 is assumed aligned to the bow after installation calibration.
+    A cluster spans at most max_width_m: navigation takes each one for a circle that wide at its median
+    range, and a wall 3 m long seen abeam at 1.6 m became a circle reaching 0.3 m from the LiDAR, which
+    stopped the boat in open water next to it (the wrecked boat of the central scene, 2026-10-23)."""
     valid = sorted((p for p in points if min_distance_m <= p.distance_m <= max_distance_m and p.intensity > 0), key=lambda p: p.angle_deg)
     groups: list[list[LidarPoint]] = []
     for point in valid:
@@ -25,8 +34,8 @@ def cluster_scan(points: tuple[LidarPoint, ...], min_distance_m: float = 0.15, m
             continue
         previous = groups[-1][-1]
         angular_gap = abs(signed_angle_deg(point.angle_deg - previous.angle_deg))
-        chord = (point.distance_m ** 2 + previous.distance_m ** 2 - 2 * point.distance_m * previous.distance_m * cos(radians(angular_gap))) ** 0.5
-        if angular_gap < 4.0 and chord <= gap_m:
+        chord = _chord_m(point, previous)
+        if angular_gap < 4.0 and chord <= gap_m and _chord_m(point, groups[-1][0]) <= max_width_m:
             groups[-1].append(point)
         else:
             groups.append([point])

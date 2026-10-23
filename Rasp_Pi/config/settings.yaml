@@ -24,8 +24,28 @@ vehicle:
   stop_distance_m: 1.00
   slow_distance_m: 2.00
   influence_distance_m: 3.00
+  # main.py: the F407 turns the Pi's speed into a throttle open-loop, and the boat may run several
+  # times that speed (the simulator: 1.43 m/s when told 0.29). The stop and slow distances, and the
+  # stand-off from a person, grow by the way the boat still goes once the throttle is cut, at the
+  # speed the GPS measures: reaction_s of it (a NAV round trip), then the coast, about v * coast_s
+  # (simulator, 2026-10-22: 0.65 m/s to rest in 2.1 m, 0.64 in 1.4 m). Tune both on the water.
+  reaction_s: 0.5
+  coast_s: 3.0
+  # The throttle goes off while the GPS speed is more than overspeed_mps above the speed given, and
+  # comes back below half of that margin (reason overspeed). 0: off.
+  overspeed_mps: 0.30
+  # main.py: the boat cannot turn on the spot; swinging away from an obstacle it first goes on along
+  # its bow. An obstacle on the bow (or on the course over the ground) less than turn_room_m plus the
+  # braking distance clear of the hull keeps it stopped (bow_blocked) instead of driving onto it.
+  turn_room_m: 0.50
   arrive_radius_m: 4.0
-  target_standoff_m: 2.0     # from the boat's GPS position; the bow is 0.55 m ahead of it
+  target_standoff_m: 2.0     # rescue_main.py (Pixhawk boat): range to the person from the boat's sensors
+  # main.py (STM32 boat): the water kept between the bow and the person, and how far the bow is ahead
+  # of the LiDAR and camera that measure the person's range (LD14 at 0.30 m, bow at 0.55 m from the
+  # hull's centre, sim/models/vedc_buoy). The boat holds at a range of person_gap_m + bow_ahead_m.
+  # 2 m off the bow, on the water and on the stand alike (the team, 2026-10-22).
+  person_gap_m: 2.0
+  bow_ahead_m: 0.25
   target_timeout_s: 2.0
   # main.py (STM32 boat): the bow follows the camera. With the person more than face_tolerance_deg
   # off the bow the boat turns to them at face_speed_mps before going to them, and keeps the bow on
@@ -41,6 +61,10 @@ vehicle:
   lidar_required: false
   imu_stale_s: 0.30
   gps_stale_s: 2.0
+  # true: no AUTO to a waypoint or home without a fresh GPS fix (gps_stale_or_no_fix); a person is
+  # followed anyway (the camera's bearing). false (main.py, indoors where no fix ever comes): the
+  # route's speed along the bow instead (bow_no_gps), the LiDAR still avoiding.
+  gps_required: true
 planner:
   attractive_gain: 1.0
   repulsive_gain: 0.75

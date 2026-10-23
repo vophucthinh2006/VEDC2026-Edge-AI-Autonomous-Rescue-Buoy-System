@@ -115,7 +115,7 @@ def main() -> int:
             cam_sequence = (cam_sequence + 1) & 0xFFFF
             uart.send("CAM", cam_sequence, f"{pan_deg:.1f}")
 
-        vision = VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, float(config["vehicle"]["target_standoff_m"]),
+        vision = VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, navigator.standoff_m,
                               lambda: mission.sweeping, lambda: mission.detecting)
         workers.append(vision)
     status = {"text": "", "lines": [], "phase": ""}

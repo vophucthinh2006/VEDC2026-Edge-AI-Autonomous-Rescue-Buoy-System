@@ -9,9 +9,8 @@ vehicle:
   # none of the bench calibration of settings.yaml applies.
   lidar_yaw_offset_deg: 0.0
   lidar_mask: []
-  # Before the front motor braked (App/front_motor.c) the boat coasted about 1 m past the stand-off;
-  # 3 m was set for that and is kept: braking now leaves it nearer 3 m than 2 m from the person.
-  target_standoff_m: 3.0
+  # The stand-off is settings.yaml's person_gap_m: the coast past it, which once needed 3 m here,
+  # is now taken off at the speed the GPS measures (reaction_s, brake_decel_mps2).
 mission:
   file: config/mission_sim_central.yaml
   waypoints_from_file: true   # the test drives the file's route, not one from the dashboard

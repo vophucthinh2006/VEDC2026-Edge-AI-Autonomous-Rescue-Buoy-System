@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import atan2, cos, degrees, hypot, log, radians, sin
+from time import monotonic
 
 from modules.perception import Obstacle
 from modules.state_store import Snapshot
@@ -36,6 +37,17 @@ FACE_INSIDE_M = 0.3   # this far inside the stand-off the boat no longer creeps 
 STOP_RELEASE_M = 0.20       # stopped for an obstacle: going on once it is this much past the stop distance
 STANDOFF_RELEASE_M = 0.50   # holding at the stand-off: closing in again only this much beyond it (a box range is +-30 %)
 STANDOFF_ARRIVE_M = 0.15    # within stand-off + this the boat stops next to the person
+COURSE_MIN_MPS = 0.3        # the GPS course is the boat's way over the ground only above this speed
+# Bow blocked, the boat still swings away at a creep (the F407 steers only with some throttle) when
+# the turn is at least this big and every obstacle on its way lies this far off the bow on the other side.
+TURN_AWAY_MIN_DEG = 30.0
+TURN_AWAY_OFF_BOW_DEG = 5.0
+TURN_AWAY_ABEAM_DEG = 30.0  # this far off the bow an obstacle may already be inside the inflated hull
+ESCAPE_STEP_DEG = 15.0      # stopped by an obstacle, the courses tried for a way out, this far apart
+# No way out ahead: the boat backs off for BACK_S with the front motor alone (NAV BACK, App/control.c),
+# BACK_THROTTLE its throttle astern, while the stern stays clear within the stop distance.
+BACK_THROTTLE = 0.30
+BACK_S = 3.0
 
 
 class BapfNavigator:
@@ -44,21 +56,92 @@ class BapfNavigator:
         self.p = planner
         self._blocked = False      # the last plan stopped for an obstacle on the course
         self._at_standoff = False  # the last plan held next to the person
+        self._bow_blocked = False  # the last plan stopped for an obstacle on the way the boat moves
+        self._coasting = False     # the last plan cut the throttle for the boat running too fast
+        self._back_until = 0.0     # backing off an obstacle until then (monotonic s)
 
-    def _course_blocked(self, obstacles: tuple[Obstacle, ...], heading_body_deg: float, extra_m: float = 0.0) -> bool:
-        """True when an obstacle inside the stop distance (plus extra_m) lies on the commanded
-        course: held, the course would bring the boat's inflated hull onto it (closest point of
-        approach, as in Jo et al. 2022, eq. 16)."""
+    @property
+    def standoff_m(self) -> float:
+        """The range to a person at which the boat holds: the water kept off the bow (person_gap_m;
+        target_standoff_m where it is not set) plus the bow ahead of the LiDAR and camera that
+        measure that range (bow_ahead_m)."""
+        gap = self.v.get("person_gap_m", self.v["target_standoff_m"])
+        return float(gap) + float(self.v.get("bow_ahead_m", 0.0))
+
+    def braking_m(self, snapshot: Snapshot) -> float:
+        """How far the boat still goes once the Pi cuts the throttle, at the speed the GPS measures:
+        a NAV round trip (reaction_s), then the coast. Water drag at these speeds grows about with
+        the speed, so the boat coasts about v * coast_s. The F407 turns the speed into a throttle
+        open-loop, so the boat may run several times the speed it was given."""
+        v = max(float(snapshot.gps.speed_mps), 0.0)
+        return v * (float(self.v.get("reaction_s", 0.0)) + float(self.v.get("coast_s", 0.0)))
+
+    def _governed(self, speed: float, gps_speed: float) -> bool:
+        """True when the throttle goes off for the boat running faster than it was told: above the
+        speed plus overspeed_mps, back on below the speed plus half of it (0 or unset: off). The margin
+        shrinks with the speed below max_speed_mps: creeping off an obstacle at 0.09 m/s, the simulated
+        boat ran 0.4 m/s within the full margin and coasted 3 m on into the wrecked boat (2026-10-23)."""
+        over = float(self.v.get("overspeed_mps", 0.0)) * min(1.0, speed / max(float(self.v["max_speed_mps"]), 1e-6))
+        if over <= 0.0 or speed <= 0.0:
+            self._coasting = False
+            return False
+        self._coasting = gps_speed > speed + (over / 2.0 if self._coasting else over)
+        return self._coasting
+
+    @staticmethod
+    def _ways_ahead(snapshot: Snapshot) -> tuple[float, ...]:
+        """Body bearings the boat moves along whatever course it is given: its bow, and its course
+        over the ground once it is fast enough for the GPS course to mean something."""
+        gps = snapshot.gps
+        if gps.speed_mps >= COURSE_MIN_MPS:
+            return 0.0, signed_angle_deg(gps.course_deg - snapshot.imu.yaw_deg)
+        return (0.0,)
+
+    def _course_blocked(self, obstacles: tuple[Obstacle, ...], heading_body_deg: float, limit_m: float) -> bool:
+        """True when an obstacle whose clearance is inside limit_m lies on the course: held, the
+        course would bring the boat's inflated hull onto it (closest point of approach, as in Jo et
+        al. 2022, eq. 16)."""
+        return bool(self._blocking(obstacles, heading_body_deg, limit_m))
+
+    def _blocking(self, obstacles: tuple[Obstacle, ...], heading_body_deg: float, limit_m: float) -> list[Obstacle]:
+        """The obstacles _course_blocked finds on the course."""
         inflated_radius = float(self.v["boat_radius_m"]) + float(self.v["safety_margin_m"])
         v_fwd, v_right = cos(radians(heading_body_deg)), sin(radians(heading_body_deg))
+        out = []
         for obstacle in obstacles:
-            if obstacle.distance_m - inflated_radius - obstacle.width_m / 2 > float(self.v["stop_distance_m"]) + extra_m:
+            if obstacle.distance_m - inflated_radius - obstacle.width_m / 2 > limit_m:
                 continue
             angle = radians(obstacle.bearing_body_deg)
             tcpa, dcpa = cpa(obstacle.distance_m * cos(angle), obstacle.distance_m * sin(angle), v_fwd, v_right)
             if tcpa >= 0.0 and dcpa <= inflated_radius + obstacle.width_m / 2:
-                return True
-        return False
+                out.append(obstacle)
+        return out
+
+    def _can_turn_away(self, blocking: list[Obstacle], turn_deg: float) -> bool:
+        """True when the boat, its bow blocked, may swing away at a creep: a big enough turn, and every
+        obstacle on its way off the bow on the side the bow leaves, clear of the inflated hull unless it
+        lies abeam. Seen in the central scene (2026-10-23): the end of the wrecked boat 1.2 m ahead to
+        starboard (or its side 0.4 m off the starboard hull), the next waypoint 50 to 150 deg to port,
+        and the boat stopped there for good."""
+        if abs(turn_deg) < TURN_AWAY_MIN_DEG:
+            return False
+        inflated_radius = float(self.v["boat_radius_m"]) + float(self.v["safety_margin_m"])
+        return all(o.bearing_body_deg * turn_deg < 0.0 and abs(o.bearing_body_deg) >= TURN_AWAY_OFF_BOW_DEG
+                   and (o.distance_m - inflated_radius - o.width_m / 2 > 0.0 or abs(o.bearing_body_deg) >= TURN_AWAY_ABEAM_DEG)
+                   for o in blocking)
+
+    def _escape_turn(self, obstacles: tuple[Obstacle, ...], blocking: list[Obstacle], wanted_deg: float, limit_m: float) -> float | None:
+        """The turn from the bow, nearest to wanted_deg in steps of ESCAPE_STEP_DEG, whose course is clear
+        within limit_m and which the bow can take (free, or swinging away from what blocks it); None if
+        there is none: boxed in, the boat stays stopped."""
+        turns = [wanted_deg] + [signed_angle_deg(wanted_deg + side * ESCAPE_STEP_DEG * k)
+                                for k in range(1, int(180 // ESCAPE_STEP_DEG) + 1) for side in (1, -1)]
+        for turn in turns:
+            if self._course_blocked(obstacles, turn, limit_m):
+                continue
+            if not blocking or self._can_turn_away(blocking, turn):
+                return turn
+        return None
 
     def _repulsion_body(self, obstacles: tuple[Obstacle, ...]) -> tuple[float, float, float]:
         """Return forward/right forces and nearest clearance after inflating the hull."""
@@ -85,10 +168,12 @@ class BapfNavigator:
         gps, imu = snapshot.gps, snapshot.imu
         goal = snapshot.waypoint
         target = snapshot.human_target
+        brake = self.braking_m(snapshot)
         if target is not None:
-            # A person is approached along the detected bearing, never closer than standoff.
+            # A person is approached along the detected bearing, never closer than standoff. The
+            # throttle goes off the braking distance early, so the boat coasts to the stand-off.
             desired_body = target.bearing_body_deg
-            remaining = target.distance_m - float(self.v["target_standoff_m"])
+            remaining = target.distance_m - self.standoff_m - brake
             desired_heading = (imu.yaw_deg + desired_body) % 360.0
             self._at_standoff = remaining <= (STANDOFF_RELEASE_M if self._at_standoff else STANDOFF_ARRIVE_M)
             desired_speed = 0.0 if self._at_standoff else float(self.v["approach_speed_mps"])
@@ -99,6 +184,14 @@ class BapfNavigator:
             if abs(desired_body) > float(self.v.get("face_tolerance_deg", 10.0)) and remaining > -FACE_INSIDE_M:
                 desired_speed = min(float(self.v["approach_speed_mps"]), float(self.v.get("face_speed_mps", 0.15)))
                 reason = "face_human"
+        elif goal is not None and gps.fix < 2 and not self.v.get("gps_required", True):
+            # No fix and vehicle.gps_required off (indoors, the boat on its stand for the judges): the
+            # route's speed along the bow, the LiDAR still turning it off obstacles, instead of a
+            # bearing reckoned from 0, 0. It never arrives anywhere.
+            self._at_standoff = False
+            desired_heading = imu.yaw_deg
+            desired_speed = float(self.v["max_speed_mps"])
+            reason = "bow_no_gps"
         elif goal is not None:
             self._at_standoff = False
             desired_heading = bearing_deg(gps.lat_deg, gps.lon_deg, goal[0], goal[1])
@@ -108,12 +201,15 @@ class BapfNavigator:
             if remaining <= float(self.v["arrive_radius_m"]):
                 return NavCommand("STOP", 0.0, imu.yaw_deg, "arrived")
         else:
-            self._at_standoff = self._blocked = False
+            self._at_standoff = self._blocked = self._bow_blocked = False
             return NavCommand("STOP", 0.0, imu.yaw_deg, "no_goal")
 
         # Desired global vector, then add obstacle forces transformed from body to world.
         desired_east, desired_north = body_to_world(cos(radians(signed_angle_deg(desired_heading - imu.yaw_deg))), sin(radians(signed_angle_deg(desired_heading - imu.yaw_deg))), imu.yaw_deg)
-        rep_fwd, rep_right, clearance = self._repulsion_body(snapshot.obstacles)  # type: ignore[arg-type]
+        # vehicle.lidar_avoidance false (the boat on its stand for the judges, config/stand_demo.yaml):
+        # the LiDAR is read and shown but steers nothing, slows nothing and stops nothing.
+        obstacles = snapshot.obstacles if self.v.get("lidar_avoidance", True) else ()
+        rep_fwd, rep_right, clearance = self._repulsion_body(obstacles)  # type: ignore[arg-type]
         # Bias is a small consistent starboard tangent. It is applied only when avoiding.
         if rep_fwd or rep_right:
             bias = float(self.p["bias_gain"])
@@ -127,17 +223,52 @@ class BapfNavigator:
         # could not turn, so it never left the obstacle again. A course that leads away from it is
         # now followed at a creep.
         creep = min(desired_speed, CREEP * float(self.v["max_speed_mps"]))
+        # Both distances grow by the way the boat still coasts at the speed it really goes.
+        stop_m = float(self.v["stop_distance_m"]) + brake
+        slow_m = float(self.v["slow_distance_m"]) + brake
         # Stopped for an obstacle, the boat goes on only once the course is clear by STOP_RELEASE_M more.
-        self._blocked = clearance < float(self.v["slow_distance_m"]) + (STOP_RELEASE_M if self._blocked else 0.0) and \
-            self._course_blocked(snapshot.obstacles, signed_angle_deg(heading - imu.yaw_deg),  # type: ignore[arg-type]
-                                 STOP_RELEASE_M if self._blocked else 0.0)
-        if self._blocked:
-            return NavCommand("STOP", 0.0, heading, "obstacle_too_close")
-        if clearance < float(self.v["slow_distance_m"]):
-            scale = clamp((clearance - float(self.v["stop_distance_m"])) / (float(self.v["slow_distance_m"]) - float(self.v["stop_distance_m"])), 0.0, 1.0)
+        release = STOP_RELEASE_M if self._blocked else 0.0
+        stop_limit = stop_m + release
+        self._blocked = clearance < slow_m + release and \
+            self._course_blocked(obstacles, signed_angle_deg(heading - imu.yaw_deg), stop_limit)  # type: ignore[arg-type]
+        # The boat cannot turn on the spot: given a speed to swing away from an obstacle, it first
+        # goes on along its bow (and its course over the ground) while it turns. With an obstacle on
+        # that way inside turn_room_m plus the braking distance, it stays stopped: wedged next to the
+        # obstacle, not driven onto it.
+        release = STOP_RELEASE_M if self._bow_blocked else 0.0
+        room = float(self.v.get("turn_room_m", 0.0)) + brake + release
+        ways = self._ways_ahead(snapshot)
+        blocking = [o for way in ways for o in self._blocking(obstacles, way, room)]  # type: ignore[arg-type]
+        self._bow_blocked = speed > 0.0 and bool(blocking)
+        now = monotonic()
+        stern_clear = not self._course_blocked(obstacles, 180.0, stop_limit)  # type: ignore[arg-type]
+        if now < self._back_until and stern_clear and (self._blocked or self._bow_blocked):
+            return NavCommand("BACK", BACK_THROTTLE, imu.yaw_deg, "backing_off")
+        self._back_until = 0.0
+        if self._blocked or self._bow_blocked:
+            # Stopped there the boat would wait for good (the F407 steers only with some throttle, and a
+            # waypoint behind an obstacle keeps the field pointing at it): from rest it creeps along the
+            # nearest course to the field's that is clear and that the bow can swing to (_escape_turn).
+            # Not while it slides on (ways has the GPS course): a creep would not stop it, STOP brakes
+            # with the front motor.
+            at_rest = len(ways) == 1
+            turn = self._escape_turn(obstacles, blocking, signed_angle_deg(heading - imu.yaw_deg), stop_limit) if at_rest else None  # type: ignore[arg-type]
+            if turn is None:
+                # No way out ahead (wedged in a doorway, against a wreck): back off, the stern clear.
+                if at_rest and stern_clear:
+                    self._back_until = now + BACK_S
+                    return NavCommand("BACK", BACK_THROTTLE, imu.yaw_deg, "backing_off")
+                return NavCommand("STOP", 0.0, heading, "obstacle_too_close" if self._blocked else "bow_blocked")
+            heading, speed, reason = (imu.yaw_deg + turn) % 360.0, creep, "turning_away"
+        elif clearance < slow_m:
+            scale = clamp((clearance - stop_m) / (slow_m - stop_m), 0.0, 1.0)
             speed = max(speed * scale, creep)
-            if clearance <= float(self.v["stop_distance_m"]):
+            if clearance <= stop_m:
                 reason = "leaving_obstacle"
+        # Speed 0 in AUTO: the F407 rests the motors (and the front one brakes) and the boat coasts
+        # down to the speed it was given, then the throttle comes back.
+        if self._governed(speed, gps.speed_mps):
+            return NavCommand("AUTO", 0.0, heading, "overspeed")
         return NavCommand("AUTO", speed, heading, reason)
 
 
