@@ -83,6 +83,10 @@ camera:
   model: yolo_movenet
   model_path: ../YOLO_Movenet/weights/yolov8n_640_int8.tflite
   pose_model_path: ../YOLO_Movenet/weights/movenet_lighting_int8.tflite
+  # CPU threads of YOLO and MoveNet (tflite-runtime num_threads). Unset, the runtime's default: one
+  # thread, one of the Pi 4's four cores. The log says the detector's frames a second every 30 s
+  # ("detector: ... frames/s"): compare there before changing it.
+  num_threads: 4
   # yolov8n_640_int8: int8 inside, float in and out, 640 px; the model of YOLO_Movenet (c902916). On the Pi 4 about
   # 0.78 s a frame (the 320 px yolov8n_320_drq it replaced: 0.24 s). On 30 frames of
   # YOLO_Movenet/videos/rescue_test1..3 it found a person in 22 (the 320 drq in 11), small and far ones

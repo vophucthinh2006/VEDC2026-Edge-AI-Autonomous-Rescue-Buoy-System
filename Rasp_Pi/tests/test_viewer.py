@@ -21,6 +21,19 @@ class ViewerRenderTest(unittest.TestCase):
         return Snapshot(ImuState(yaw_deg=90.0, imu_ok=True), GpsState(lat_deg=10.88, lon_deg=106.79, fix=3), SysState(),
                         (Obstacle(0.0, 3.0, 0.05), Obstacle(1.0, 3.0, 0.05)), 0.0, None, target, VehicleState("AUTO", True, 1, 0.0, 2, 12.0))
 
+    def test_nothing_is_drawn_while_nobody_watches(self):
+        import threading
+        from time import monotonic
+        from modules.state_store import StateStore
+        from modules.viewer import Viewer
+        viewer = Viewer(0, StateStore(), threading.Event(), {}, {"horizontal_fov_deg": 60.0}, lambda: None,
+                        lambda: [], lambda: None, lambda: "")
+        self.assertFalse(viewer.watched())
+        viewer._streams = 1                  # a page open on /stream
+        self.assertTrue(viewer.watched())
+        viewer._streams, viewer._asked = 0, monotonic()   # a /frame.jpg just asked for (record_media.py)
+        self.assertTrue(viewer.watched())
+
     def test_renders_without_a_camera_frame(self):
         image = render(self._snap(), None, [801] * 72, 8.0, [], 60.0, "search")
         self.assertEqual(image.shape, (TOP_H, FRAME_W, 3))

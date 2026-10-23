@@ -180,8 +180,12 @@ def main() -> int:
                 # the viewer and the log show why the boat stands. The route and the mission carry on.
                 command = NavCommand("STOP", 0.0, command.heading_deg, "dashboard_hold")
             uart.send("NAV", sequence, command.mode, f"{command.speed_mps:.2f}", heading_tenths(command.heading_deg), config["vehicle"]["nav_ttl_ms"])
-            # 4th field: the LoRa route revision running, so the STM32 stops resending it (docs/lora-route-downlink.md)
-            uart.send("HBT", sequence, command.reason, lora_rev)
+            # 4th field: the LoRa route revision running, so the STM32 stops resending it (docs/lora-route-downlink.md);
+            # then the mission and the waypoint gone to, which the F407 sends on to the dashboard with the reason,
+            # and the detector's frames a second x10 ("-" while it is off: no route, or no camera)
+            fps = vision.fps if vision else None
+            uart.send("HBT", sequence, command.reason, lora_rev, mission.code, mission.waypoint_field,
+                      "-" if fps is None else round(fps * 10))
             goal = planned.waypoint
             target_bearing = bearing_deg(snapshot.gps.lat_deg, snapshot.gps.lon_deg, *goal) if goal else command.heading_deg
             state.update_steering(command.heading_deg, target_bearing)

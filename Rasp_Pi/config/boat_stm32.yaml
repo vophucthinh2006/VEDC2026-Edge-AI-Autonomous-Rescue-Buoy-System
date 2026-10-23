@@ -36,3 +36,5 @@ camera:
   pan_limit_deg: 45           # following a person, too: the servo stays within +-45 deg
   scan:
     sweep_limit_deg: 45       # the search sweep (in every state but IDLE, modules/mission.py): +-45 deg
+    sweep_rate_deg_s: 15      # at about 1 detector frame a second, 30 deg/s moved half the 60 deg view
+                              # between frames: a spot was seen in 2 frames, blurred; 15: in 4, 12 s a round

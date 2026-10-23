@@ -33,6 +33,9 @@ CAMERA_W, CAMERA_H = 640, 480
 MAP = 444                      # the LiDAR panel is MAP x CAMERA_H pixels
 HEADER = 52                    # title, status chips and readouts across the top
 RISK_COLOURS = (GREEN, YELLOW, ORANGE, RED)   # SAFE, MEDIUM, HIGH, CRITICAL (modules/edge_model.py)
+# Frames are drawn and JPEG-encoded only while somebody watches: a /stream open, or a /frame.jpg asked
+# for within this long. Drawn all the time they took CPU from the detector on the Pi (2026-10-23).
+WATCH_HOLD_S = 3.0
 
 PAGE = b"""<!doctype html><html><head><meta charset="utf-8"><title>RedgeSCUE - Pi view</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -238,6 +241,12 @@ class Viewer(threading.Thread):
         self.log = logging.getLogger(__name__)
         self._jpeg = b""
         self._fresh = threading.Condition()
+        self._streams = 0       # /stream connections open
+        self._asked = -WATCH_HOLD_S   # last /frame.jpg request (monotonic s)
+
+    def watched(self) -> bool:
+        """True while somebody looks: only then are frames drawn (WATCH_HOLD_S)."""
+        return self._streams > 0 or monotonic() - self._asked < WATCH_HOLD_S
 
     def _frame(self) -> np.ndarray:
         snap = self.state.snapshot()
@@ -265,6 +274,11 @@ class Viewer(threading.Thread):
                     self.end_headers()
                     self.wfile.write(PAGE)
                 elif self.path == "/frame.jpg":
+                    idle = not viewer.watched()
+                    viewer._asked = monotonic()
+                    if idle:      # nothing drawn lately: wait for a fresh frame, not the last one before the pause
+                        with viewer._fresh:
+                            viewer._fresh.wait(timeout=2.0)
                     self.send_response(200)
                     self.send_header("Content-Type", "image/jpeg")
                     self.send_header("Content-Length", str(len(viewer._jpeg)))
@@ -275,6 +289,8 @@ class Viewer(threading.Thread):
                     self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                     self.send_header("Cache-Control", "no-store")
                     self.end_headers()
+                    with viewer._fresh:
+                        viewer._streams += 1
                     try:
                         while not viewer.stop.is_set():
                             with viewer._fresh:
@@ -284,6 +300,9 @@ class Viewer(threading.Thread):
                                              + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n")
                     except (BrokenPipeError, ConnectionError):
                         return
+                    finally:
+                        with viewer._fresh:
+                            viewer._streams -= 1
                 else:
                     self.send_error(404)
 
@@ -297,6 +316,9 @@ class Viewer(threading.Thread):
         self.log.info("viewer: http://127.0.0.1:%d/ (any address of this machine)", self.port)
         try:
             while not self.stop.is_set():
+                if not self.watched():
+                    self.stop.wait(self.period)   # nobody looking: no drawing, no JPEG, the CPU stays with the detector
+                    continue
                 started = monotonic()
                 try:
                     ok, encoded = cv2.imencode(".jpg", self._frame(), [cv2.IMWRITE_JPEG_QUALITY, 85])

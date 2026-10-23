@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic, sleep, strftime
@@ -22,6 +23,8 @@ from modules.state_store import HumanTarget, StateStore
 from utils.geometry import bearing_deg, signed_angle_deg
 
 IDLE_FRAME_S = 0.2   # detector off (no route): a frame this often for the viewer, nothing else
+RATE_LOG_S = 30.0    # the detector's frames a second go to the log this often
+FPS_WINDOW_S = 10.0  # VisionWorker.fps counts the frames of this last stretch
 
 
 @dataclass(frozen=True)
@@ -131,6 +134,9 @@ class VisionWorker(threading.Thread):
         self._snapshot_dir = camera.get("snapshot_dir")
         self._last_snapshot = 0.0
         self._last_frame = 0.0
+        self._rate_start: float | None = None      # _log_rate: the detector's frames a second
+        self._rate_frames, self._rate_busy = 0, 0.0
+        self._frame_times: deque[float] = deque(maxlen=400)   # when each detection finished, for fps
         self._ranged_standing: bool | None = None
         self._frame_aspect = 4.0 / 3.0       # width over height, taken from the frames once they come
         # For the live viewer (modules/viewer.py): the last frame read and what was made of the last one looked at.
@@ -372,6 +378,30 @@ class VisionWorker(threading.Thread):
             self._sweep_step(monotonic())
             self.stop.wait(period)
 
+    @property
+    def fps(self) -> float | None:
+        """The detector's frames a second over the last FPS_WINDOW_S; None while it is off (no route)
+        or has not run for that long. Sent to the dashboard in $HBT (main.py)."""
+        if not self._detector_on:
+            return None
+        now = monotonic()
+        recent = [t for t in tuple(self._frame_times) if now - t <= FPS_WINDOW_S]
+        return len(recent) / FPS_WINDOW_S if recent else None
+
+    def _log_rate(self, now: float, busy_s: float) -> None:
+        """Every RATE_LOG_S of detection: frames a second and the detector's time per frame, to measure
+        the model, camera.num_threads and whatever else runs on the Pi."""
+        self._frame_times.append(now)
+        if self._rate_start is None:
+            self._rate_start, self._rate_frames, self._rate_busy = now, 0, 0.0
+        self._rate_frames += 1
+        self._rate_busy += busy_s
+        if now - self._rate_start >= RATE_LOG_S:
+            self.log.info("detector: %.1f frames/s, %.0f ms a frame (%d frames in %.0f s, %s threads)",
+                          self._rate_frames / (now - self._rate_start), 1000.0 * self._rate_busy / self._rate_frames,
+                          self._rate_frames, now - self._rate_start, self.c.get("num_threads") or "default")
+            self._rate_start, self._rate_frames, self._rate_busy = now, 0, 0.0
+
     def run(self) -> None:
         # tflite-runtime on the Pi; it has no wheels for Python 3.12, where its
         # successor ai-edge-litert takes over (the simulator under WSL).
@@ -389,7 +419,8 @@ class VisionWorker(threading.Thread):
             self._model = EdgeModel(Interpreter, self.c)
             self.log.info("detector: YOLOv8n %d px + %s", self._model.size, "MoveNet" if self.c.get("pose_model_path") else "no pose")
         else:
-            interpreter = Interpreter(model_path=self.c["model_path"])
+            from modules.edge_model import make_interpreter
+            interpreter = make_interpreter(Interpreter, self.c["model_path"], self.c.get("num_threads"))
             interpreter.allocate_tensors()
             details = interpreter.get_input_details() + interpreter.get_output_details()
         gazebo = self.c.get("source", "device") == "gazebo"
@@ -452,7 +483,9 @@ class VisionWorker(threading.Thread):
                     continue   # the servo is still moving: blurred frame, angle unknown
                 self._last_frame = now
                 detections = self._detect(interpreter, details, frame)
+                busy = monotonic() - now
                 now = monotonic()
+                self._log_rate(now, busy)
                 detection = self._follow(detections, pan_at_capture) if detections else None
                 if detection is not None:
                     with self._pan_lock:
