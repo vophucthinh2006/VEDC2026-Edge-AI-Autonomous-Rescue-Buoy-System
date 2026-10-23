@@ -15,11 +15,11 @@ CONFIG = {"follow": {"confirm_frames": 3, "confirm_s": 2.5, "lost_s": 4.0, "repo
           "return": {"arrive_radius_m": 3.0, "fence_margin_m": 2.0}}
 
 
-def snap(t, at=BOAT, people=(), shore_ok=True, home=None, presses=-1, fix=3, yaw=0.0):
+def snap(t, at=BOAT, people=(), shore_ok=True, home=None, presses=-1, fix=3, yaw=0.0, battery=-1):
     """people: (bearing from the bow, distance, risk) seen in a detector pass at t."""
     targets = tuple(HumanTarget(bearing, distance, 0.6, t, risk) for bearing, distance, risk in people)
     return Snapshot(ImuState(yaw_deg=yaw, imu_ok=True, timestamp=t), GpsState(*at, fix=fix, timestamp=t),
-                    SysState(timestamp=t, confirm_presses=presses), (), t, None, targets[0] if targets else None,
+                    SysState(timestamp=t, confirm_presses=presses, battery_pct=battery), (), t, None, targets[0] if targets else None,
                     human_targets=targets, link=LinkState(shore_ok, 1.0 if shore_ok else 75.0, home, t))
 
 
@@ -78,6 +78,47 @@ class MissionTest(unittest.TestCase):
         self.assertEqual(self.mission.state, PATROL)
         # Somebody else, elsewhere: followed.
         self.run_steps((6.6, 7.4, 8.2), people=[(-60.0, 6.0, MEDIUM)], presses=1)
+        self.assertEqual(self.mission.state, FOLLOW)
+
+    def test_three_minutes_with_a_person_and_no_press_is_patrol_again(self):
+        mission = Mission({**CONFIG, "follow": {**CONFIG["follow"], "max_hold_s": 180.0, "hold_ignore_s": 600.0}},
+                          Route([WP1, WP2], 3.0, False, FENCE), only_on_route=True)
+        person = [(20.0, 3.0, HIGH)]
+        for t in (0.0, 0.8, 1.6):
+            mission.step(snap(t, people=person), t)
+        self.assertEqual(mission.state, FOLLOW)
+        # Lost for 10 s (waves) at 100 s and found again: the same stay, the clock runs on.
+        for t in range(2, 100):
+            mission.step(snap(float(t), people=person), float(t))
+        for t in range(100, 110):
+            mission.step(snap(float(t)), float(t))
+        self.assertEqual(mission.state, PATROL)
+        for t in (110.0, 110.8, 111.6):
+            mission.step(snap(t, people=person), t)
+        self.assertEqual(mission.state, FOLLOW)
+        # Followed from 1.6 s on: 180 s with them at 181.6 s.
+        for t in range(112, 182):
+            mission.step(snap(float(t), people=person), float(t))
+        self.assertEqual(mission.state, FOLLOW)
+        with self.assertLogs("modules.mission", "INFO") as logs:
+            step = mission.step(snap(182.0, people=person), 182.0)
+        self.assertEqual(mission.state, PATROL)
+        self.assertEqual(step.planned.waypoint, WP1)
+        self.assertIsNone(step.planned.human_target)
+        self.assertTrue(any("180 s with that person and no confirm" in line for line in logs.output), logs.output)
+        # Still in view: left alone for hold_ignore_s, the route goes on...
+        for t in range(183, 600, 5):
+            mission.step(snap(float(t), people=person), float(t))
+        self.assertEqual(mission.state, PATROL)
+        # ...and somebody else is followed meanwhile.
+        for t in (600.0, 600.8, 601.6):
+            mission.step(snap(t, people=[(-60.0, 6.0, MEDIUM)]), t)
+        self.assertEqual(mission.state, FOLLOW)
+
+    def test_no_hold_limit_by_default(self):
+        self.give_route(WP1)
+        for t in range(0, 400, 1):
+            self.mission.step(snap(float(t), people=[(0.0, 3.0, HIGH)]), float(t))
         self.assertEqual(self.mission.state, FOLLOW)
 
     def test_a_person_lost_for_lost_s_is_patrol_again(self):
@@ -146,6 +187,78 @@ class MissionTest(unittest.TestCase):
         self.assertTrue(route.inside_fence(*goal))
         self.assertAlmostEqual(haversine_m(*BOAT, *goal), 48.0, delta=0.2)   # 2 m inside the south edge
         self.assertAlmostEqual(goal[1], BOAT[1], places=6)
+
+
+class BatteryHomeTest(unittest.TestCase):
+    """Below battery_low_pct the boat goes home whatever it does, until a fresh pack reads battery_ok_pct."""
+
+    def setUp(self):
+        self.mission = Mission(CONFIG, Route([], 3.0, False, FENCE), only_on_route=True)
+        self.mission.set_route(Route([WP1, WP2], 3.0, False, FENCE))
+
+    def test_a_low_pack_takes_the_boat_home_and_keeps_it_there(self):
+        step = self.mission.step(snap(0.0, home=HOME, battery=60), 0.0)
+        self.assertEqual((self.mission.state, self.mission.code, self.mission.waypoint_field), (PATROL, "P", "1/2"))
+        step = self.mission.step(snap(1.0, home=HOME, battery=19), 1.0)
+        self.assertEqual((self.mission.state, self.mission.code), (RETURN, "B"))
+        self.assertEqual(step.planned.waypoint, HOME)
+        self.assertIsNone(step.planned.human_target)
+        # 25 %: still low (no going back out on a pack that only recovered at rest)
+        self.mission.step(snap(2.0, home=HOME, battery=25), 2.0)
+        self.assertEqual(self.mission.state, RETURN)
+        self.mission.step(snap(3.0, at=HOME, home=HOME, battery=25), 3.0)
+        self.assertEqual((self.mission.state, self.mission.code), (HOME_HOLD, "H"))
+        # A fresh pack: back to the route, and the log names the pack, not the shore link
+        with self.assertLogs("modules.mission", "INFO") as logs:
+            self.mission.step(snap(4.0, at=HOME, home=HOME, battery=95), 4.0)
+        self.assertEqual(self.mission.state, PATROL)
+        self.assertTrue(any("battery back" in line for line in logs.output), logs.output)
+
+    def test_a_sag_under_the_motors_is_not_a_low_pack(self):
+        mission = Mission({**CONFIG, "return": {**CONFIG["return"], "battery_hold_s": 30.0}},
+                          Route([WP1, WP2], 3.0, False, FENCE), only_on_route=True)
+        mission.step(snap(0.0, home=HOME, battery=60), 0.0)
+        # The stand, 2026-10-22: 15 % for 1.5 s, then 33 %. The boat runs on.
+        for t, pct in ((1.0, 15), (1.5, 15), (2.5, 33), (3.0, 15), (4.0, 40)):
+            mission.step(snap(t, home=HOME, battery=pct), t)
+            self.assertEqual(mission.state, PATROL, t)
+        # Low for 30 s on end: home.
+        for t in range(10, 40):
+            mission.step(snap(float(t), home=HOME, battery=17), float(t))
+        self.assertEqual(mission.state, PATROL)
+        mission.step(snap(40.0, home=HOME, battery=17), 40.0)
+        self.assertEqual((mission.state, mission.code), (RETURN, "B"))
+        # At rest the pack reads 33 % again: not enough to set off, unless it holds for 30 s.
+        for t in range(41, 70):
+            mission.step(snap(float(t), home=HOME, battery=33 if t % 10 else 18), float(t))
+        self.assertEqual(mission.state, RETURN)
+        for t in range(70, 101):
+            mission.step(snap(float(t), home=HOME, battery=95), float(t))
+        self.assertEqual(mission.state, PATROL)
+
+    def test_standing_idle_with_a_low_pack_goes_home_too(self):
+        mission = Mission(CONFIG, Route([], 3.0, False, FENCE), only_on_route=True)
+        mission.step(snap(0.0, home=HOME, battery=60), 0.0)
+        self.assertEqual((mission.state, mission.code, mission.waypoint_field), (IDLE, "I", "0/0"))
+        step = mission.step(snap(1.0, home=HOME, battery=15), 1.0)
+        self.assertEqual(mission.state, RETURN)
+        self.assertEqual(step.planned.waypoint, HOME)
+
+    def test_the_shore_link_coming_back_does_not_end_a_battery_return(self):
+        self.mission.step(snap(0.0, home=HOME, battery=10, shore_ok=False), 0.0)
+        self.assertEqual((self.mission.state, self.mission.code), (RETURN, "B"))
+        self.mission.step(snap(1.0, home=HOME, battery=10, shore_ok=True), 1.0)
+        self.assertEqual(self.mission.state, RETURN)
+
+    def test_shore_lost_alone_is_code_r(self):
+        self.mission.step(snap(0.0, home=HOME, battery=80), 0.0)
+        self.mission.step(snap(1.0, home=HOME, battery=80, shore_ok=False), 1.0)
+        self.assertEqual((self.mission.state, self.mission.code), (RETURN, "R"))
+
+    def test_no_battery_reading_never_sends_it_home(self):
+        for t in range(5):
+            self.mission.step(snap(float(t), home=HOME, battery=-1), float(t))
+        self.assertEqual(self.mission.state, PATROL)
 
 
 class FenceClampTest(unittest.TestCase):
