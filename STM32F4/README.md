@@ -407,12 +407,18 @@ Triệu chứng khác:
 Raspberry Pi → STM32:
 
 ```
-$NAV,seq,AUTO|STOP|MANUAL,speed_mps,heading_deg,ttl_ms*CS\n
-$HBT,seq,state[,route_rev]*CS\n
+$NAV,seq,AUTO|STOP|MANUAL|BACK,speed_mps,heading_deg,ttl_ms*CS\n
+$HBT,seq,reason[,route_rev[,mission,wp/total[,fps_x10]]]*CS\n
 $SOS,seq,0|1*CS\n
 $TXD,seq,event,lat,lon,confidence[,risk]*CS\n
 $CAM,seq,pan_deg*CS\n
 ```
+
+`BACK`: lùi ra khỏi vật cản đang chắn mũi. Hai motor sau tắt (ESC một chiều), bánh lái về giữa, motor
+trước quay ngược với ga bằng `speed_mps` (tối đa `FRONT_BACK_MAX` 0.40, `App/app_config.h`). Phải qua
+cùng các điều kiện như `AUTO`: đã arm, IMU còn mới, NAV trong TTL, HBT còn mới, không bị DỪNG từ dashboard.
+Pi chỉ gửi khi thuyền đứng yên, không còn hướng thoát phía trước và phía sau trống (`navigation.py`,
+lý do `backing_off`), mỗi lần tối đa 3 s. F407 cũ không biết `BACK` thì coi là `STOP`.
 
 STM32 → Raspberry Pi:
 

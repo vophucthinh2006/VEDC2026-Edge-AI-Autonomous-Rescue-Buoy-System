@@ -129,6 +129,8 @@
    front motor stays off as before. */
 #define FRONT_THRUST_GAIN          1.0f
 #define FRONT_BRAKE_LEVEL          0.40f
+/* NAV BACK (App/control.c): the most the front motor pulls astern, the Pi's speed taken as a throttle. */
+#define FRONT_BACK_MAX             0.40f
 #define FRONT_BRAKE_MIN_DROP       0.05f
 #define FRONT_BRAKE_MS_PER_THROTTLE 2000U
 #define FRONT_BRAKE_MAX_MS         1000U
@@ -182,6 +184,8 @@
 /* Events (App/event_queue.h): an event frame waiting for the station's ACK goes out again this soon.
    The station silent for SHORE_LINK_TIMEOUT_MS (60 s, App/shore_link.h): the Pi takes the boat home. */
 #define LORA_EVENT_RETRY_MS        1500U
+/* Diagnostics for the dashboard (App/diag_frame.h) in a frame of their own this often, between beacons. */
+#define LORA_DIAG_PERIOD_MS        10000U
 /* Overturned for this long after the first tilt event: report it once more, with the boat's GPS then. */
 #define TILT_REPEAT_MS             30000U
 

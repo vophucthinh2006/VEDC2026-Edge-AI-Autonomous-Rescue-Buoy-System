@@ -14,6 +14,7 @@ void Protocol_Init(pi_command_t *command) {
     memset(command, 0, sizeof(*command));
     TxdQueue_Init(&command->txd);
     command->mode = NAV_STOP;
+    command->pi_fps_x10 = -1;
 }
 
 static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms) {
@@ -27,7 +28,8 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
            again, and comparing with the last run's sequence would refuse it for as long as that run lasted. */
         bool stream_live = command->last_nav_ms != 0U && (uint32_t)(now_ms - command->last_nav_ms) <= NAV_TIMEOUT_MS;
         if (stream_live && !sequence_is_newer(seq, command->sequence)) return;
-        nav_mode_t mode = strcmp(fields[2], "AUTO") == 0 ? NAV_AUTO : (strcmp(fields[2], "MANUAL") == 0 ? NAV_MANUAL : NAV_STOP);
+        nav_mode_t mode = strcmp(fields[2], "AUTO") == 0 ? NAV_AUTO : strcmp(fields[2], "MANUAL") == 0 ? NAV_MANUAL
+                        : strcmp(fields[2], "BACK") == 0 ? NAV_BACK : NAV_STOP;
         float speed = strtof(fields[3], NULL), heading = strtof(fields[4], NULL);
         uint16_t ttl = (uint16_t)strtoul(fields[5], NULL, 10);
         if (speed < 0.0f || speed > 2.0f || heading < 0.0f || heading >= 360.0f || ttl == 0U || ttl > 1000U) return;
@@ -36,6 +38,18 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
         command->last_hbt_ms = now_ms; command->pi_link_ok = true;
         /* Optional 4th field: revision of the LoRa route the Pi runs (docs/lora-route-downlink.md). */
         command->route_rev = count >= 4U ? (uint16_t)strtoul(fields[3], NULL, 10) : 0U;
+        /* The reason of its NAV command, then (newer Pi) its mission and waypoint, for the dashboard. */
+        strncpy(command->pi_reason, fields[2], sizeof(command->pi_reason) - 1U);
+        command->pi_reason[sizeof(command->pi_reason) - 1U] = '\0';
+        if (count >= 5U && fields[4][1] == '\0') command->pi_mission = fields[4][0];
+        if (count >= 6U) {
+            char *slash = strchr(fields[5], '/');
+            command->pi_wp = (uint16_t)strtoul(fields[5], NULL, 10);
+            command->pi_wp_total = slash != NULL ? (uint16_t)strtoul(slash + 1, NULL, 10) : 0U;
+        }
+        /* 7th field: the detector's frames a second x10, "-" off; an older Pi sends none. */
+        long fps = count >= 7U && fields[6][0] >= '0' && fields[6][0] <= '9' ? strtol(fields[6], NULL, 10) : -1L;
+        command->pi_fps_x10 = fps >= 0L && fps <= 999L ? (int16_t)fps : -1;
     } else if (strcmp(fields[0], "CAM") == 0 && count >= 3U) {
         float pan = strtof(fields[2], NULL);
         if (pan < -90.0f || pan > 90.0f) return;
