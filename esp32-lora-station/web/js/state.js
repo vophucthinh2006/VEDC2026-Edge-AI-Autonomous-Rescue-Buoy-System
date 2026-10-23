@@ -34,6 +34,7 @@ export const state = {
   hold: new Map(),       // id -> lệnh DỪNG của admin (true = dừng); trạng thái thật ở buoys.get(id).hold
   eventBuoys: new Set(), // phao đã gửi sự kiện người/lật/xác nhận: không báo thêm theo số đếm `victims`
   capsizedAt: new Map(), // id -> time (ms) of the latest capsize alert
+  diag: new Map(),       // id -> the latest diagnostics frame (STM32F4/App/diag_frame.h) + at (ms)
 };
 
 const handlers = new Map();
@@ -57,6 +58,15 @@ export function stationStatus() {
 // mode R: phao không nghe thấy trạm bờ quá 60 giây, tự chạy về trạm
 export const isReturning = b => b.hasAttitude === true && b.headingMode === 'R';
 
+export const DIAG_STALE_SEC = 30;   // three missed 10 s diagnostics frames
+// What the Pi does (Rasp_Pi/modules/mission.py Mission.code) from a diagnostics frame not older than
+// DIAG_STALE_SEC, or null. The beacon's mode R only tells a lost shore; a low pack (B) shows only here.
+export function diagMission(id) {
+  const d = state.diag.get(id);
+  return d && (Date.now() - d.at) / 1000 <= DIAG_STALE_SEC ? d.mission || null : null;
+}
+export const isGoingHome = id => ['R', 'B'].includes(diagMission(id));
+
 // What the buoy is doing, in one word for the judges. Order matters: old data first, then danger.
 export const STATUS = {
   lost:      { text: 'Mất tín hiệu',      tone: 'lost', icon: 'ph-cell-signal-slash' },
@@ -77,7 +87,7 @@ export function buoyStatus(id, b) {
     if (b.nav.mode_name === 'HOLD') return 'stopped';
     return b.nav.armed ? 'patrol' : 'idle';
   }
-  if (isReturning(b)) return 'returning';
+  if (isReturning(b) || isGoingHome(id)) return 'returning';
   // The F407 reports mode A only while the Pi is driving it (a fresh NAV AUTO and heartbeat); without a
   // route, or with main.py not running, it stands still in mode S
   if (b.hasAttitude && b.headingMode === 'A') return 'patrol';

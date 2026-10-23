@@ -417,3 +417,19 @@ body[data-mode="mission"] #empty{ display:none; }
 .quick .k{ display:block; color:var(--muted); font-size:11px; font-weight:700; }
 .quick b{ display:block; color:var(--accent); font-size:22px; font-weight:800; line-height:1.15; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .quick small{ display:block; color:var(--dim); font-size:11px; }
+
+/* Buoy health, route ahead and the boat's diagnostics (js/features/health.js) */
+.alert-line{ margin:10px 0 0; padding:9px 12px; border-radius:var(--r); background:var(--bad-bg); color:var(--bad); font-size:13.5px; font-weight:700; }
+.kv-card{ margin-top:12px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--r); background:var(--panel-2); }
+.kv-card h3{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:0 0 6px; font-size:12.5px; font-weight:700;
+  color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+.kv-card h3 small{ font-weight:500; text-transform:none; letter-spacing:0; color:var(--dim); }
+.kv{ display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0; font-size:13.5px; }
+.kv dt{ color:var(--dim); }
+.kv dd{ margin:0; color:var(--text); font-variant-numeric:tabular-nums; }
+.kv-line{ margin:0; font-size:13.5px; }
+.kv dd[data-tone="ok"], .kv-line[data-tone="ok"]{ color:var(--ok); }
+.kv dd[data-tone="warn"], .kv-line[data-tone="warn"], .kv-card h3 small[data-tone="warn"]{ color:var(--warn); }
+.kv dd[data-tone="bad"], .kv-line[data-tone="bad"]{ color:var(--bad); font-weight:700; }
+.kv dd[data-tone="idle"]{ color:var(--muted); }
+.kv-card h3 small[data-tone="lost"]{ color:var(--bad); }

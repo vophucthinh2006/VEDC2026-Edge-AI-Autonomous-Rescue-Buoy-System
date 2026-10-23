@@ -15,6 +15,7 @@ const KINDS = {
   home:    { icon: 'ph ph-arrow-u-up-left',         tone: 'warn',   alert: true },
   lost:    { icon: 'ph ph-cell-signal-slash',       tone: 'warn',   alert: true },
   back:    { icon: 'ph ph-cell-signal-full',        tone: 'ok' },
+  battery: { icon: 'ph-fill ph-battery-warning',    tone: 'bad',    alert: true },
 };
 
 const $ = id => document.getElementById(id);
