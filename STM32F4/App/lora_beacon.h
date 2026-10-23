@@ -13,6 +13,7 @@
 #include "gps_nmea.h"
 #include "imu.h"
 #include "control.h"
+#include "diag_frame.h"
 
 /* Beacon state, read over OpenOCD (Tools/lora_monitor.py). Keep the layout in step with that file. */
 typedef enum {
@@ -46,6 +47,7 @@ typedef struct {
     uint8_t lights;            /* relays driven, bit 0 PC3, bit 1 PC2 */
     uint8_t home_valid;
     uint8_t hold;              /* 1: STOP from the dashboard, motors off */
+    uint32_t diag_tx;          /* diagnostics frames sent (App/diag_frame.h); appended last */
 } lora_debug_t;
 
 extern volatile lora_debug_t lora_debug;
@@ -75,4 +77,6 @@ size_t LoraBeacon_LinkLine(uint16_t seq, uint32_t now_ms, char *buf, size_t size
 /* Route from the dashboard, for the Pi: the revision the Pi's $HBT reports, and the next $RTE line
  * payload to send (false: nothing now). Call NextPiRouteLine once per telemetry period. */
 void LoraBeacon_SetPiRouteRev(uint16_t rev);
+/* The latest diagnostics (App/diag_frame.h), sent in a frame of their own every LORA_DIAG_PERIOD_MS. */
+void LoraBeacon_SetDiag(const diag_t *latest);
 bool LoraBeacon_NextPiRouteLine(uint16_t seq, uint32_t now_ms, char *buf, size_t size);

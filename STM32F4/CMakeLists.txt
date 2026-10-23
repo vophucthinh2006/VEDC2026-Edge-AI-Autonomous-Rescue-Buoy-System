@@ -68,6 +68,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/txd_queue.c
     App/imu_watchdog.c
     App/i2c_bus.c
+    App/diag_frame.c
 )
 
 # Add include paths
