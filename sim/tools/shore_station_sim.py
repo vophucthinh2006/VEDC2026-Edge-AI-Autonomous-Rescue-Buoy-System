@@ -82,6 +82,28 @@ def cloud_commands(data: dict) -> dict[str, int] | None:
     return {str(k): (int(lights.get(k, 0)) & 3) | (4 if int(hold.get(k, 0)) else 0) for k in set(lights) | set(hold)}
 
 
+def diag_json(raw: str) -> dict | None:
+    """lora_payload.c lora_diag_parse, as the JSON main.c xu_ly_chan_doan posts; None when it is not one."""
+    if not raw.startswith("dg="):
+        return None
+    head, *fields = raw[3:].split(",")
+    try:
+        f = dict(field.split("=", 1) for field in fields)
+        wp, wp_total = (int(v) for v in f["w"].split("/"))
+        i2c, imu = (int(v) for v in f["k"].split(":"))
+        out = {"id": head, "reason": "" if f["n"] == "-" else f["n"], "wp": wp, "wp_total": wp_total,
+               "arm": int(f["a"]), "drive": int(f["d"]), "i2c": i2c, "imu": imu}
+        if f["s"] != "-":
+            out["mission"] = f["s"]
+        if "u" in f and "j" in f:
+            out["volts"], out["amps"] = int(f["u"]) / 100, int(f["j"]) / 100
+        if "f" in f:
+            out["fps"] = int(f["f"]) / 10
+    except (KeyError, ValueError):
+        return None
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--radio-lib", required=True, type=Path, help="librouteradio.so (tools/hw_standins.sh)")
@@ -162,6 +184,14 @@ def main() -> int:
                 time.sleep(TURNAROUND_S + airtime_s(len(frame)))
                 tx.sendto(frame, ("127.0.0.1", DOWNLINK_PORT))
                 log(f"event {group}: sent {frame.decode()}")
+                continue
+            diag = diag_json(raw)
+            if diag is not None:
+                # main.c xu_ly_chan_doan: posted beside the buoy's beacon, never answered
+                if args.cloud:
+                    body = {"id": diag.pop("id"), "rssi": -72, "snr": 9.5, "diag": diag}
+                    threading.Thread(target=post, args=(args.cloud.rstrip("/") + "/api/ingest", token, body), daemon=True).start()
+                log(f"diagnostics {raw}")
                 continue
             body = station_json(raw)
             if body is None:
