@@ -24,8 +24,28 @@ vehicle:
   stop_distance_m: 1.00
   slow_distance_m: 2.00
   influence_distance_m: 3.00
+  # main.py: the F407 turns the Pi's speed into a throttle open-loop, and the boat may run several
+  # times that speed (the simulator: 1.43 m/s when told 0.29). The stop and slow distances, and the
+  # stand-off from a person, grow by the way the boat still goes once the throttle is cut, at the
+  # speed the GPS measures: reaction_s of it (a NAV round trip), then the coast, about v * coast_s
+  # (simulator, 2026-10-22: 0.65 m/s to rest in 2.1 m, 0.64 in 1.4 m). Tune both on the water.
+  reaction_s: 0.5
+  coast_s: 3.0
+  # The throttle goes off while the GPS speed is more than overspeed_mps above the speed given, and
+  # comes back below half of that margin (reason overspeed). 0: off.
+  overspeed_mps: 0.30
+  # main.py: the boat cannot turn on the spot; swinging away from an obstacle it first goes on along
+  # its bow. An obstacle on the bow (or on the course over the ground) less than turn_room_m plus the
+  # braking distance clear of the hull keeps it stopped (bow_blocked) instead of driving onto it.
+  turn_room_m: 0.50
   arrive_radius_m: 4.0
-  target_standoff_m: 2.0     # from the boat's GPS position; the bow is 0.55 m ahead of it
+  target_standoff_m: 2.0     # rescue_main.py (Pixhawk boat): range to the person from the boat's sensors
+  # main.py (STM32 boat): the water kept between the bow and the person, and how far the bow is ahead
+  # of the LiDAR and camera that measure the person's range (LD14 at 0.30 m, bow at 0.55 m from the
+  # hull's centre, sim/models/vedc_buoy). The boat holds at a range of person_gap_m + bow_ahead_m.
+  # 2 m off the bow, on the water and on the stand alike (the team, 2026-10-22).
+  person_gap_m: 2.0
+  bow_ahead_m: 0.25
   target_timeout_s: 2.0
   # main.py (STM32 boat): the bow follows the camera. With the person more than face_tolerance_deg
   # off the bow the boat turns to them at face_speed_mps before going to them, and keeps the bow on
@@ -41,6 +61,10 @@ vehicle:
   lidar_required: false
   imu_stale_s: 0.30
   gps_stale_s: 2.0
+  # true: no AUTO to a waypoint or home without a fresh GPS fix (gps_stale_or_no_fix); a person is
+  # followed anyway (the camera's bearing). false (main.py, indoors where no fix ever comes): the
+  # route's speed along the bow instead (bow_no_gps), the LiDAR still avoiding.
+  gps_required: true
 planner:
   attractive_gain: 1.0
   repulsive_gain: 0.75
@@ -59,6 +83,10 @@ camera:
   model: yolo_movenet
   model_path: ../YOLO_Movenet/weights/yolov8n_640_int8.tflite
   pose_model_path: ../YOLO_Movenet/weights/movenet_lighting_int8.tflite
+  # CPU threads of YOLO and MoveNet (tflite-runtime num_threads). Unset, the runtime's default: one
+  # thread, one of the Pi 4's four cores. The log says the detector's frames a second every 30 s
+  # ("detector: ... frames/s"): compare there before changing it.
+  num_threads: 4
   # yolov8n_640_int8: int8 inside, float in and out, 640 px; the model of YOLO_Movenet (c902916). On the Pi 4 about
   # 0.78 s a frame (the 320 px yolov8n_320_drq it replaced: 0.24 s). On 30 frames of
   # YOLO_Movenet/videos/rescue_test1..3 it found a person in 22 (the 320 drq in 11), small and far ones
@@ -230,12 +258,25 @@ follow:
   # ignore_radius_m of them (by compass bearing without a GPS fix) is followed for ignore_s.
   ignore_s: 60.0
   ignore_radius_m: 5.0
+  # With the same person this long and no press (they may not be able to reach the button), the
+  # boat leaves them, already reported, and goes on with the route; nobody within ignore_radius_m
+  # of them is followed for hold_ignore_s. Lost and found again within 30 s counts as the same
+  # stay. 0: stay as long as they are in view.
+  max_hold_s: 180.0
+  hold_ignore_s: 600.0
 # STM32 boat (main.py) only: no word from the shore station (the F407's $LNK shore_ok 0, after 60 s)
 # sends the boat home (RETURN), to the station's GPS position; a station outside the geofence is
 # brought fence_margin_m inside it. Within arrive_radius_m the boat holds (HOME_HOLD).
 return:
   arrive_radius_m: 3.0
   fence_margin_m: 2.0
+  # The pack below battery_low_pct (the F407's $SYS charge): home, whatever the boat was doing, and stay
+  # there until it reads battery_ok_pct again (a fresh pack). -1 (no INA226) never triggers it.
+  battery_low_pct: 20
+  battery_ok_pct: 30
+  # Only a reading held this long counts, either way: under the motors the pack sags (10.94 V, read
+  # 15 %, on the stand 2026-10-22) and is back up a second or two later.
+  battery_hold_s: 30.0
 # STM32 boat (main.py) only: spoken messages (modules/announcer.py), WAVs from tools/make_sounds.ps1.
 audio:
   # The Pi's 3.5 mm jack by its ALSA name: on Bookworm card 0 is the HDMI output and the jack card 1,

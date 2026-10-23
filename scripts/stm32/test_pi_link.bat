@@ -8,8 +8,9 @@ rem  Usage: test_pi_link [noprobe]
 rem ============================================================
 setlocal EnableExtensions
 call "%~dp0_env.cmd" pi || exit /b 1
+rem The service vedc-boat is stopped first: killed alone, main.py would be back in 3 s on the port.
 if /I not "%~1"=="noprobe" (
-    ssh %PI_HOST% "cd %PI_DIR% && pkill -f '[m]ain.py'; %PI_PY% $PY tools/port_probe.py"
+    ssh %PI_HOST% "cd %PI_DIR% && bash tools/install_service.sh --stop; pkill -f '[m]ain.py'; %PI_PY% $PY tools/port_probe.py"
 )
-ssh %PI_HOST% "cd %PI_DIR% && pkill -f '[m]ain.py'; %PI_PY% $PY tools/stm32_lines.py"
+ssh %PI_HOST% "cd %PI_DIR% && bash tools/install_service.sh --stop; pkill -f '[m]ain.py'; %PI_PY% $PY tools/stm32_lines.py"
 exit /b %ERRORLEVEL%

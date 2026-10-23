@@ -17,6 +17,10 @@ vehicle:
   approach_speed_mps: 0.15
   face_speed_mps: 0.10
   arrive_radius_m: 3.0
+  # The competition room has no GPS fix: with a route the boat still drives, along its bow, the
+  # LiDAR avoiding (modules/navigation.py bow_no_gps). Put true back for the water: there a lost
+  # fix must stop it (gps_stale_or_no_fix).
+  gps_required: false
 # No RC transmitter: the boat runs only a route sent from the dashboard ("Gửi tới phao"), and an
 # empty route stops it (docs/lora-route-downlink.md). Until one arrives, and once it is done, the
 # boat stays still: mission_stm32.yaml gives the pool's geofence only.
@@ -32,3 +36,5 @@ camera:
   pan_limit_deg: 45           # following a person, too: the servo stays within +-45 deg
   scan:
     sweep_limit_deg: 45       # the search sweep (in every state but IDLE, modules/mission.py): +-45 deg
+    sweep_rate_deg_s: 15      # at about 1 detector frame a second, 30 deg/s moved half the 60 deg view
+                              # between frames: a spot was seen in 2 frames, blurred; 15: in 4, 12 s a round

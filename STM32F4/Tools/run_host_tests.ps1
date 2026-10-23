@@ -53,6 +53,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to compile imu_watchdog_test' }
 & $imuExe
 if ($LASTEXITCODE -ne 0) { throw 'imu_watchdog_test failed' }
 
+$diagExe = Join-Path $testDir 'diag_frame_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'STM32F4/App') `
+  (Join-Path $repo 'STM32F4/Tests/diag_frame_test.c') `
+  (Join-Path $repo 'STM32F4/App/diag_frame.c') `
+  -lm -o $diagExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile diag_frame_test' }
+& $diagExe
+if ($LASTEXITCODE -ne 0) { throw 'diag_frame_test failed' }
+
 $parserExe = Join-Path $testDir 'lora_payload_test.exe'
 & gcc -std=c11 -Wall -Wextra -Werror `
   -I (Join-Path $repo 'esp32-lora-station/main') `

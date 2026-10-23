@@ -127,7 +127,7 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const bno055_eu
 
     /* STOP from the dashboard wins over the Pi: the boat stays where it is, the route is kept. */
     if (control->hold) { stop_braking(control, now_ms); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_HOLD); return; }
-    bool nav_fresh = pi->mode == NAV_AUTO && pi->ttl_ms > 0U && fresh(now_ms, pi->last_nav_ms, pi->ttl_ms);
+    bool nav_fresh = (pi->mode == NAV_AUTO || pi->mode == NAV_BACK) && pi->ttl_ms > 0U && fresh(now_ms, pi->last_nav_ms, pi->ttl_ms);
     bool hbt_fresh = pi->pi_link_ok && fresh(now_ms, pi->last_hbt_ms, HBT_TIMEOUT_MS);
     if (!nav_fresh || !hbt_fresh) { stop_braking(control, now_ms); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_PI); return; }
     /* A stale heading must never drive a motor on the water. Only BENCH_IGNORE_IMU, for the boat
@@ -136,6 +136,17 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const bno055_eu
     bno055_euler_t held = *imu;
     if (!imu_fresh) held.yaw_rate_dps = 0.0f;     /* the last rate read would brake for ever */
     imu = &held;
+    if (pi->mode == NAV_BACK) {
+        /* Backing off an obstacle the boat is wedged against: the rear ESCs turn one way only, so the
+           front motor alone pulls it astern, as when it brakes; rudders centred, no heading held. */
+        heading_off(control);
+        FrontMotor_Reset(&control->front);
+        control->operating_mode = 'A';
+        actuator_cmd_t back = { 0.0f, 0.0f, -clamp(pi->speed_mps, 0.0f, FRONT_BACK_MAX), 0.0f };
+        Actuators_Apply(&back, now_ms);
+        publish_debug(control, imu, imu_fresh, &back, DRIVE_BLOCK_NONE);
+        return;
+    }
     if (control->heading_state != HEADING_AUTO) HeadingController_Reset(&control->heading);
     control->heading_state = HEADING_AUTO;
     control->heading_target_deg = Heading_Wrap360(pi->heading_deg);

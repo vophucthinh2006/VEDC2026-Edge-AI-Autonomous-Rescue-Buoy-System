@@ -158,3 +158,19 @@ test("drops a malformed event and flags it", () => {
     assert.equal(result.event_bad, 1);
   }
 });
+
+test("keeps a well-formed diagnostics group, flags a broken one", () => {
+  const base = { id: "PHAO-01", rssi: -80, snr: 7 };
+  const diag = { reason: "obstacle_too_close", mission: "P", wp: 2, wp_total: 5, arm: 0, drive: 2, volts: 11.844, amps: -0.35, i2c: 3, imu: 1 };
+  assert.deepEqual(sanitizeBuoy({ ...base, diag }).diag, { ...diag, volts: 11.84 });
+  const noPack = { reason: "", wp: 0, wp_total: 0, arm: 1, drive: 1, i2c: 0, imu: 0 };
+  assert.deepEqual(sanitizeBuoy({ ...base, diag: noPack }).diag, noPack);
+  // The Pi's detector frames a second, when it runs
+  assert.equal(sanitizeBuoy({ ...base, diag: { ...noPack, fps: 1.34 } }).diag.fps, 1.3);
+  for (const bad of [{ ...diag, reason: "Bad reason" }, { ...diag, mission: "X" }, { ...diag, drive: 5 },
+    { ...diag, wp: 301 }, { ...diag, amps: undefined }, { ...diag, i2c: -1 }, { ...diag, fps: -1 }, { ...diag, fps: "fast" }, "diag"]) {
+    const out = sanitizeBuoy({ ...base, diag: bad });
+    assert.equal(Object.hasOwn(out, "diag"), false, JSON.stringify(bad));
+    assert.equal(out.diag_bad, 1);
+  }
+});

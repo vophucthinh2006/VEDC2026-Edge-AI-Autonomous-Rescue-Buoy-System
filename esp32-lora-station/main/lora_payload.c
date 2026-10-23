@@ -202,3 +202,109 @@ bool lora_event_parse(const char *message, lora_event_t *out) {
         return false;
     }
 }
+
+static bool parse_int(const char *text, long low, long high, long *out) {
+    char *end = NULL;
+    errno = 0;
+    long value = strtol(text, &end, 10);
+    if (end == text || *end != '\0' || errno == ERANGE || value < low || value > high) return false;
+    *out = value;
+    return true;
+}
+
+/* "a<sep>b", two unsigned numbers up to max each */
+static bool parse_pair(char *text, char sep, uint32_t max, uint32_t *a, uint32_t *b) {
+    char *mid = strchr(text, sep);
+    if (mid == NULL) return false;
+    *mid = '\0';
+    return parse_uint(text, a) && *a <= max && parse_uint(mid + 1, b) && *b <= max;
+}
+
+bool lora_diag_parse(const char *message, lora_diag_t *out) {
+    if (message == NULL || out == NULL) return false;
+    memset(out, 0, sizeof(*out));
+    char buffer[128];
+    size_t length = strlen(message);
+    if (length < 4U || length >= sizeof(buffer) || strncmp(message, "dg=", 3U) != 0) return false;
+    memcpy(buffer, message + 3, length - 2U);
+
+    bool found_n = false, found_s = false, found_w = false, found_a = false, found_d = false, found_k = false;
+    bool found_u = false, found_j = false;
+    char *fields[16];
+    unsigned count = 0U;
+    fields[count++] = buffer;
+    for (char *p = buffer; *p != '\0'; p++) {
+        if (*p != ',') continue;
+        if (count == 16U) return false;
+        *p = '\0';
+        fields[count++] = p + 1;
+    }
+    char *token = fields[0];
+    if (token[0] == '\0' || strchr(token, '=') != NULL || strlen(token) >= sizeof(out->id)) return false;
+    strcpy(out->id, token);
+    for (unsigned i = 1U; i < count; i++) {
+        token = fields[i];
+        char *equals = strchr(token, '=');
+        if (equals == NULL || equals != token + 1) return false;
+        const char key = token[0];
+        char *value = equals + 1;
+        uint32_t a = 0U, b = 0U;
+        long v = 0;
+        switch (key) {
+        case 'n':
+            if (strlen(value) == 0U || strlen(value) >= sizeof(out->reason)) return false;
+            if (strcmp(value, "-") != 0) {
+                for (const char *p = value; *p; p++)
+                    if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_')) return false;
+                strcpy(out->reason, value);
+            }
+            found_n = true;
+            break;
+        case 's':
+            if (value[0] == '\0' || value[1] != '\0' || strchr("IPFRBH-", value[0]) == NULL) return false;
+            out->mission = value[0] == '-' ? 0 : value[0];
+            found_s = true;
+            break;
+        case 'w':
+            if (!parse_pair(value, '/', 300U, &a, &b)) return false;
+            out->wp = (uint16_t)a; out->wp_total = (uint16_t)b;
+            found_w = true;
+            break;
+        case 'a':
+            if (!parse_int(value, 0, 2, &v)) return false;
+            out->arm_block = (uint8_t)v;
+            found_a = true;
+            break;
+        case 'd':
+            if (!parse_int(value, 0, 4, &v)) return false;
+            out->drive_block = (uint8_t)v;
+            found_d = true;
+            break;
+        case 'u':
+            if (!parse_int(value, 0, 10000, &v)) return false;
+            out->volts = (float)v / 100.0f;
+            found_u = true;
+            break;
+        case 'j':
+            if (!parse_int(value, -20000, 20000, &v)) return false;
+            out->amps = (float)v / 100.0f;
+            found_j = true;
+            break;
+        case 'k':
+            if (!parse_pair(value, ':', 0xFFFFU, &a, &b)) return false;
+            out->i2c_recoveries = (uint16_t)a; out->imu_reinits = (uint16_t)b;
+            found_k = true;
+            break;
+        case 'f':
+            if (!parse_int(value, 0, 999, &v)) return false;
+            out->fps = (float)v / 10.0f;
+            out->has_fps = true;
+            break;
+        default:
+            break;   /* a field of newer firmware: skipped */
+        }
+    }
+    if (found_u != found_j) return false;
+    out->has_battery = found_u;
+    return found_n && found_s && found_w && found_a && found_d && found_k;
+}

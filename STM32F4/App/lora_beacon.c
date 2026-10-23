@@ -5,6 +5,7 @@
 #include "route_link.h"
 #include "shore_link.h"
 #include "event_queue.h"
+#include "diag_frame.h"
 #include "battery.h"
 #include "lights.h"
 #include <math.h>
@@ -47,6 +48,10 @@ static uint32_t rx_start_ms;
 static route_link_t route;
 static shore_link_t shore;
 static event_queue_t events;
+static diag_t diag;                /* the latest diagnostics from main.c (App/diag_frame.h) */
+static bool diag_set;
+static uint32_t next_diag_ms;
+static bool listen_after_tx;       /* the station answers beacons and events, not diagnostics */
 
 /* Round to the 0.1 deg the frame carries, then wrap: 359.96 would print as
  * "360.0", which the station rejects as out of range. */
@@ -187,6 +192,7 @@ void LoraBeacon_Init(SPI_HandleTypeDef *hspi, const gps_state_t *gps,
     lora_debug.init_ok = 1U;
     lora_debug.state = LORA_STATE_IDLE;
     next_tx_ms = HAL_GetTick() + FIRST_TX_DELAY_MS;
+    next_diag_ms = next_tx_ms + LORA_BEACON_PERIOD_MS / 2U;   /* between the first two beacons */
 #endif
 }
 
@@ -252,13 +258,20 @@ void LoraBeacon_Tick(uint32_t now_ms)
             if (len > 0U) lora_debug.event_tx++;
             publish_link();
         }
-        if (len == 0U) {
-            if ((int32_t)(now_ms - next_tx_ms) < 0) return;
+        listen_after_tx = true;
+        if (len == 0U && (int32_t)(now_ms - next_tx_ms) >= 0) {
             len = build_frame(frame, sizeof(frame), now_ms);
             next_tx_ms = now_ms + (RouteLink_Receiving(&route) ? ROUTE_BEACON_MS : LORA_BEACON_PERIOD_MS);
             lora_debug.seq++;
+        } else if (len == 0U && diag_set && (int32_t)(now_ms - next_diag_ms) >= 0 && !RouteLink_Receiving(&route)) {
+            /* Diagnostics between two beacons, not while a route comes in; nobody answers them. */
+            len = (uint16_t)DiagFrame_Build(frame, sizeof(frame), LORA_BUOY_ID, &diag);
+            next_diag_ms = now_ms + LORA_DIAG_PERIOD_MS;
+            listen_after_tx = false;
+            if (len > 0U) lora_debug.diag_tx++;
         }
-        if (len > 0U && SX127x_StartTx(&radio, (const uint8_t *)frame, (uint8_t)len)) {
+        if (len == 0U) return;
+        if (SX127x_StartTx(&radio, (const uint8_t *)frame, (uint8_t)len)) {
             lora_debug.last_len = len;
             tx_start_ms = now_ms;
             last_poll_ms = now_ms;
@@ -275,7 +288,8 @@ void LoraBeacon_Tick(uint32_t now_ms)
             lora_debug.last_tx_ms = now_ms;
             /* Listen for the station's answer; without it the radio rests until the next frame. */
             rx_start_ms = now_ms;
-            lora_debug.state = SX127x_StartRx(&radio) ? LORA_STATE_RX : LORA_STATE_IDLE;
+            if (!listen_after_tx) { SX127x_Standby(&radio); lora_debug.state = LORA_STATE_IDLE; }
+            else lora_debug.state = SX127x_StartRx(&radio) ? LORA_STATE_RX : LORA_STATE_IDLE;
         } else if ((uint32_t)(now_ms - tx_start_ms) > TX_TIMEOUT_MS) {
             SX127x_Standby(&radio);
             lora_debug.tx_fail++;
@@ -286,16 +300,18 @@ void LoraBeacon_Tick(uint32_t now_ms)
         last_poll_ms = now_ms;
         uint8_t frame[LORA_FRAME_SIZE + 1U];
         uint8_t len = 0U;
-        bool got = SX127x_ReadPacket(&radio, frame, LORA_FRAME_SIZE, &len);
-        if (got) {
+        bool ours = false;
+        if (SX127x_ReadPacket(&radio, frame, LORA_FRAME_SIZE, &len)) {
             frame[len] = '\0';
             bool was_receiving = RouteLink_Receiving(&route);
             uint16_t eseq = 0U;
             if (RouteLink_OnFrame(&route, (const char *)frame, LORA_BUOY_ID)) {
+                ours = true;
                 ShoreLink_Heard(&shore, now_ms);
                 if (RouteLink_Complete(&route) && (was_receiving || route.total == 0U))
                     next_tx_ms = now_ms;   /* tell the station at once that the route is complete */
             } else if (ShoreLink_OnFrame(&shore, (const char *)frame, LORA_BUOY_ID, now_ms, &eseq)) {
+                ours = true;
                 lora_debug.ack_count++;
                 Lights_Set(shore.lights);
                 lora_debug.hold = shore.hold ? 1U : 0U;
@@ -304,8 +320,11 @@ void LoraBeacon_Tick(uint32_t now_ms)
             }
             publish_link();
         }
-        /* One answer per frame: stop listening once it is in, or when the window closes. */
-        if (got || (uint32_t)(now_ms - rx_start_ms) > RX_WINDOW_MS) {
+        /* One answer per frame: stop listening once ours is in, or when the window closes. The
+           station answers every buoy on the one channel: an ACK for another buoy, sent just before
+           ours, used to close the window and the RTE behind it was lost, beacon after beacon while
+           the two buoys kept the same rhythm. The radio stays in RX_CONTINUOUS meanwhile. */
+        if (ours || (uint32_t)(now_ms - rx_start_ms) > RX_WINDOW_MS) {
             SX127x_Standby(&radio);
             lora_debug.state = LORA_STATE_IDLE;
         }
@@ -343,6 +362,16 @@ size_t LoraBeacon_LinkLine(uint16_t seq, uint32_t now_ms, char *buf, size_t size
     shore_link_t never;
     ShoreLink_Init(&never);
     return ShoreLink_PiLine(&never, seq, now_ms, buf, size);
+#endif
+}
+
+void LoraBeacon_SetDiag(const diag_t *latest)
+{
+#if LORA_ENABLED
+    diag = *latest;
+    diag_set = true;
+#else
+    (void)latest;
 #endif
 }
 

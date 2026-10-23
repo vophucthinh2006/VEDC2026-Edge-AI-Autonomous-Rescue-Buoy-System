@@ -74,6 +74,36 @@ function sanitizeEvent(e) {
 // Chuẩn hóa và kiểm tra bản tin từ trạm; trả về null nếu không hợp lệ.
 // Gói GPS-only cũ vẫn hợp lệ. Nhóm attitude chỉ được giữ khi đầy đủ và đúng
 // miền; hỏng thì chỉ bỏ nhóm đó (đánh dấu attitude_bad), vị trí và RSSI vẫn giữ.
+// Diagnostics of the STM32 boat (STM32F4/App/diag_frame.h, the station's "dg=" frame), every 10 s:
+// the Pi's NAV reason and mission, the waypoint it goes to, why the F407 does not drive, the pack, and
+// the I2C/IMU recoveries. Null when any field is out of range.
+const MISSIONS = ["I", "P", "F", "R", "B", "H"];
+const intIn = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+export function sanitizeDiag(d) {
+  if (!d || typeof d !== "object") return null;
+  if (typeof d.reason !== "string" || !/^[a-z0-9_]{0,23}$/.test(d.reason)) return null;
+  if (!intIn(d.wp, 0, 300) || !intIn(d.wp_total, 0, 300) || !intIn(d.arm, 0, 2) || !intIn(d.drive, 0, 4) ||
+      !intIn(d.i2c, 0, 65535) || !intIn(d.imu, 0, 65535)) return null;
+  const out = { reason: d.reason, wp: d.wp, wp_total: d.wp_total, arm: d.arm, drive: d.drive, i2c: d.i2c, imu: d.imu };
+  if (d.mission !== undefined) {
+    if (!MISSIONS.includes(d.mission)) return null;
+    out.mission = d.mission;
+  }
+  if (d.volts !== undefined || d.amps !== undefined) {
+    const volts = num(d.volts), amps = num(d.amps);
+    if (!inRange(volts, 0, 100) || !inRange(amps, -200, 200)) return null;
+    out.volts = round(volts, 2);
+    out.amps = round(amps, 2);
+  }
+  // The Pi's detector frames a second (f=, x10 in the frame); absent while the detector is off
+  if (d.fps !== undefined) {
+    const fps = num(d.fps);
+    if (!inRange(fps, 0, 100)) return null;
+    out.fps = round(fps, 1);
+  }
+  return out;
+}
+
 export function sanitizeBuoy(m) {
   if (!m || typeof m !== "object") return null;
   const link = m.link === undefined ? "lora" : m.link;
@@ -125,6 +155,10 @@ export function sanitizeBuoy(m) {
   if (m.event !== undefined) {
     const event = sanitizeEvent(m.event);
     if (event) out.event = event; else out.event_bad = 1;
+  }
+  if (m.diag !== undefined) {
+    const diag = sanitizeDiag(m.diag);
+    if (diag) out.diag = diag; else out.diag_bad = 1;
   }
 
   const attitudeKeys =["roll", "pitch", "yaw", "target_yaw", "mode", "imu_ok", "calib", "seq"];

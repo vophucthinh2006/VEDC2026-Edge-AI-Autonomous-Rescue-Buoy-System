@@ -91,6 +91,17 @@ def risk_level(on_boat: bool, in_water: bool | None, keypoints: tuple = (), limi
     return CRITICAL if drowning_signs(keypoints, limits) else HIGH
 
 
+def make_interpreter(interpreter_class: type, model_path: str, threads: int | None) -> object:
+    """The TFLite interpreter on camera.num_threads CPU threads; unset, the runtime's default (one thread
+    on the Pi's tflite-runtime, so YOLO had one of the Pi 4's four cores)."""
+    if threads:
+        try:
+            return interpreter_class(model_path=model_path, num_threads=int(threads))
+        except TypeError:       # a runtime without the argument
+            pass
+    return interpreter_class(model_path=model_path)
+
+
 def letterbox(image: np.ndarray, size: int) -> tuple[np.ndarray, float, float, float]:
     """Scale into a size x size square, keeping the aspect ratio, grey padding. Returns the image,
     the scale and the left and top padding in pixels of the square."""
@@ -164,7 +175,7 @@ class EdgeModel:
         self.near_camera = float(camera.get("near_camera_margin", 0.03))
         self.max_poses = int(camera.get("max_poses", 3))
         self.risk = RiskThresholds.from_config(camera.get("risk"))
-        self._yolo = interpreter_class(model_path=camera["model_path"])
+        self._yolo = make_interpreter(interpreter_class, camera["model_path"], camera.get("num_threads"))
         self._yolo.allocate_tensors()
         self._yolo_in = self._yolo.get_input_details()[0]
         self._yolo_out = self._yolo.get_output_details()[0]
@@ -173,7 +184,7 @@ class EdgeModel:
         self.size = int(shape[2] if self._nchw else shape[1])
         self._pose = None
         if camera.get("pose_model_path"):
-            self._pose = interpreter_class(model_path=camera["pose_model_path"])
+            self._pose = make_interpreter(interpreter_class, camera["pose_model_path"], camera.get("num_threads"))
             self._pose.allocate_tensors()
             self._pose_in = self._pose.get_input_details()[0]
             self._pose_out = self._pose.get_output_details()[0]

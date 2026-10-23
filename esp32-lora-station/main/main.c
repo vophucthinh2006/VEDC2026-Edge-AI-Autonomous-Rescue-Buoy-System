@@ -91,7 +91,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
-        ESP_LOGW(TAG, "Mat ket noi WiFi, dang thu lai...");
+        // 201 = khong thay AP (sai ten / AP o 5 GHz), 15/204/210 = sai mat khau hoac kieu bao mat
+        ESP_LOGW(TAG, "Mat ket noi WiFi (reason %d), dang thu lai...",
+                 ((wifi_event_sta_disconnected_t *)event_data)->reason);
         esp_wifi_connect();   // thử lại mãi mãi
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
@@ -208,10 +210,38 @@ static void xu_ly_su_kien(const lora_event_t *ev, const char *raw, int rssi, flo
 
 // ------------------------------------------------------------- Xử lý gói LoRa nhận được
 // Dựng JSON đúng định dạng dashboard/Worker mong đợi rồi xếp vào hàng đợi gửi cloud.
+// Khung chẩn đoán (dg=) mỗi 10 giây: lý do dừng, nhiệm vụ của Pi, điện áp pin, số lần phục hồi I2C/IMU.
+// Gửi lên Worker dưới khóa "diag", gắn vào phao chứ không thay beacon. Phao không chờ trạm trả lời khung này.
+static void xu_ly_chan_doan(const lora_diag_t *dg, int rssi, float snr) {
+    char id_sach[32];
+    lam_sach_cho_json(id_sach, dg->id, sizeof(id_sach));
+    cloud_msg_t m;
+    m.station = false;
+    size_t used = 0U;
+    bool json_ok = json_append(m.json, sizeof(m.json), &used,
+                   "{\"id\":\"%s\",\"rssi\":%d,\"snr\":%.1f,\"diag\":{\"reason\":\"%s\",\"wp\":%u,\"wp_total\":%u,"
+                   "\"arm\":%u,\"drive\":%u,\"i2c\":%u,\"imu\":%u",
+                   id_sach, rssi, snr, dg->reason, dg->wp, dg->wp_total, dg->arm_block, dg->drive_block,
+                   dg->i2c_recoveries, dg->imu_reinits);
+    if (dg->mission) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"mission\":\"%c\"", dg->mission);
+    if (dg->has_battery) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"volts\":%.2f,\"amps\":%.2f", dg->volts, dg->amps);
+    if (dg->has_fps) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"fps\":%.1f", dg->fps);
+    json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, "}}");
+    if (!json_ok) { ESP_LOGE(TAG, "JSON chan doan vuot qua %u byte", (unsigned int)sizeof(m.json)); return; }
+    ESP_LOGI(TAG, "[CHAN DOAN] id=%s ly do=%s nhiem vu=%c lai=%u", id_sach, dg->reason[0] ? dg->reason : "-",
+             dg->mission ? dg->mission : '-', dg->drive_block);
+    xep_hang_cloud(&m);
+}
+
 static void xu_ly_goi_lora(const char *raw, int rssi, float snr) {
     lora_event_t ev;
     if (lora_event_parse(raw, &ev)) {
         xu_ly_su_kien(&ev, raw, rssi, snr);
+        return;
+    }
+    lora_diag_t dg;
+    if (lora_diag_parse(raw, &dg)) {
+        xu_ly_chan_doan(&dg, rssi, snr);
         return;
     }
     lora_payload_t payload;

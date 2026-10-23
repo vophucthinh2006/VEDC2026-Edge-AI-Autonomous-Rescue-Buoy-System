@@ -138,17 +138,23 @@ echo "6. the station switched off"
 touch "$T/station_off"
 check "link lost after 60 s" 80 events "shore station lost"
 check "the Pi goes home" 15 pilog "RETURN"
-# The boat patrols on for the 60 s before the link counts as lost: measure from the turn home.
+# The boat patrols on for the 60 s before the link counts as lost: measure from the turn home. Facing
+# away from the station it first swings round at a creep, a circle some 4 m wide, so it may get further
+# before it gets closer: within 120 s it must be 1 m closer than when it turned home.
 START_D="$(distance)"
-sleep 45
-END_D="$(distance)"
-echo "        distance to the station: ${START_D} m when it turned home, ${END_D} m 45 s later"
-if awk -v a="$START_D" -v b="$END_D" 'BEGIN { exit !(b < a) }'; then
+END_D="$START_D"
+for _ in $(seq 24); do
+    sleep 5
+    END_D="$(distance)"
+    awk -v a="$START_D" -v b="$END_D" 'BEGIN { exit !(b < a - 1.0) }' && break
+done
+echo "        distance to the station: ${START_D} m when it turned home, ${END_D} m at the end"
+if awk -v a="$START_D" -v b="$END_D" 'BEGIN { exit !(b < a - 1.0) }'; then
     echo "  ok    closer to the station"
-elif grep "RETURN" "$T/pi.log" | tail -n 5 | grep -q "obstacle_too_close"; then
-    # The rear ESCs turn one way only: wedged against something, the boat cannot back off. Not the way
-    # home that is wrong; seen against the wrecked boat at x 22, y -4.3.
-    echo "  WARN  stuck against an obstacle (obstacle_too_close): the boat cannot reverse"
+elif grep "RETURN" "$T/pi.log" | tail -n 5 | grep -qE "obstacle_too_close|bow_blocked"; then
+    # Wedged with something astern too: the boat backs off with the front motor (NAV BACK) only with the
+    # stern clear. Not the way home that is wrong.
+    echo "  WARN  stuck against an obstacle (obstacle_too_close or bow_blocked), the stern blocked as well"
 else
     echo "  FAIL  not closer to the station"; FAILS=$((FAILS + 1))
 fi

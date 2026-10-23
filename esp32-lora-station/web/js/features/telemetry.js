@@ -6,11 +6,13 @@ import { distM } from '../util/geo.js';
 import { renderHud } from './hud.js';
 import { renderLights } from './lights.js';
 import { renderHold } from './hold.js';
+import { renderHealth } from './health.js';
 
 const $ = id => document.getElementById(id);
 const SHOW_MAV_HUD = false;   // Pixhawk HUD stays in the code for the `pixhawk` boat but is not shown
 
 let routeLine = () => null;   // app.js supplies the one-line route progress for a buoy
+let routeAhead = () => null;  // and the route still ahead of it (health.js)
 
 export function renderDetail() {
   const id = state.selected;
@@ -61,11 +63,13 @@ export function renderDetail() {
   el.hidden = !r;
   if (r) { el.dataset.tone = r.tone; el.textContent = r.text; }
 
+  renderHealth(id, b, routeAhead(id));
   if (SHOW_MAV_HUD) renderHud(b);
 }
 
-export function initTelemetry({ toast, routeLine: fn }) {
+export function initTelemetry({ toast, routeLine: fn, routeAhead: ahead }) {
   routeLine = fn;
+  if (ahead) routeAhead = ahead;
   $('btn-copy').addEventListener('click', async () => {
     const b = state.buoys.get(state.selected);
     if (!b || !b.hasPos) { toast('Phao này chưa có toạ độ'); return; }

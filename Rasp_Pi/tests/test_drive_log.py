@@ -33,6 +33,13 @@ class DriveLogTest(unittest.TestCase):
         lines = log.update(NavCommand("AUTO", 0.0, 90.0, "human_standoff"), snap(), NOW)
         self.assertIn("boat stopped: AUTO human_standoff", lines[0])
 
+    def test_coasting_down_to_the_speed_given_is_not_a_stop(self) -> None:
+        # The throttle off and on again every few seconds (overspeed) is not a line each time.
+        log = DriveLog()
+        log.update(AUTO, snap(), NOW)
+        self.assertEqual(log.update(NavCommand("AUTO", 0.0, 90.0, "overspeed"), snap(), NOW), [])
+        self.assertEqual(log.update(AUTO, snap(), NOW), [])
+
     def test_the_f407_disarming_with_its_likely_cause(self) -> None:
         log = DriveLog()
         log.update(AUTO, snap(), NOW)

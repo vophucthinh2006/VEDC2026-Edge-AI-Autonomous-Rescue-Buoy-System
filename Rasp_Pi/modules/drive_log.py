@@ -64,7 +64,8 @@ class DriveLog:
             if self._armed is not None and armed != self._armed:
                 lines.append("F407 armed" if armed else f"F407 DISARMED ({_disarm_cause(snap)}): {describe(snap, now)}")
             self._armed = armed
-        driving = command.mode == "AUTO" and command.speed_mps > 0.0
+        # Coasting down to the speed it was given (overspeed) the boat is still under way, not stopped.
+        driving = command.mode == "BACK" or (command.mode == "AUTO" and (command.speed_mps > 0.0 or command.reason == "overspeed"))
         if self._driving and not driving:
             lines.append(f"boat stopped: {command.mode} {command.reason}; {describe(snap, now)}")
         elif driving and not self._driving:

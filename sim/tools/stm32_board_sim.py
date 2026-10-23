@@ -59,12 +59,15 @@ RUDDER_SPAN_US, RUDDER_FRONT_GAIN = 250.0, 1.0
 ESC_RAMP_PER_S = 2.0
 # App/front_motor.c: the bidirectional front motor pushes with the rear ones and brakes on a throttle cut.
 FRONT_THRUST_GAIN, FRONT_BRAKE_LEVEL, FRONT_BRAKE_MIN_DROP = 1.0, 0.40, 0.05
+FRONT_BACK_MAX = 0.40         # NAV BACK: the most the front motor pulls astern
 FRONT_BRAKE_S_PER_THROTTLE, FRONT_BRAKE_MAX_S, ESC_FRONT_REVERSE_DELAY_S = 2.0, 1.0, 0.2
 FRONT_BRAKE_HOLD_S = 1.0
 CAM_PAN_LIMIT_DEG = 80.0
 AUTO_THROTTLE_MAX = 0.50
 TILT_REPEAT_S = 30.0
 LORA_EVENT_RETRY_S = 1.5
+LORA_DIAG_PERIOD_S = 10.0     # LORA_DIAG_PERIOD_MS: the diagnostics frame (App/diag_frame.h)
+DIAG_PI_SILENT_S = 2.0        # DIAG_PI_SILENT_MS: no $HBT this long, the diagnostics say pi_silent
 SIM_BATTERY_V, BATTERY_CELLS = 11.9, 3
 CELL_VOLTS = (3.27, 3.61, 3.69, 3.71, 3.73, 3.77, 3.79, 3.84, 3.92, 4.02, 4.20)   # App/battery.c
 # sim/models/vedc_buoy/model.sdf: a pod turns 45 deg for 500 us, positive cmd_pos (anticlockwise
@@ -219,6 +222,10 @@ class Board:
         self.cam_pan: float | None = None
         self.victims = 0
         self.pi_route_rev = 0
+        # $HBT's reason, mission and waypoint, and why the board does not drive: App/diag_frame.h
+        self.pi_reason, self.pi_mission, self.pi_wp = "", "", "0/0"
+        self.pi_fps: int | None = None
+        self.arm_block, self.drive_block = 1, 1
         self.lora_seq = 0
         self.lora: Lora | None = None
         # Actuator outputs after the ESC ramp
@@ -267,7 +274,7 @@ class Board:
                     if self.seq_drops in (1, 10) or self.seq_drops % 100 == 0:
                         self.event(f"NAV seq {seq} not newer than {self.nav_seq}: dropped ({self.seq_drops})")
                     return
-                mode = fields[2] if fields[2] in ("AUTO", "MANUAL") else "STOP"
+                mode = fields[2] if fields[2] in ("AUTO", "MANUAL", "BACK") else "STOP"
                 speed, heading, ttl = float(fields[3]), float(fields[4]), int(fields[5])
                 if not (0.0 <= speed <= NAV_SPEED_MAX and 0.0 <= heading < 360.0 and 0 < ttl <= 1000):
                     return
@@ -279,6 +286,14 @@ class Board:
                 self.last_hbt, self.link_ok = now, True
                 # Optional 4th field: the LoRa route the Pi runs (docs/lora-route-downlink.md).
                 self.pi_route_rev = int(fields[3]) & 0xFFFF if len(fields) >= 4 else 0
+                # The reason of the NAV command, then the mission and the waypoint (uart_protocol.c)
+                self.pi_reason = "".join(c for c in fields[2] if c.islower() or c.isdigit() or c == "_")[:23]
+                if len(fields) >= 5 and len(fields[4]) == 1:
+                    self.pi_mission = fields[4]
+                if len(fields) >= 6:
+                    self.pi_wp = fields[5]
+                # 7th field: the detector's frames a second x10, "-" while it is off
+                self.pi_fps = int(fields[6]) if len(fields) >= 7 and fields[6].isdigit() and int(fields[6]) <= 999 else None
             elif kind == "CAM" and len(fields) >= 3:
                 pan = float(fields[2])
                 if -90.0 <= pan <= 90.0:
@@ -324,12 +339,19 @@ class Board:
         armed = imu_fresh and not self.estop and not overturned
         throttle, u, state = 0.0, 0.0, "S"
         held = self.lora is not None and self.lora.shore.hold   # STOP from the dashboard (App/control.c)
+        # arm_block_t and drive_block_t of App/control.h, for the diagnostics frame
+        self.arm_block = 0 if armed else 2 if overturned else 1
+        self.drive_block = 1 if not armed else 4 if held else 2
+        backing = False
         if armed and not held:
-            nav_fresh = self.nav_mode == "AUTO" and now - self.last_nav <= self.nav_ttl
+            nav_fresh = self.nav_mode in ("AUTO", "BACK") and now - self.last_nav <= self.nav_ttl
             hbt_fresh = self.link_ok and now - self.last_hbt <= HBT_TIMEOUT_S
             if imu_fresh and nav_fresh and hbt_fresh:
                 state = "A"
-                throttle = clamp(self.nav_speed / 1.0, 0.0, AUTO_THROTTLE_MAX)
+                self.drive_block = 0
+                # NAV BACK: the front motor alone pulls the boat astern, rudders centred (App/control.c).
+                backing = self.nav_mode == "BACK"
+                throttle = 0.0 if backing else clamp(self.nav_speed / 1.0, 0.0, AUTO_THROTTLE_MAX)
         if state == "A" and throttle > 0.0:
             if self.state != "A":
                 self.pid.reset()
@@ -347,6 +369,9 @@ class Board:
         if not armed:
             self.front_motor.reset()
             front_target = 0.0
+        elif backing:
+            self.front_motor.reset()
+            front_target = -clamp(self.nav_speed, 0.0, FRONT_BACK_MAX)
         else:
             front_target = self.front_motor.command(throttle if state == "A" else 0.0, now)
         if front_target < 0.0 <= self.front:
@@ -404,8 +429,9 @@ class Board:
         course = math.degrees(math.atan2(ve, vn)) % 360.0
         self.send(fd, "IMU", seq, f"{pitch:.2f}", f"{roll:.2f}", f"{heading:.2f}", int(imu_ok), int(overturned))
         self.send(fd, "GPS", seq, f"{lat:.6f}", f"{lon:.6f}", self.args.gps_fix, "0.9", f"{speed:.2f}", f"{course:.1f}")
-        self.send(fd, "SYS", seq, f"{SIM_BATTERY_V:.2f}", 0, int(self.estop), int(self.link_ok), int(self.armed), 1,
-                  self.confirm_presses, cell_percent(SIM_BATTERY_V / BATTERY_CELLS))
+        volts = self.battery_v()
+        self.send(fd, "SYS", seq, f"{volts:.2f}", 0, int(self.estop), int(self.link_ok), int(self.armed), 1,
+                  self.confirm_presses, cell_percent(volts / BATTERY_CELLS))
         if self.lora is not None and seq % 10 == 0:
             # Once a second the shore link and the way home: the Pi takes the boat home when it is lost.
             self.send(fd, "LNK", self.lora.shore.pi_line(seq, int(now * 1000)))
@@ -417,6 +443,24 @@ class Board:
                 self.send(fd, "RTE", line)
                 if line.split(",")[2] == "0":
                     self.event(f"RTE rev {line.split(',')[1]} to the Pi ({line.split(',')[3]} points)")
+
+    def battery_v(self) -> float:
+        """The pack: SIM_BATTERY_V, or the volts written in a file named battery in --dir (a low pack
+        to try the way home: echo 10.6 > ~/vedc_sim/sitl_run/battery)."""
+        try:
+            return float((self.args.dir / "battery").read_text().strip())
+        except (OSError, ValueError):
+            return SIM_BATTERY_V
+
+    def diag(self) -> str:
+        """App/diag_frame.c Diag_SetPi and DiagFrame_Build (n, s, w, a, d, u, j, k)."""
+        if self.link_ok and time.monotonic() - self.last_hbt <= DIAG_PI_SILENT_S:
+            reason, mission, wp, fps = self.pi_reason or "-", self.pi_mission, self.pi_wp, self.pi_fps
+        else:
+            reason, mission, wp, fps = "pi_silent", "", "0/0", None      # the Pi's last word no longer holds
+        mission = mission if mission in ("I", "P", "F", "R", "B", "H") else "-"
+        return (f"dg={self.args.buoy_id},n={reason},s={mission},w={wp},a={self.arm_block},"
+                f"d={self.drive_block},u={round(self.battery_v() * 100)},j=0,k=0:0" + ("" if fps is None else f",f={fps}"))
 
     def beacon(self, now: float) -> str:
         """App/lora_beacon.c build_frame, with the route field."""
@@ -435,7 +479,7 @@ class Board:
                  f"y={round(heading, 1) % 360.0 if imu_ok else 0:.1f},t={target:.1f},m={mode},i={int(imu_ok)},c={3 if imu_ok else 0},"
                  f"q={self.lora_seq},v={self.victims}")
         # The optional fields, each only while there is room, most needed first.
-        for field in (self.lora.route.beacon_field(), f"H={int(self.lora.shore.hold)}", f"L={self.lights}", f"b={cell_percent(SIM_BATTERY_V / BATTERY_CELLS)}",
+        for field in (self.lora.route.beacon_field(), f"H={int(self.lora.shore.hold)}", f"L={self.lights}", f"b={cell_percent(self.battery_v() / BATTERY_CELLS)}",
                       f"g={round(math.degrees(math.atan2(ve, vn)), 1) % 360.0:.1f}", f"s={math.hypot(ve, vn):.2f}"):
             if field and len(frame) + 1 + len(field) < 120:
                 frame += "," + field
@@ -468,6 +512,7 @@ class Lora:
         self.rx.setblocking(False)
         self.station = ("127.0.0.1", BEACON_PORT)
         self.state, self.next_tx, self.until, self.frame = "idle", time.monotonic() + 1.0, 0.0, ""
+        self.next_diag, self.listen = self.next_tx + self.PERIOD_S / 2, True
 
     def _received(self) -> list[bytes]:
         out = []
@@ -493,11 +538,16 @@ class Lora:
             if self.events.pending and now >= self.event_due:
                 frame = self.events.frame(self.board.args.buoy_id)
                 self.event_due = now + LORA_EVENT_RETRY_S
-            if not frame:
-                if now < self.next_tx:
-                    return
+            self.listen = True
+            if not frame and now >= self.next_tx:
                 frame = self.board.beacon(now)
                 self.next_tx = now + (self.ROUTE_PERIOD_S if self.route.receiving else self.PERIOD_S)
+            elif not frame and now >= self.next_diag and not self.route.receiving:
+                # App/lora_beacon.c: the diagnostics between two beacons, unanswered
+                frame, self.listen = self.board.diag(), False
+                self.next_diag = now + LORA_DIAG_PERIOD_S
+            if not frame:
+                return
             self.frame = frame
             self.state, self.until = "tx", now + self.airtime_s(len(self.frame))
         elif self.state == "tx":
@@ -505,10 +555,15 @@ class Lora:
             if now < self.until:
                 return
             self.tx.sendto(self.frame.encode(), self.station)   # the station has it once it is off the air
-            self.state, self.until = "rx", now + self.RX_WINDOW_S
+            self.state, self.until = ("rx", now + self.RX_WINDOW_S) if self.listen else ("idle", now)
         else:
-            frames = self._received()
-            for frame in frames[:1]:            # one answer per frame
+            # One answer per frame: listening stops once ours is in. An answer to another buoy on the
+            # channel (the station's ACK to PHAO-03 just before our RTE) is passed over.
+            ours = False
+            for frame in self._received():
+                if ours:
+                    break
+                ours = True
                 was_receiving = self.route.receiving
                 eseq = None
                 if self.route.on_frame(frame, self.board.args.buoy_id):
@@ -529,8 +584,9 @@ class Lora:
                         if self.events.pending:
                             self.event_due = now
                 else:
+                    ours = False
                     self.board.event(f"LoRa frame refused: {frame[:60]!r}")
-            if frames or now >= self.until:
+            if ours or now >= self.until:
                 self.state = "idle"
 
 

@@ -11,5 +11,6 @@ rem ============================================================
 setlocal EnableExtensions
 call "%~dp0_env.cmd" pi || exit /b 1
 echo [CAMERA] viewer: http://%PI_HOST:*@=%:8090/
-ssh -t %PI_HOST% "cd %PI_DIR% && ./run.sh stm32 --no-lidar --viewer"
+rem The service vedc-boat (main.py with the LiDAR) is stopped first: it would fight this one for the UART.
+ssh -t %PI_HOST% "cd %PI_DIR% && bash tools/install_service.sh --stop; ./run.sh stm32 --no-lidar --viewer"
 exit /b %ERRORLEVEL%

@@ -14,4 +14,13 @@ export function fmtAgo(ms) {
   return Math.floor(s / 86400) + ' ngày trước';
 }
 
+// A time to go: "40 giây", "3 phút", "1 giờ 5 phút"
+export function fmtDuration(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return s + ' giây';
+  const m = Math.round(s / 60);
+  if (m < 60) return m + ' phút';
+  return Math.floor(m / 60) + ' giờ' + (m % 60 ? ' ' + (m % 60) + ' phút' : '');
+}
+
 export const hm = d => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;

@@ -102,6 +102,36 @@ int main(void) {
     };
     for (size_t i = 0; i < sizeof(bad_event) / sizeof(bad_event[0]); i++) assert(!lora_event_parse(bad_event[i], &ev));
 
+    /* Diagnostics frames (STM32F4/App/diag_frame.h), as the F407 builds them */
+    lora_diag_t dg;
+    assert(lora_diag_parse("dg=PHAO-01,n=obstacle_too_close,s=P,w=2/5,a=0,d=2,u=1184,j=-35,k=3:1", &dg));
+    assert(strcmp(dg.id, "PHAO-01") == 0 && strcmp(dg.reason, "obstacle_too_close") == 0 && dg.mission == 'P');
+    assert(dg.wp == 2U && dg.wp_total == 5U && dg.arm_block == 0U && dg.drive_block == 2U);
+    assert(dg.has_battery && fabsf(dg.volts - 11.84f) < 1e-4f && fabsf(dg.amps + 0.35f) < 1e-4f);
+    assert(dg.i2c_recoveries == 3U && dg.imu_reinits == 1U);
+    /* Nothing known yet, no INA226 */
+    assert(lora_diag_parse("dg=PHAO-01,n=-,s=-,w=0/0,a=1,d=1,k=0:0", &dg));
+    assert(dg.reason[0] == '\0' && dg.mission == 0 && !dg.has_battery && dg.arm_block == 1U);
+    assert(!dg.has_fps);
+    /* The Pi's detector running: frames a second x10 */
+    assert(lora_diag_parse("dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0,k=0:0,f=13", &dg));
+    assert(dg.has_fps && fabsf(dg.fps - 1.3f) < 1e-4f);
+    assert(!lora_diag_parse("dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0,k=0:0,f=1000", &dg));   /* out of range */
+    /* A field of newer firmware is skipped */
+    assert(lora_diag_parse("dg=PHAO-01,n=waypoint,s=B,w=1/3,a=0,d=0,k=0:0,z=7", &dg) && dg.mission == 'B');
+    const char *bad_diag[] = {
+        "dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0",            /* k missing */
+        "dg=PHAO-01,n=Way-point,s=P,w=1/3,a=0,d=0,k=0:0",     /* reason outside [a-z0-9_] */
+        "dg=PHAO-01,n=waypoint,s=X,w=1/3,a=0,d=0,k=0:0",      /* unknown mission */
+        "dg=PHAO-01,n=waypoint,s=P,w=1/3,a=3,d=0,k=0:0",      /* arm block past overturned */
+        "dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0,u=1184,k=0:0",  /* volts without amps */
+        "dg=,n=waypoint,s=P,w=1/3,a=0,d=0,k=0:0",
+        "id=PHAO-01,10.0,106.0",
+    };
+    for (size_t i = 0; i < sizeof(bad_diag) / sizeof(bad_diag[0]); i++) assert(!lora_diag_parse(bad_diag[i], &dg));
+    /* A beacon is never taken for a diagnostics frame, nor the other way round */
+    assert(!lora_diag_parse("id=PHAO-01,10.0,106.0,r=0,p=0,y=0,t=0,m=A,i=1,c=3,q=1", &dg));
+
     puts("lora_payload_test: PASS");
     return 0;
 }

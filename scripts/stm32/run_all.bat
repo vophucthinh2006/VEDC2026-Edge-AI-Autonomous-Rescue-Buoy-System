@@ -5,27 +5,45 @@ rem    1. every test of this computer (test_host.bat); stops on a failure
 rem    2. builds and flashes the STM32F407 firmware (Debug)
 rem    3. builds and flashes the shore station (ESP-IDF), its log in a window of its own
 rem    4. copies Rasp_Pi to the Pi (boat stm32 deploy)
-rem    5. starts main.py on the Pi with the viewer, in a window of its own
-rem    6. opens the dashboard and the viewer
+rem    5. (re)starts main.py on the Pi, without the viewer (it costs the model fps), as the systemd
+rem       service vedc-boat, which starts again by itself after a reboot; its output in a window of
+rem       its own
+rem    6. opens the dashboard
 rem
-rem  Usage: run_all [noflash] [nostation] [notest] [sim]
+rem  Usage: run_all [noflash] [nostation] [notest] [sim] [stand]
 rem    noflash   : the F407 keeps its firmware (steps 2 skipped)
 rem    nostation : the station keeps its firmware and runs on its own (step 3 skipped)
 rem    notest    : step 1 skipped
 rem    sim       : no hardware: the Worker on this computer and the whole mission in the simulator
 rem                (test_cloud.bat, then test_sim.bat) instead of steps 2 to 6
+rem    stand     : the boat on its stand in a small room for the judges (demo_stand.bat): the same
+rem                chain, but main.py with config\stand_demo.yaml (the LiDAR is drawn, avoids
+rem                nothing: walls and people close round the stand never stop the motors). Kept at
+rem                every boot until a run_all without it. NEVER ON THE WATER.
+rem  No viewer either way: every camera frame goes to the detector. To see the camera, run
+rem  test_camera.bat (main.py by hand with the viewer) instead.
 rem
 rem  Then: draw a route on the dashboard and press "Gui toi phao": the boat runs it. An empty
 rem  route stops it. The lights are the two switches of the boat's card (admin).
 rem ============================================================
 setlocal EnableExtensions
 call "%~dp0_env.cmd"
-set "NOFLASH=" & set "NOSTATION=" & set "NOTEST=" & set "SIM="
+set "NOFLASH=" & set "NOSTATION=" & set "NOTEST=" & set "SIM=" & set "STAND="
 for %%A in (%*) do (
     if /I "%%~A"=="noflash" set "NOFLASH=1"
     if /I "%%~A"=="nostation" set "NOSTATION=1"
     if /I "%%~A"=="notest" set "NOTEST=1"
     if /I "%%~A"=="sim" set "SIM=1"
+    if /I "%%~A"=="stand" set "STAND=1"
+)
+rem What the service gives run.sh (Rasp_Pi\tools\install_service.sh; none: no viewer)
+set "SVC_ARGS="
+if defined STAND (
+    set "SVC_ARGS=--overlay config/stand_demo.yaml"
+    echo.
+    echo   STAND DEMO: obstacle avoidance OFF. Never on the water.
+    echo   Hands off the propellers once a route is sent; the front ESC is water-cooled.
+    echo.
 )
 
 if not defined NOTEST (
@@ -59,16 +77,17 @@ if not defined NOSTATION (
 echo ===== 4. Pi code
 call "%ROOT%boat.bat" stm32 deploy || goto :fail
 echo ===== 5. main.py on the Pi
-rem One main.py only: two would fight over the F407's UART. End the ssh of an earlier run's window
-rem and stop any main.py still running on the Pi ([m]/[s]: the patterns must not match the shell
-rem that runs them).
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'ssh.*run\.sh [s]tm32' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-ssh %PI_HOST% "pkill -INT -f '[m]ain.py --overlay'; sleep 2" >nul 2>&1
-start "Pi main.py" cmd /k ssh -t %PI_HOST% "cd %PI_DIR% && ./run.sh stm32 --viewer"
+rem main.py runs as the systemd service vedc-boat (Rasp_Pi\tools\install_service.sh): installed the
+rem first time, restarted here on the code just copied, started again by itself at every boot and
+rem 3 s after it stops. One main.py only: the script also stops one started by hand. The window
+rem follows the service's output; closing it leaves main.py running. End the ssh of an earlier
+rem run's window first ([s]/[v]: the patterns must not match the shell that runs them).
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'ssh.*(run\.sh [s]tm32|journalctl -u [v]edc-boat)' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+ssh %PI_HOST% "cd %PI_DIR% && bash tools/install_service.sh --restart %SVC_ARGS%" || goto :fail
+start "Pi main.py" cmd /k ssh -t %PI_HOST% "journalctl -u vedc-boat -f -n 40 -o cat"
 ping -n 10 127.0.0.1 >nul
-echo ===== 6. dashboard and viewer
+echo ===== 6. dashboard
 start "" "%CLOUD_URL%/"
-for /f "tokens=2 delims=@" %%H in ("x@%PI_HOST%") do start "" "http://%%H:8090/"
 
 :ok
 echo.

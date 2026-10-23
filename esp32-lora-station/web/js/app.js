@@ -289,6 +289,33 @@ function updateStart() {
 }
 
 // One line of route progress for buoy `id`, or null (docs/lora-route-downlink.md)
+// The route still ahead of a buoy: the waypoint it goes to (its diagnostics frame, from the Pi) and the
+// points of the route it runs. Those are the map's when the last send was of this very mission; else unknown.
+function routeAhead(id) {
+  const d = state.diag.get(id), b = state.buoys.get(id);
+  if (!d || !d.wp || !b || !b.hasPos || !downlink || downlink.id !== id || !downlink.n) return null;
+  if (downlink.mission_rev !== missionRev || wps.length !== downlink.n || d.wp_total !== downlink.n || d.wp > wps.length) return null;
+  let remaining = distM(b, wps[d.wp - 1]);
+  for (let i = d.wp - 1; i + 1 < wps.length; i++) remaining += distM(wps[i], wps[i + 1]);
+  return { k: d.wp, n: d.wp_total, remaining, loop: downlink.loop };
+}
+
+function onDiagMessage(m) {
+  const id = String(m.id);
+  const { type, id: _id, age_s, ...d } = m;
+  const before = state.diag.get(id);
+  state.diag.set(id, { ...d, at: Date.now() - (Number(age_s) || 0) * 1000 });
+  // The Pi took the boat home for a low pack (mission B: below return.battery_low_pct for
+  // battery_hold_s). Not on the beacon's reading itself: it sags under the motors for a second or two.
+  if (before && before.mission !== 'B' && d.mission === 'B') {
+    const pct = state.buoys.get(id)?.battery;
+    const text = `${id}: pin yếu${Number.isInteger(pct) ? ` ${pct}%` : ''}, phao tự quay về trạm`;
+    toast(text, 'bad');
+    log('battery', text);
+  }
+  if (id === state.selected) renderDetail();
+}
+
 function routeProgress(id) {
   if (!downlink || !downlink.rev || downlink.id !== id) return null;
   const r = state.buoys.get(id)?.route;
@@ -584,6 +611,7 @@ function connect() {
     else if (m.type === 'alert') { onAlertMessage(m); renderDetail(); renderList(); }
     else if (m.type === 'lights') onLightsMessage(m);
     else if (m.type === 'hold') onHoldMessage(m);
+    else if (m.type === 'diag') onDiagMessage(m);
     else onBuoyMessage(m);
   };
 }
@@ -692,7 +720,7 @@ $('btn-logout').addEventListener('click', async () => {
 async function boot() {
   $('map').classList.add('dark');
   initTimeline();
-  initTelemetry({ toast, routeLine: routeProgress });
+  initTelemetry({ toast, routeLine: routeProgress, routeAhead });
   initVictims(map, { toast, onClear: clearVictims });
   initLights({ onSet: sendLights });
   initHold({ onSet: sendHold });

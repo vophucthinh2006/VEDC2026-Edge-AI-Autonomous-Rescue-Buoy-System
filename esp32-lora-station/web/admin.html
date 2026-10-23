@@ -78,6 +78,35 @@
               </div>
             </div>
             <p id="c-line" class="line"></p>
+            <p id="c-lowbatt" class="alert-line" role="alert" hidden></p>
+
+            <section id="d-health" class="kv-card" aria-label="Sức khoẻ phao" hidden>
+              <h3>Sức khoẻ phao</h3>
+              <dl class="kv">
+                <dt>IMU</dt><dd id="h-imu"></dd>
+                <dt>Lắc ngang</dt><dd id="h-roll"></dd>
+                <dt>Chúi dọc</dt><dd id="h-pitch"></dd>
+                <dt>Mũi tàu</dt><dd id="h-head"></dd>
+                <dt>LoRa</dt><dd id="h-zone"></dd>
+              </dl>
+            </section>
+
+            <section id="d-prog" class="kv-card" aria-label="Tiến độ lộ trình" hidden>
+              <h3>Tiến độ lộ trình</h3>
+              <p id="h-prog" class="kv-line"></p>
+            </section>
+
+            <section id="d-diag" class="kv-card" aria-label="Máy tính Pi và mạch F407" hidden>
+              <h3>Pi và F407 <small id="g-age"></small></h3>
+              <dl class="kv">
+                <dt>Nhiệm vụ</dt><dd id="g-mission"></dd>
+                <dt>Lệnh của Pi</dt><dd id="g-reason"></dd>
+                <dt>Motor</dt><dd id="g-drive"></dd>
+                <dt>Camera AI</dt><dd id="g-fps"></dd>
+                <dt>Pin</dt><dd id="g-pack"></dd>
+                <dt>Tự phục hồi</dt><dd id="g-recov"></dd>
+              </dl>
+            </section>
 
             <section id="d-hold" class="hold" aria-label="Dừng phao" hidden>
               <button id="d-hold-btn" class="btn hold-btn stop" type="button">DỪNG PHAO</button>

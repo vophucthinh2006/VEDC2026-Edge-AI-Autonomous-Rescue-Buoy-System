@@ -41,6 +41,7 @@
 #include "lora_beacon.h"
 #include "uart_protocol.h"
 #include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -261,6 +262,23 @@ int main(void)
       Protocol_Send(&huart4, "TST", payload);
 #else
       send_telemetry(++sequence);
+      /* Diagnostics for the dashboard, sent over LoRa every LORA_DIAG_PERIOD_MS (App/diag_frame.h). */
+      diag_t diag = { 0 };
+      char reason[sizeof(pi_command.pi_reason)];
+      memcpy(reason, pi_command.pi_reason, sizeof(reason));   /* the UART interrupt writes it */
+      reason[sizeof(reason) - 1U] = '\0';
+      bool pi_heard = pi_command.pi_link_ok && (uint32_t)(now - pi_command.last_hbt_ms) <= DIAG_PI_SILENT_MS;
+      Diag_SetPi(&diag, pi_heard, reason, pi_command.pi_mission, pi_command.pi_wp, pi_command.pi_wp_total);
+      diag.has_fps = pi_heard && pi_command.pi_fps_x10 >= 0;
+      diag.fps_x10 = diag.has_fps ? (uint16_t)pi_command.pi_fps_x10 : 0U;
+      diag.arm_block = heading_debug.arm_block;
+      diag.drive_block = heading_debug.block;
+      diag.has_battery = battery_debug.ok != 0U;
+      diag.volts = battery_debug.volts;
+      diag.amps = battery_debug.amps;
+      diag.i2c_recoveries = i2c_bus_debug.recoveries;
+      diag.imu_reinits = imu_watchdog.attempts;
+      LoraBeacon_SetDiag(&diag);
       /* Route from the dashboard over LoRa: one $RTE line a period until the Pi's $HBT confirms it. */
       char route_line[180];
       LoraBeacon_SetPiRouteRev(pi_command.route_rev);
