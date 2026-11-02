@@ -71,7 +71,9 @@ ACK,PHAO-01,0,1,10.883438,106.796019*64
 
 - `eseq`: khung sự kiện được nhận (`ev=...`, `STM32F4/App/event_queue.h`), 0 với beacon.
 - `lệnh`: lệnh admin, bit 0 đèn 1 (PC3), bit 1 đèn 2 (PC2), bit 2 DỪNG (F407 khóa motor, lộ trình giữ nguyên);
-  `GET /api/downlink` mang chúng trong `lights: {id: mask}` và `hold: {id: 0|1}` (`POST /api/lights`, `POST /api/hold`).
+  `GET /api/downlink` mang chúng trong `lights: {id: mask}` và `hold: {id: 0|1}` (`POST /api/lights`, `POST /api/hold`);
+  bit 3 VỀ BỜ (`ret`), điểm đỗ riêng thay GPS trạm (`home`) và đội hình (`fol`, ba trường thêm sau lon): xem
+  [fleet-control.md](fleet-control.md). Nhiều phao: mỗi phao một bản gửi, trạm giữ tối đa 4 bản (`routes`).
 - lat/lon: GPS của trạm, điểm về của phao; trống khi trạm chưa có fix.
 - Trạm gửi RTE thay cho ACK chỉ khi khung là beacon, phao còn thiếu lộ trình **và** `L=`, `H=` của beacon đã đúng lệnh;
   sai thì ACK trước, lộ trình chậm thêm một lượt. Lệnh dừng vì vậy không phải chờ truyền xong lộ trình.

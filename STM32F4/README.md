@@ -426,7 +426,7 @@ STM32 → Raspberry Pi:
 $IMU,seq,pitch,roll,yaw,imu_ok,overturned*CS\n
 $GPS,seq,lat,lon,fix,hdop,speed,course*CS\n
 $SYS,seq,battery_v,motor_fault,estop,link_ok,armed,auto,confirm_presses,battery_pct*CS\n
-$LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon,hold*CS\n     (mỗi giây)
+$LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon,hold,ret*CS\n     (mỗi giây)
 $ACK,seq,TXD,ACCEPTED*CS\n
 $RTE,seq,rev,first,total,loop,lat;lon,...*CS\n
 ```
@@ -451,7 +451,9 @@ LoRa (mục 14).
 
 `$SYS`: `battery_v` là điện áp INA226 (0 khi chưa đọc được), `battery_pct` 0..100 (−1 chưa biết).
 `$LNK`: `shore_ok` = 0 khi trạm bờ đã từng nghe mà im quá 60 s (`SHORE_LINK_TIMEOUT_MS`); Pi đưa thuyền về
-`home` = vị trí GPS của trạm (lấy từ ACK). `heard_ago_s` −1 khi chưa từng nghe; lat/lon trống khi chưa có điểm về.
+`home` = điểm đỗ của phao hoặc vị trí GPS của trạm (lấy từ ACK). `heard_ago_s` −1 khi chưa từng nghe; lat/lon trống
+khi chưa có điểm về. `ret` = 1 khi admin gọi phao về bờ (bit 3 của lệnh, [docs/fleet-control.md](../docs/fleet-control.md)):
+Pi đưa thuyền về điểm đỗ và giữ ở đó tới khi admin cho chạy tiếp.
 
 Checksum là XOR của các ký tự ASCII giữa `$` và `*`, giống `Rasp_Pi/utils/nmea_packet.py`.
 
@@ -567,7 +569,8 @@ ev=PHAO-01,<eseq>,C,<lat>,<lon>,<presses>              nút PE4: người đã l
 ```
 
 **Trạm trả lời mọi khung** trong cửa sổ 1.5 s: khung `RTE` khi phao còn thiếu lộ trình, ngược lại
-`ACK,<id>,<eseq>,<lệnh>,<lat trạm>,<lon trạm>*CS` (`App/shore_link.c`). `<lệnh>` 0..7: bit 0–1 hai đèn, **bit 2 DỪNG**
+`ACK,<id>,<eseq>,<lệnh>,<lat>,<lon>[,<dẫn đầu>,<phải m>,<sau m>]*CS` (`App/shore_link.c`). `<lệnh>` 0..15: bit 0–1 hai
+đèn, bit 3 VỀ BỜ, ba trường cuối chỉ khi phao đi đội hình ([docs/fleet-control.md](../docs/fleet-control.md)); **bit 2 DỪNG**
 (nút "DỪNG PHAO" trên dashboard: F407 khóa motor, `heading_debug.block` = 4, tới khi admin bấm "Chạy tiếp"; lộ trình
 giữ nguyên). Beacon báo lại `H=1` khi đang dừng. Phao bật relay đúng theo lệnh, lấy vị trí trạm làm điểm về, và coi mọi
 khung của trạm là còn liên lạc. Im quá 60 s: `$LNK` báo mất, Pi đưa thuyền về. Đèn giữ
