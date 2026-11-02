@@ -288,6 +288,9 @@ int main(void)
       if (sequence % (1000U / TELEMETRY_PERIOD_MS) == 0U &&
           LoraBeacon_LinkLine(sequence, now, route_line, sizeof(route_line)) > 0U)
         Protocol_Send(&huart4, "LNK", route_line);
+      /* A person another boat looks after (docs/victim-claim.md): $SKP once, the Pi leaves them alone. */
+      if (LoraBeacon_SkipLine(sequence, route_line, sizeof(route_line)) > 0U)
+        Protocol_Send(&huart4, "SKP", route_line);
 #endif
     }
   }

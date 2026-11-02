@@ -19,6 +19,8 @@ What is compared, from each boat's track.csv and stm32_events.log and the statio
   - area seen: the share of the area within SEEN_M of a track (the camera sweeps both sides)
   - distance run, energy (the rear throttle summed over time, in throttle-seconds)
   - close passes: seconds two boats were within CLOSE_M of each other
+  - duplicate stops: seconds a boat followed (mission F) a person another boat had reported first, within
+    STOP_M of them: what the victim claims (docs/victim-claim.md) save
   - the LoRa channel: frames the station heard, lost to overlaps, lost while it was sending
   - formation: how far each follower was from its place (median), after the first minute
 """
@@ -44,6 +46,7 @@ AREAS = {
     "wide": [(0.0, -18.0), (60.0, -18.0), (60.0, 18.0), (0.0, 18.0)],     # open water, about 2.5 times the street
 }
 MATCH_M, SEEN_M, CLOSE_M = 6.0, 6.0, 3.0
+STOP_M = 10.0   # a boat following within this of a person is stopping for them
 EARTH = 6378137.0
 
 
@@ -84,6 +87,8 @@ def run(args: argparse.Namespace) -> int:
            f"--run={out}", f"--duration={args.duration + args.warmup + 60}", f"--vision={args.vision}", f"--hold={args.hold}"]
     if args.no_tdma:
         cmd.append("--no-tdma")
+    if args.no_claims:
+        cmd.append("--no-claims")
     print(" ".join(cmd), flush=True)
     sim = subprocess.Popen(cmd, start_new_session=True)
     try:
@@ -115,7 +120,7 @@ def run(args: argparse.Namespace) -> int:
         plan_at = time.time()
         print(f"plan sent: {plan.get('mode')}", flush=True)
         (out / "scenario.json").write_text(json.dumps({"name": args.name, "mode": args.mode, "boats": args.boats,
-                                                       "tdma": not args.no_tdma, "plan_at": plan_at, "duration": args.duration,
+                                                       "tdma": not args.no_tdma, "claims": not args.no_claims, "plan_at": plan_at, "duration": args.duration,
                                                        "kill_leader_at": args.kill_leader_at, "plan": plan, "world": args.world,
                                                        "vision": args.vision}, indent=1))
         if args.kill_leader_at:
@@ -215,6 +220,17 @@ def analyse(d: Path) -> dict | None:
         energy = sum(a["throttle"] * (b["t"] - a["t"]) for a, b in zip(rows, rows[1:]))
         per_boat[boat] = {"distance_m": round(dist, 1), "energy": round(energy, 1), "reports": len(tr["reports"])}
     # Close passes: seconds two boats were within CLOSE_M
+    # Duplicate stops: a boat following somebody another boat reported first (by the first report's time)
+    dup_stop, follow_s = 0, 0
+    for boat, tr in tracks.items():
+        for r in tr["rows"]:
+            if r["t"] < t0 or r["mission"] != "F":
+                continue
+            follow_s += 1
+            near = min(((p[0], math.hypot(p[1] - r["x"], p[2] - r["y"])) for p in people), key=lambda v: v[1], default=(None, 1e9))
+            owner = first.get(near[0])
+            if near[1] <= STOP_M and owner is not None and owner[1] != boat and owner[0] + t0 <= r["t"]:
+                dup_stop += 1
     close = 0
     names = list(tracks)
     by_sec = {boat: {int(r["t"]): (r["x"], r["y"]) for r in tracks[boat]["rows"] if r["t"] >= t0} for boat in names}
@@ -247,7 +263,8 @@ def analyse(d: Path) -> dict | None:
         air = {}
     found_times = sorted(t for t, _ in first.values())
     return {
-        "name": sc["name"], "world": sc["world"], "area_xy": area, "mode": sc["mode"], "boats": sc["boats"], "tdma": sc["tdma"], "duration_s": sc["duration"],
+        "name": sc["name"], "world": sc["world"], "area_xy": area, "mode": sc["mode"], "boats": sc["boats"], "tdma": sc["tdma"],
+        "claims": sc.get("claims", False), "duration_s": sc["duration"], "dup_stop_s": dup_stop, "follow_s": follow_s,
         "kill_leader_at": sc.get("kill_leader_at"),
         "people": len(people), "found": len(first),
         "found_by": {k: {"after_s": round(v[0]), "boat": v[1], "boats": sorted(reporters.get(k, []))} for k, v in sorted(first.items())},
@@ -294,6 +311,7 @@ def main() -> int:
     r.add_argument("--duration", type=int, default=600)
     r.add_argument("--warmup", type=int, default=20)
     r.add_argument("--no-tdma", action="store_true")
+    r.add_argument("--no-claims", action="store_true", help="the station tells no boat to leave a person alone (docs/victim-claim.md)")
     r.add_argument("--vision", default="all", choices=("all", "first"))
     r.add_argument("--hold", type=int, default=20, help="seconds with a person before going on (follow.max_hold_s), the same for every plan")
     r.add_argument("--kill-leader-at", type=int, default=0, help="seconds after the plan: PHAO-01's board stops")

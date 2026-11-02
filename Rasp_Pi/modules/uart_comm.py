@@ -98,6 +98,10 @@ class Stm32Uart(threading.Thread):
                 # $LDR,seq,leader,lat,lon,heading,speed: a beacon of the formation's leader, as the F407 heard it
                 _, leader, lat, lon, heading, speed = packet.fields[:6]
                 self._state.update_leader(LeaderState(leader, float(lat), float(lon), float(heading), float(speed), monotonic()))
+            elif packet.command == "SKP" and len(packet.fields) >= 3:
+                # $SKP,seq,lat,lon: a person another boat looks after, or already rescued (docs/victim-claim.md)
+                _, lat, lon = packet.fields[:3]
+                self._state.update_skip(float(lat), float(lon))
             elif packet.command == "RTE":
                 route = self._routes.feed(packet.fields)
                 if route is not None:

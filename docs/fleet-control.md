@@ -39,7 +39,8 @@ Phạm vi hiện tại: kiến trúc Pi + STM32F407. Tàu thật vẫn là một
 `GET /api/downlink` (cho trạm) thêm: `routes` (mọi bản gửi chưa giao, mỗi tàu một bản; bản mới nhất vẫn ở gốc cho
 trạm cũ), `ret`, `home` (điểm đỗ từng tàu), `fol` (tàu theo → `[dẫn đầu, sang phải m, lùi sau m]`).
 
-WebSocket thêm: `task` (nhiệm vụ của tàu: `idle`, `sector`, `return`, `formation`; vấn đề 2 sẽ thêm `victim`),
+WebSocket thêm: `task` (nhiệm vụ của tàu: `idle`, `sector`, `return`, `formation`, `victim`: tàu đang giữ một người,
+[victim-claim.md](victim-claim.md)),
 `ret`, `link` (mất / có lại liên lạc), `formation`; cảnh báo `L` (mất liên lạc 30 s) và `E` (tàu khác lên dẫn đầu).
 
 **Điểm đỗ:** PHAO-01 đỗ ngay tại trạm như khi chỉ có một tàu; PHAO-02 cách 8 m bên phải, PHAO-03 8 m bên trái,
@@ -56,7 +57,8 @@ ACK,PHAO-03,0,8,10.883366,106.795745*..            về bờ, tới điểm đ�
 ACK,PHAO-02,0,0,10.883438,106.796019,PHAO-01,10,0*..   đi cách PHAO-01 10 m bên phải
 ```
 
-Tàu ngoài đội hình nhận đúng khung 6 trường như cũ. F407 đưa sang Pi: `$LNK` thêm trường `ret`; `$FOL,seq,dẫn đầu,phải,sau`;
+Tàu ngoài đội hình nhận đúng khung 6 trường như cũ. ACK 11 trường thêm một người cần bỏ qua (tàu khác đã nhận):
+[victim-claim.md](victim-claim.md). F407 đưa sang Pi: `$LNK` thêm trường `ret`; `$FOL,seq,dẫn đầu,phải,sau`;
 `$LDR,seq,id,lat,lon,hướng,tốc độ` mỗi khi nghe beacon của tàu dẫn đầu (beacon đã có `g=` hướng đi và `s=` tốc độ GPS).
 
 **Chia khe thời gian (TDMA, `STM32F4/App/lora_slot.c`):** một beacon (~0.7 s ở SF9/BW125) cộng câu trả lời của

@@ -172,6 +172,9 @@ Giao thức với F407 ở `STM32F4/README.md` mục 11. Pi đọc thêm:
   lần cuối nghe trạm bờ (-1: chưa nghe), `home_valid` 0/1 và vị trí trạm (6 chữ số thập phân, có thể để trống khi
   `home_valid` = 0). Firmware chưa có `$LNK`: Pi coi liên lạc bờ luôn tốt và không có nhà.
 - `$SYS` trường thứ 9 `battery_pct` (0..100, -1 không rõ); trường 1 `battery` là volt.
+- `$SKP,seq,lat,lon`: một người tàu khác đã nhận (hoặc đã được cứu). Trong `follow.claim_ttl_s`, người cách điểm đó
+  dưới `follow.claim_radius_m` không được theo, không được báo; đang theo thì rời đi
+  ([docs/victim-claim.md](../docs/victim-claim.md)).
 
 ## Hành vi phát hiện người
 

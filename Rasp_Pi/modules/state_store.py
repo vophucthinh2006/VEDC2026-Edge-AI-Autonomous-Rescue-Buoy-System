@@ -42,6 +42,9 @@ class SysState:
     battery_pct: int = -1       # STM32F407 $SYS 9th field: charge 0..100; -1 unknown (battery_v is then still volts)
 
 
+MAX_SKIPS = 16   # $SKP places kept (docs/victim-claim.md)
+
+
 @dataclass(frozen=True)
 class LinkState:
     """STM32F407 $LNK, once a second: whether the shore station has been heard lately (the F407
@@ -118,6 +121,8 @@ class Snapshot:
     link: LinkState = LinkState()
     leader: LeaderState | None = None            # the formation's leader, when one is heard
     goal_speed: float | None = None              # set by the mission in formation: the speed to go to waypoint at
+    # $SKP: people another boat looks after or already rescued (docs/victim-claim.md), (lat, lon, when heard)
+    skips: tuple[tuple[float, float, float], ...] = ()
 
 
 class StateStore:
@@ -136,6 +141,7 @@ class StateStore:
         self._nav = NavState()
         self._link = LinkState()
         self._leader: LeaderState | None = None
+        self._skips: tuple[tuple[float, float, float], ...] = ()
 
     def update_link(self, shore_ok: bool, heard_ago_s: float, home: tuple[float, float] | None, hold: bool = False,
                     ret: bool = False) -> None:
@@ -152,6 +158,13 @@ class StateStore:
     def update_leader(self, leader: LeaderState) -> None:
         with self._lock:
             self._leader = leader
+
+    def update_skip(self, lat: float, lon: float) -> None:
+        """$SKP: a person the shore station says to leave alone. The same place heard again is only
+        made newer; the last MAX_SKIPS places are kept."""
+        with self._lock:
+            kept = tuple(s for s in self._skips if abs(s[0] - lat) > 1e-5 or abs(s[1] - lon) > 1e-5)
+            self._skips = (kept + ((lat, lon, monotonic()),))[-MAX_SKIPS:]
 
     def update_vehicle(self, mode: str, armed: bool, mission_seq: int, mission_total: int = 0, wp_dist_m: float = -1.0,
                        wp_bearing_deg: float = 0.0) -> None:
@@ -206,4 +219,4 @@ class StateStore:
     def snapshot(self) -> Snapshot:
         with self._lock:
             return Snapshot(self._imu, self._gps, self._system, self._obstacles, self._scan_timestamp, self._waypoint, self._human_target, self._vehicle,
-                            self._human_targets, self._focus, self._nav, self._link, self._leader)
+                            self._human_targets, self._focus, self._nav, self._link, self._leader, skips=self._skips)

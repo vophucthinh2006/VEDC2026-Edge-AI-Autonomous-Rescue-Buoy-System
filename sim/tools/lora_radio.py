@@ -180,6 +180,23 @@ class _Lib:
         lib.sim_beacon_parse.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_double),
                                          ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float),
                                          ctypes.POINTER(ctypes.c_float))
+        # One person, one boat (docs/victim-claim.md): the station's claims and the ACK with a person to leave alone
+        lib.sim_claims_size.restype = ctypes.c_size_t
+        lib.sim_claim_size.restype = ctypes.c_size_t
+        lib.Claims_OnReport.restype = ctypes.c_void_p
+        lib.Claims_OnReport.argtypes = (ctypes.c_void_p, ctypes.c_char_p, ctypes.c_double, ctypes.c_double, ctypes.c_uint32)
+        lib.Claims_OnConfirm.restype = ctypes.c_void_p
+        lib.Claims_OnConfirm.argtypes = (ctypes.c_void_p, ctypes.c_char_p, ctypes.c_bool, ctypes.c_double, ctypes.c_double, ctypes.c_uint32)
+        lib.Claims_Set.argtypes = (ctypes.c_void_p, ctypes.c_double, ctypes.c_double, ctypes.c_char_p, ctypes.c_int, ctypes.c_uint32)
+        lib.Claims_Release.argtypes = (ctypes.c_void_p, ctypes.c_char_p)
+        lib.Claims_SkipFor.restype = ctypes.c_bool
+        lib.Claims_SkipFor.argtypes = (ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_bool, ctypes.c_double, ctypes.c_double,
+                                       ctypes.c_uint32, ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double))
+        lib.RouteDownlink_AckSkip.restype = ctypes.c_size_t
+        lib.RouteDownlink_AckSkip.argtypes = (ctypes.c_char_p, ctypes.c_uint16, ctypes.c_uint8, ctypes.c_bool, ctypes.c_double, ctypes.c_double,
+                                              ctypes.c_void_p, ctypes.c_bool, ctypes.c_double, ctypes.c_double, ctypes.c_char_p, ctypes.c_size_t)
+        lib.ShoreLink_SkipLine.restype = ctypes.c_size_t
+        lib.ShoreLink_SkipLine.argtypes = (ctypes.c_void_p, ctypes.c_uint16, ctypes.c_char_p, ctypes.c_size_t)
         lib.LoraSlot_FromId.restype = ctypes.c_uint8
         lib.LoraSlot_FromId.argtypes = (ctypes.c_char_p, ctypes.c_uint8)
         lib.LoraSlot_Wait.restype = ctypes.c_uint32
@@ -262,16 +279,18 @@ class StationRoute:
         return buf.raw[:length]
 
     def ack(self, buoy_id: str, eseq: int, lights: int, position: tuple[float, float] | None,
-            role: tuple[str, int, int] | None = None) -> bytes:
-        """RouteDownlink_Ack: the answer to every frame that gets no RTE frame. lights: the whole command
-        (lights, STOP, RETURN); role: (leader, right_m, back_m) while the boat sails in formation."""
+            role: tuple[str, int, int] | None = None, skip: tuple[float, float] | None = None) -> bytes:
+        """RouteDownlink_AckSkip: the answer to every frame that gets no RTE frame. lights: the whole command
+        (lights, STOP, RETURN); role: (leader, right_m, back_m) while the boat sails in formation; skip: a
+        person another boat looks after (docs/victim-claim.md)."""
         buf = ctypes.create_string_buffer(121)
         lat, lon = position if position is not None else (0.0, 0.0)
         r = FormationRole()
         if role is not None:
             r.on, r.leader, r.right_m, r.back_m = True, role[0].encode()[:31], int(role[1]), int(role[2])
-        length = self._lib.RouteDownlink_Ack(buoy_id.encode(), eseq & 0xFFFF, lights & 15, position is not None, lat, lon,
-                                             ctypes.byref(r), buf, len(buf))
+        skip_lat, skip_lon = skip if skip is not None else (0.0, 0.0)
+        length = self._lib.RouteDownlink_AckSkip(buoy_id.encode(), eseq & 0xFFFF, lights & 15, position is not None, lat, lon,
+                                                 ctypes.byref(r), skip is not None, skip_lat, skip_lon, buf, len(buf))
         return buf.raw[:length]
 
     def event_json(self, frame: bytes) -> tuple[str, dict] | None:
@@ -287,6 +306,54 @@ class StationRoute:
 
 def _e6(value: float) -> int:
     return int(round(value * 1e6))
+
+
+class Claim(ctypes.Structure):
+    """claim_t of victim_claims.h"""
+    _fields_ = [("status", ctypes.c_uint8), ("lat", ctypes.c_double), ("lon", ctypes.c_double), ("owner", ctypes.c_char * 32),
+                ("last_ms", ctypes.c_uint32)]
+
+
+class StationClaims:
+    """claims_t of the ESP32 (main/victim_claims.c): the first boat to report a person owns them; the others
+    are told in their ACKs to leave them alone (docs/victim-claim.md)."""
+    OWNED, RESCUED = 1, 2
+
+    def __init__(self, lib_path: Path) -> None:
+        self._lib = _Lib(lib_path).lib
+        assert self._lib.sim_claim_size() == ctypes.sizeof(Claim), "claim_t and the ctypes Claim differ"
+        self._state = ctypes.create_string_buffer(self._lib.sim_claims_size())   # zeroed = Claims_Init
+
+    def report(self, buoy_id: str, lat: float, lon: float, now_ms: int) -> int | None:
+        """Claims_OnReport: the claim (an address, the ACK's verdict) of the person boat buoy_id reported."""
+        return self._lib.Claims_OnReport(self._state, buoy_id.encode(), lat, lon, now_ms & 0xFFFFFFFF)
+
+    def confirm(self, buoy_id: str, position: tuple[float, float] | None, now_ms: int) -> int | None:
+        lat, lon = position if position is not None else (0.0, 0.0)
+        return self._lib.Claims_OnConfirm(self._state, buoy_id.encode(), position is not None, lat, lon, now_ms & 0xFFFFFFFF)
+
+    @staticmethod
+    def owner(claim: int | None) -> tuple[int, str] | None:
+        """(status, owner) of a claim Claims_OnReport returned."""
+        if not claim:
+            return None
+        c = Claim.from_address(claim)
+        return c.status, c.owner.decode()
+
+    def set(self, lat: float, lon: float, owner: str, status: int, now_ms: int) -> None:
+        self._lib.Claims_Set(self._state, lat, lon, owner.encode()[:31], status, now_ms & 0xFFFFFFFF)
+
+    def release(self, owner: str) -> None:
+        self._lib.Claims_Release(self._state, owner.encode())
+
+    def skip_for(self, buoy_id: str, verdict: int | None, position: tuple[float, float] | None, now_ms: int) -> tuple[float, float] | None:
+        """Claims_SkipFor: the one person boat buoy_id should leave alone, for its ACK."""
+        lat, lon = ctypes.c_double(), ctypes.c_double()
+        at = position if position is not None else (0.0, 0.0)
+        if not self._lib.Claims_SkipFor(self._state, buoy_id.encode(), verdict, position is not None, at[0], at[1],
+                                        now_ms & 0xFFFFFFFF, ctypes.byref(lat), ctypes.byref(lon)):
+            return None
+        return lat.value, lon.value
 
 
 class BuoyShore:
@@ -345,6 +412,11 @@ class BuoyShore:
         buf = ctypes.create_string_buffer(64)
         self._lib.ShoreLink_FollowLine(self._state, seq & 0xFFFF, buf, len(buf))
         return buf.value.decode()
+
+    def skip_line(self, seq: int) -> str | None:
+        """ShoreLink_SkipLine: the $SKP payload once a person to leave alone came in, else None."""
+        buf = ctypes.create_string_buffer(48)
+        return buf.value.decode() if self._lib.ShoreLink_SkipLine(self._state, seq & 0xFFFF, buf, len(buf)) else None
 
 
 class Slots:

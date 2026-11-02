@@ -5,9 +5,12 @@
 #include <string.h>
 #include "route_link.h"
 #include "route_downlink.h"
+#include "victim_claims.h"
 
 size_t sim_route_link_size(void) { return sizeof(route_link_t); }
 size_t sim_route_downlink_size(void) { return sizeof(route_downlink_t); }
+size_t sim_claims_size(void) { return sizeof(claims_t); }
+size_t sim_claim_size(void) { return sizeof(claim_t); }
 
 uint16_t sim_route_link_rev(const route_link_t *route) { return route->rev; }
 uint16_t sim_route_link_have(const route_link_t *route) { return route->have; }

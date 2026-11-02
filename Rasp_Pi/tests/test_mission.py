@@ -15,12 +15,12 @@ CONFIG = {"follow": {"confirm_frames": 3, "confirm_s": 2.5, "lost_s": 4.0, "repo
           "return": {"arrive_radius_m": 3.0, "fence_margin_m": 2.0}}
 
 
-def snap(t, at=BOAT, people=(), shore_ok=True, home=None, presses=-1, fix=3, yaw=0.0, battery=-1, ret=False):
+def snap(t, at=BOAT, people=(), shore_ok=True, home=None, presses=-1, fix=3, yaw=0.0, battery=-1, ret=False, skips=()):
     """people: (bearing from the bow, distance, risk) seen in a detector pass at t."""
     targets = tuple(HumanTarget(bearing, distance, 0.6, t, risk) for bearing, distance, risk in people)
     return Snapshot(ImuState(yaw_deg=yaw, imu_ok=True, timestamp=t), GpsState(*at, fix=fix, timestamp=t),
                     SysState(timestamp=t, confirm_presses=presses, battery_pct=battery), (), t, None, targets[0] if targets else None,
-                    human_targets=targets, link=LinkState(shore_ok, 1.0 if shore_ok else 75.0, home, t, ret=ret))
+                    human_targets=targets, link=LinkState(shore_ok, 1.0 if shore_ok else 75.0, home, t, ret=ret), skips=skips)
 
 
 class MissionTest(unittest.TestCase):
@@ -98,6 +98,35 @@ class MissionTest(unittest.TestCase):
         self.assertEqual(self.mission.state, PATROL)
         # Somebody else, elsewhere: followed.
         self.run_steps((6.6, 7.4, 8.2), people=[(-60.0, 6.0, MEDIUM)], presses=1)
+        self.assertEqual(self.mission.state, FOLLOW)
+
+    def test_a_person_another_boat_looks_after_is_left_alone(self):
+        # docs/victim-claim.md: the station says ($SKP) another boat has the person 5 m off the bow.
+        self.give_route(WP1, WP2)
+        theirs = offset_latlon(*BOAT, 20.0, 5.0)
+        claim = ((theirs[0], theirs[1], 0.5),)
+        step, reports = self.run_steps((0.0, 0.8, 1.6, 2.4), people=[(20.0, 5.0, HIGH)], skips=claim)
+        self.assertEqual(self.mission.state, PATROL)       # not followed
+        self.assertEqual(reports, [])                      # nor reported again
+        self.assertEqual(step.planned.waypoint, WP1)
+        # Somebody 30 m off is anybody's: followed and reported.
+        _, reports = self.run_steps((3.2, 4.0, 4.8), people=[(-60.0, 6.0, MEDIUM)], skips=claim)
+        self.assertEqual(self.mission.state, FOLLOW)
+        self.assertEqual(len(reports), 1)
+
+    def test_following_a_person_another_boat_claimed_goes_on_with_the_route(self):
+        self.give_route(WP1, WP2)
+        person = [(20.0, 5.0, HIGH)]
+        _, reports = self.run_steps((0.0, 0.8, 1.6), people=person)
+        self.assertEqual(self.mission.state, FOLLOW)       # reported first: this boat's own
+        self.assertEqual(len(reports), 1)
+        # The station: the other boat reported them first after all.
+        theirs = offset_latlon(*BOAT, 20.0, 5.0)
+        step = self.mission.step(snap(2.4, people=person, skips=((theirs[0], theirs[1], 2.3),)), 2.4)
+        self.assertEqual(self.mission.state, PATROL)
+        self.assertIsNone(step.planned.human_target)
+        # claim_ttl_s (120 s) after the station last named them, they are anybody's again.
+        self.run_steps((130.0, 130.8, 131.6), people=person, skips=((theirs[0], theirs[1], 2.3),))
         self.assertEqual(self.mission.state, FOLLOW)
 
     def test_three_minutes_with_a_person_and_no_press_is_patrol_again(self):

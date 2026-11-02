@@ -13,7 +13,13 @@ const PERSIST_MS = 5000;
 const EMPTY_MISSION = { rev: 0, waypoints: [], poly: [], spacing: 10, angle: null, speed: 1.5 };
 const MAX_VICTIMS = 200;
 const MAX_ALERTS = 50;
-const VICTIM_MERGE_M = 5;              // phát hiện mới cách chấm cũ của cùng phao dưới 5 m: cùng một người
+// Một người, một phao (docs/victim-claim.md): báo cáo của mọi phao cách nhau dưới CLAIM_M là cùng một người
+// (hoặc một nhóm), phao báo đầu tiên là chủ. Trạm ESP32 phân xử ngay trong ACK; Hub giữ sổ và lời của admin.
+const CLAIM_M = 6;
+const CONFIRM_M = 10;                  // nút xác nhận của chủ cách người dưới chừng này: người đã được cứu
+const CLAIM_KEEP_MS = { claimed: 10 * 60 * 1000, rescued: 30 * 60 * 1000, released: 2 * 60 * 1000 };
+const CLAIMS_DOWN_MAX = 16;            // người gửi xuống trạm trong "claims", mới nhất trước
+const CLAIM_CODE = { released: 0, claimed: 1, rescued: 2 };
 const EVENT_DEDUP_MS = 10 * 60 * 1000; // phao gửi lặp sự kiện tới khi trạm ACK; phao khởi động lại thì seq đếm lại
 const MAX_SEEN = 64;                   // số sự kiện gần nhất nhớ cho mỗi phao để bỏ bản lặp
 const LOST_MS = 30 * 1000;             // phao im quá lâu này: cảnh báo mất liên lạc (beacon 5-8 s một lần)
@@ -192,6 +198,7 @@ export class Hub extends DurableObject {
     }
     if (changed) {
       await this.ctx.storage.put("lost", lost);
+      for (const id of Object.keys(lost)) if (lost[id] === now) await this.releaseClaims(id, now);
       await this.electLeader(now);
     }
   }
@@ -320,8 +327,10 @@ export class Hub extends DurableObject {
     await this.ctx.storage.put("ret", all);
     const m = await this.retMessage(id);
     this.broadcast(m);
-    if (want) await this.setTask(id, "return");
-    else await this.routeTask(id);
+    if (want) {
+      await this.releaseClaims(id, Date.now());
+      await this.setTask(id, "return");
+    } else await this.routeTask(id);
     return m;
   }
 
@@ -370,6 +379,49 @@ export class Hub extends DurableObject {
     return { type: "hold", id, want: h ? h.want : null, have: have === undefined ? null : have === 1, by: h?.by ?? null, at: h?.at ?? null };
   }
 
+  // Nhiệm vụ của phao khi xong việc với một người: chỗ trong đội hình nếu nó đang ở đó, không thì lộ trình
+  async restoreTask(id) {
+    const f = await this.loadFormation();
+    if (f && f.leader === id) await this.setTask(id, "formation", { role: "leader", n: f.route.length });
+    else if (f?.members[id]) await this.setTask(id, "formation", { role: "follower", leader: f.leader, ...f.members[id] });
+    else await this.routeTask(id);
+  }
+
+  // Đổi trạng thái một người (claimed / rescued / released) và chủ; cập nhật sổ nhiệm vụ của các phao.
+  async setClaim(v, status, owner, now, by = null) {
+    const before = v.owner;
+    v.status = status;
+    v.owner = owner;
+    v.status_at = now;
+    if (by) v.status_by = by;
+    if (status === "claimed") await this.setTask(owner, "victim", { vid: v.vid });
+    if (before && (before !== owner || status !== "claimed") && (await this.loadTasks())[before]?.ref?.vid === v.vid) {
+      await this.restoreTask(before);
+    }
+  }
+
+  // Nhả mọi người phao id đang giữ (phao mất liên lạc, bị gọi về bờ): phao khác thấy họ sẽ nhận
+  async releaseClaims(id, now) {
+    const ev = await this.loadEvents();
+    const mine = ev.victims.filter(v => v.status === "claimed" && v.owner === id);
+    for (const v of mine) {
+      await this.setClaim(v, "released", null, now);
+      this.broadcast({ type: "victim", victim: v, new: false });
+    }
+    if (mine.length) await this.ctx.storage.put("events", ev);
+    return mine.length;
+  }
+
+  // Người gửi xuống trạm: [lat, lon, chủ, 1 có chủ | 2 đã cứu | 0 nhả], còn hiệu lực, mới nhất trước
+  async claimsForStation(now) {
+    const ev = await this.loadEvents();
+    return ev.victims
+      .filter(v => v.status && now - (v.status === "claimed" ? Math.max(v.last_at, v.status_at) : v.status_at) < CLAIM_KEEP_MS[v.status])
+      .sort((a, b) => b.status_at - a.status_at)
+      .slice(0, CLAIMS_DOWN_MAX)
+      .map(v => [v.lat, v.lon, v.owner || "", CLAIM_CODE[v.status]]);
+  }
+
   // Ghi một sự kiện mới; trả về false nếu là bản phao gửi lặp
   async recordEvent(id, e, now) {
     const ev = await this.loadEvents();
@@ -378,16 +430,26 @@ export class Hub extends DurableObject {
     seen.push({ seq: e.seq, type: e.type, t: now });
     if (seen.length > MAX_SEEN) seen.splice(0, seen.length - MAX_SEEN);
 
-    let out;
+    let out, rescued = null;
     if (e.type === "V" && e.lat !== null) {
-      // Cùng phao báo lại gần chỗ cũ: cập nhật chấm cũ thay vì thêm chấm mới
-      let v = ev.victims.find(x => x.buoy === id && distM(x, e) < VICTIM_MERGE_M);
+      // Báo gần một người đã có (phao nào báo cũng vậy): cùng một người, không thêm chấm mới.
+      // Phao báo đầu tiên là chủ; người đã nhả thì phao báo kế tiếp nhận.
+      let v = ev.victims.reduce((best, x) => {
+        const d = distM(x, e);
+        return d < CLAIM_M && (!best || d < best.d) ? { x, d } : best;
+      }, null)?.x;
       const isNew = !v;
-      if (v) Object.assign(v, { risk: e.risk, conf: e.conf, last_at: now });
-      else {
-        v = { vid: ++ev.vid, buoy: id, lat: e.lat, lon: e.lon, risk: e.risk, conf: e.conf, first_at: now, last_at: now };
+      if (v) {
+        v.seen_by ??= [v.buoy];
+        if (!v.seen_by.includes(id)) v.seen_by.push(id);
+        if (id === (v.owner ?? v.buoy)) Object.assign(v, { risk: e.risk, conf: e.conf });
+        v.last_at = now;
+        if (!v.status || v.status === "released") await this.setClaim(v, "claimed", id, now);
+      } else {
+        v = { vid: ++ev.vid, buoy: id, lat: e.lat, lon: e.lon, risk: e.risk, conf: e.conf, first_at: now, last_at: now, seen_by: [id] };
         ev.victims.push(v);
         if (ev.victims.length > MAX_VICTIMS) ev.victims.splice(0, ev.victims.length - MAX_VICTIMS);
+        await this.setClaim(v, "claimed", id, now);
       }
       out = { type: "victim", victim: v, new: isNew };
     } else {
@@ -397,9 +459,21 @@ export class Hub extends DurableObject {
       ev.alerts.push(alert);
       if (ev.alerts.length > MAX_ALERTS) ev.alerts.splice(0, ev.alerts.length - MAX_ALERTS);
       out = { type: "alert", alert };
+      // Nút xác nhận của chủ cạnh người của nó (người nó nhận gần nhất khi không có GPS): đã cứu
+      if (e.type === "C") {
+        const mine = ev.victims.filter(v => v.status === "claimed" && v.owner === id);
+        const v = e.lat !== null
+          ? mine.filter(x => distM(x, e) < CONFIRM_M).sort((a, b) => distM(a, e) - distM(b, e))[0]
+          : mine.sort((a, b) => b.status_at - a.status_at)[0];
+        if (v) {
+          await this.setClaim(v, "rescued", id, now);
+          rescued = v;
+        }
+      }
     }
     await this.ctx.storage.put("events", ev);
     this.broadcast(out);
+    if (rescued) this.broadcast({ type: "victim", victim: rescued, new: false });
     return true;
   }
 
@@ -483,6 +557,9 @@ export class Hub extends DurableObject {
         if (f && Object.keys(f.members).length) {
           out.fol = Object.fromEntries(Object.entries(f.members).map(([id, m]) => [id, [f.leader, m.right, m.back]]));
         }
+        // Nhận nạn nhân: lời của Hub (và của admin) về từng người; trạm sửa bảng phân xử của nó theo đó
+        const claims = await this.claimsForStation(now);
+        if (claims.length) out.claims = claims;
         return json(out);
       }
       if (request.method === "PUT") {
@@ -570,6 +647,27 @@ export class Hub extends DurableObject {
         if (action === "resume" && (await this.loadRet())[id]?.want) await this.setRet(id, false, by);
       }
       return json({ action, ids: targets });
+    }
+
+    // Admin về một người: { vid, action: rescued | release | assign, id?, by }. assign: giao cho phao id và gửi
+    // cho nó lộ trình một điểm tới chỗ người đó (docs/victim-claim.md).
+    if (url.pathname === "/victim" && request.method === "PUT") {
+      const { vid, action, id, by } = await request.json();
+      const ev = await this.loadEvents();
+      const v = ev.victims.find(x => x.vid === vid);
+      if (!v) return json({ error: "no such person" }, 404);
+      const now = Date.now();
+      if (action === "rescued") await this.setClaim(v, "rescued", v.owner, now, by);
+      else if (action === "release") await this.setClaim(v, "released", null, now, by);
+      else if (action === "assign" && id) {
+        if ((await this.loadFormation())?.members[id]) await this.leaveFormation([id], by);
+        await this.sendRoute(id, [[v.lat, v.lon]], false, null, by);
+        await this.setClaim(v, "claimed", id, now, by);
+      } else return json({ error: "bad request" }, 400);
+      await this.ctx.storage.put("events", ev);
+      const m = { type: "victim", victim: v, new: false };
+      this.broadcast(m);
+      return json(m);
     }
 
     if (url.pathname === "/victims") {

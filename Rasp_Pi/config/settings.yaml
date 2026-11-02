@@ -264,6 +264,11 @@ follow:
   # stay. 0: stay as long as they are in view.
   max_hold_s: 180.0
   hold_ignore_s: 600.0
+  # One person, one boat (docs/victim-claim.md): the shore station gives each person to the first boat
+  # that reported them and tells the others ($SKP). Nobody within claim_radius_m of such a person is
+  # followed or reported, for claim_ttl_s after the station last named them.
+  claim_ttl_s: 120.0
+  claim_radius_m: 6.0
 # STM32 boat (main.py) only: no word from the shore station (the F407's $LNK shore_ok 0, after 60 s)
 # sends the boat home (RETURN), to the station's GPS position; a station outside the geofence is
 # brought fence_margin_m inside it. Within arrive_radius_m the boat holds (HOME_HOLD).

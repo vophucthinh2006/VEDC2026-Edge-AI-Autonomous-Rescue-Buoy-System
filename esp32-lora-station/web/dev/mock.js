@@ -25,7 +25,9 @@
 
   // Người phát hiện, cảnh báo, đèn: giống bản tin máy chủ thật (đã bỏ bản phao gửi lặp, gộp phát hiện cách nhau dưới 5 m)
   let vid = 0;
-  const victim = (buoy, risk, lat, lon, conf, agoS) => ({ vid: ++vid, buoy, lat, lon, risk, conf, first_at: now() - agoS * 1000, last_at: now() - agoS * 400 });
+  const victim = (buoy, risk, lat, lon, conf, agoS, seen = [buoy]) => ({ vid: ++vid, buoy, lat, lon, risk, conf, first_at: now() - agoS * 1000,
+    last_at: now() - agoS * 400, owner: buoy, status: 'claimed', status_at: now() - agoS * 1000, seen_by: seen });
+  const people = new Map();   // vid -> người, cho các lệnh của admin (docs/victim-claim.md)
   const lights = { want: 1, have: 1, applyAt: 0 };   // PHAO-01: đèn 1 đang bật
   const holds = { 'PHAO-01': { want: false, have: false, applyAt: 0 }, 'PHAO-04': { want: true, have: true, applyAt: 0 } };
   // Route held by each buoy: { rev, n, have, pi }. PHAO-01 already runs rev 1, PHAO-04 was stopped on rev 1
@@ -96,7 +98,10 @@
         });
         send({ type: 'downlink', ...dl });
         // Đã có hai người từ trước (mức an toàn và trung bình), đèn 1 của PHAO-01 đang bật
-        send({ type: 'victims', alerts: [], victims: [victim('PHAO-01', 0, 10.7652, 106.6589, 0.71, 400), victim('PHAO-02', 1, 10.7729, 106.6672, 0.64, 250)] });
+        // Người thứ hai: PHAO-02 thấy trước, PHAO-03 cũng thấy và đi tiếp (nhận nạn nhân)
+        const start = [victim('PHAO-01', 0, 10.7652, 106.6589, 0.71, 400), victim('PHAO-02', 1, 10.7729, 106.6672, 0.64, 250, ['PHAO-02', 'PHAO-03'])];
+        for (const v of start) people.set(v.vid, v);
+        send({ type: 'victims', alerts: [], victims: start });
         send({ type: 'lights', id: 'PHAO-01', want: lights.want, have: lights.have, by: 'mliotredgescue@gmail.com', at: now() - 600000 });
         for (const [id, h] of Object.entries(holds)) send({ type: 'hold', id, want: h.want, have: h.have, at: now() - 300000 });
         window.mockServer = {
@@ -117,7 +122,16 @@
             send({ type: 'downlink', ...dl });
             routes[id] = { rev: dl.rev, n: count, have: 0, pi: 0 };
           },
-          clearVictims() { send({ type: 'victims', victims: [], alerts: [] }); },
+          clearVictims() { people.clear(); send({ type: 'victims', victims: [], alerts: [] }); },
+          victimAction(vid, action, id) {
+            const v = people.get(vid);
+            if (!v) return;
+            if (action === 'rescued') Object.assign(v, { status: 'rescued' });
+            if (action === 'release') Object.assign(v, { status: 'released', owner: null });
+            if (action === 'assign') Object.assign(v, { status: 'claimed', owner: id });
+            Object.assign(v, { status_at: now(), status_by: 'mock@local' });
+            send({ type: 'victim', victim: { ...v }, new: false });
+          },
           // Đội tàu (js/features/fleet.js): về bờ, lệnh cả đội, kế hoạch (một kế hoạch thô: mỗi phao một đường chéo vùng)
           setReturn(id, ret) {
             send({ type: 'ret', id, want: ret, have: null, at: now() });

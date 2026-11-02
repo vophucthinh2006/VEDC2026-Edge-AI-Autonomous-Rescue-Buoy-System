@@ -72,6 +72,13 @@ class Stm32LinesTest(unittest.TestCase):
         self.assertIsNone(snap.link.follow)
         self.assertIsNone(snap.leader)
 
+    def test_skp_brings_the_people_to_leave_alone(self):
+        self.feed("SKP", 1, "10.762600", "106.660100")
+        self.feed("SKP", 2, "10.762700", "-106.660200")
+        self.feed("SKP", 3, "10.762600", "106.660100")      # named again: made newer, not twice
+        skips = self.state.snapshot().skips
+        self.assertEqual([(s[0], s[1]) for s in skips], [(10.7627, -106.6602), (10.7626, 106.6601)])
+
     def test_lnk_home_valid_0_ignores_any_position(self):
         self.feed("LNK", 6, 0, "75.0", 0, "10.762600", "106.660100")
         self.assertIsNone(self.state.snapshot().link.home)

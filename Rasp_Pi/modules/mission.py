@@ -21,6 +21,10 @@ FORMATION  the shore station put the boat in a formation ($FOL, docs/fleet-contr
            it keeps its place beside the leader, whose beacons the F407 hears ($LDR; modules/formation.py),
            the camera sweeping and people followed as on PATROL, then back to its place. The leader
            not heard for formation.leader_stale_s: stand still.
+CLAIMS     not a state: the shore station gives each person to the first boat that reported them ($SKP,
+           docs/victim-claim.md). Within follow.claim_radius_m of a person another boat looks after (or
+           rescued), for follow.claim_ttl_s after the station last named them, nobody is followed or
+           reported; a boat following such a person leaves them and goes on.
            When the shore link comes back, RETURN and HOME_HOLD go back to PATROL at the waypoint
            the boat was going to (the Route is kept), or to IDLE without one.
 
@@ -103,7 +107,9 @@ class Reporter:
         self._reported: list[tuple[tuple[float, float] | None, float, float]] = []   # position, compass bearing, when
         self._frame = float("-inf")   # timestamp of the last detector pass taken
 
-    def observe(self, snap: Snapshot, now: float) -> list[Report]:
+    def observe(self, snap: Snapshot, now: float, claimed: tuple[tuple[float, float], ...] = (),
+                claim_m: float = 6.0) -> list[Report]:
+        """claimed: people another boat looks after (docs/victim-claim.md), not reported again."""
         fresh = [t for t in snap.human_targets if t.timestamp > self._frame]
         if fresh:
             self._frame = max(t.timestamp for t in fresh)
@@ -130,6 +136,8 @@ class Reporter:
             position = _reckon(snap, track.world_deg, track.distance_m)
             if any(_same(snap, position, track.world_deg, p, w, self.dedup_m, self.gate_deg) for p, w, _ in self._reported):
                 continue
+            if position is not None and any(haversine_m(*position, *c) <= claim_m for c in claimed):
+                continue
             self._reported.append((position, track.world_deg, now))
             lat, lon = position if position is not None else (0.0, 0.0)
             reports.append(Report(lat, lon, track.confidence, track.risk, "found"))
@@ -150,6 +158,8 @@ class Mission:
         self.ignore_m = float(follow.get("ignore_radius_m", 5.0))
         self.max_hold_s = float(follow.get("max_hold_s", 0.0))         # 0: as long as they are in view
         self.hold_ignore_s = float(follow.get("hold_ignore_s", 600.0))
+        self.claim_ttl_s = float(follow.get("claim_ttl_s", 120.0))
+        self.claim_m = float(follow.get("claim_radius_m", 6.0))
         self.arrive_m = float(back.get("arrive_radius_m", 3.0))
         self.margin_m = float(back.get("fence_margin_m", 2.0))
         # A pack below battery_low_pct takes the boat home, whatever it was doing, until it reads
@@ -168,6 +178,9 @@ class Mission:
         self._start_pending = True
         self._presses = -1
         self._ignored: list[tuple[float, tuple[float, float] | None, float]] = []   # until, position, compass bearing
+        # People another boat looks after ($SKP): position -> until; _skip_seen: the newest $SKP taken
+        self._claimed: dict[tuple[float, float], float] = {}
+        self._skip_seen = float("-inf")
         self._risk = 0                     # the followed person's risk last reported
         self._risk_new, self._risk_count, self._risk_seen = 0, 0, 0.0
         self._report_at = 0.0
@@ -220,7 +233,12 @@ class Mission:
         fix = snap.gps.fix >= 2
         role = snap.link.follow
         self.in_formation = role is not None
-        reports = self.reporter.observe(snap, now)
+        for lat, lon, heard in snap.skips:
+            if heard > self._skip_seen:
+                self._claimed[(lat, lon)] = now + self.claim_ttl_s
+        self._skip_seen = max((s[2] for s in snap.skips), default=self._skip_seen)
+        self._claimed = {p: until for p, until in self._claimed.items() if until > now}
+        reports = self.reporter.observe(snap, now, tuple(self._claimed), self.claim_m)
         if snap.link.home is not None:
             self.home = snap.link.home
         if self._start_pending and fix and self.route.waypoints:
@@ -277,6 +295,10 @@ class Mission:
             self._ignored.append((now + self.ignore_s, self.follow.position(snap), self.follow.world_deg))
             self.follow.stand_by(snap)
             self._enter(self._base(), f"supplies taken: that person is left alone for {self.ignore_s:.0f} s")
+        if self.state == FOLLOW and self._is_claimed(self.follow.position(snap)):
+            self.follow.stand_by(snap)
+            self._hold = None
+            self._enter(self._base(), f"another boat looks after that person (shore station): {self.route.describe()}")
         if role is not None and waypoint is None:
             self._enter(FORMATION, f"in formation behind {role[0]}, not heard: standing still")
             return Step(self.follow.stand_by(snap), reports, supplies)
@@ -323,10 +345,14 @@ class Mission:
         self._presses = presses
         return rose
 
+    def _is_claimed(self, position: tuple[float, float] | None) -> bool:
+        """Within claim_m of a person another boat looks after, or rescued (docs/victim-claim.md)."""
+        return position is not None and any(haversine_m(*position, *c) <= self.claim_m for c in self._claimed)
+
     def _ignored_target(self, snap: Snapshot, target: HumanTarget) -> bool:
         world = (snap.imu.yaw_deg + target.bearing_body_deg) % 360.0
         position = _reckon(snap, world, target.distance_m)
-        return any(_same(snap, position, world, p, w, self.ignore_m, 15.0) for _, p, w in self._ignored)
+        return self._is_claimed(position) or any(_same(snap, position, world, p, w, self.ignore_m, 15.0) for _, p, w in self._ignored)
 
     def _pick(self, snap: Snapshot) -> HumanTarget | None:
         """Who to follow: never somebody on a boat or left alone after taking the supplies; the

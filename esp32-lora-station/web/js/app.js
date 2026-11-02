@@ -658,6 +658,16 @@ async function clearVictims() {
   } catch { toast('Mất kết nối, chưa xoá được'); }
 }
 
+// Admin về một người (docs/victim-claim.md): đã cứu, nhả, giao cho một phao
+async function victimAction(vid, action, id) {
+  if (MOCK) { window.mockServer?.victimAction(vid, action, id); return; }
+  try {
+    const res = await jsonPost(`/api/victims/${vid}`, { action, id });
+    if (res.ok) onVictimMessage(await res.json());
+    else toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Máy chủ từ chối lệnh');
+  } catch { toast('Mất kết nối, chưa gửi được lệnh'); }
+}
+
 // ================= ĐĂNG NHẬP =================
 const jsonPost = (path, body) => fetch(path, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
@@ -733,7 +743,7 @@ async function boot() {
   $('map').classList.add('dark');
   initTimeline();
   initTelemetry({ toast, routeLine: routeProgress, routeAhead });
-  initVictims(map, { toast, onClear: clearVictims });
+  initVictims(map, { toast, onClear: clearVictims, onVictimAction: victimAction });
   initLights({ onSet: sendLights });
   initHold({ onSet: sendHold });
   initSearch(map, { onShowBuoy: showBuoy, onOpen: () => setSheet(true) });   // phone: give the results the whole map

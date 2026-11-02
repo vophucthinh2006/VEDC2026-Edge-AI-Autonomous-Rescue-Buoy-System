@@ -57,6 +57,14 @@ typedef struct {
 size_t RouteDownlink_Ack(const char *id, uint16_t eseq, uint8_t cmd, bool has_position, double lat, double lon,
                          const formation_role_t *role, char *buf, size_t size);
 
+/* The same ACK with a person to leave alone (docs/victim-claim.md: another boat looks after them, or they
+ * are rescued), eleven fields:
+ *     ACK,<id>,<eseq>,<cmd>,<lat>,<lon>,<leader>,<right_m>,<back_m>,<skip_lat>,<skip_lon>*CS
+ * the three formation fields empty outside a formation. has_skip false: the frame of RouteDownlink_Ack. */
+size_t RouteDownlink_AckSkip(const char *id, uint16_t eseq, uint8_t cmd, bool has_position, double lat, double lon,
+                             const formation_role_t *role, bool has_skip, double skip_lat, double skip_lon,
+                             char *buf, size_t size);
+
 /* The route among routes[count] that is for buoy id, or NULL. */
 const route_downlink_t *RouteDownlink_Find(const route_downlink_t *routes, size_t count, const char *id);
 
