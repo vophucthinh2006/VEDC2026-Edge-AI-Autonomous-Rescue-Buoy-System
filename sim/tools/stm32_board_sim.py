@@ -452,6 +452,12 @@ class Board:
             # or when the admin calls it home; and its place in a formation, if it sails in one.
             self.send(fd, "LNK", self.lora.shore.pi_line(seq, int(now * 1000)))
             self.send(fd, "FOL", self.lora.shore.follow_line(seq))
+        if self.lora is not None:
+            # A person another boat looks after (docs/victim-claim.md): once, as the F407 does
+            skip = self.lora.shore.skip_line(seq)
+            if skip is not None:
+                self.send(fd, "SKP", skip)
+                self.event(f"SKP {skip}: another boat looks after that person")
         if now >= self.next_track:
             self.next_track = now + 1.0
             follow = self.lora.shore.follow if self.lora is not None else None

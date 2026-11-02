@@ -10,6 +10,8 @@
 #   --boats=      how many boats, 1..4 (default 3): PHAO-01 .. PHAO-0n
 #   --world=      central (default), lake, flood, village, two
 #   --no-tdma     every boat beacons on its own clock, as a lone boat does (the channel then loses frames)
+#   --no-claims   the station tells no boat to leave a person alone (docs/victim-claim.md): every boat stays
+#                 with every person it sees, as before the claims
 #   --vision=     all (default): every boat runs the detector; first: only PHAO-01, the others main.py --no-camera
 #   --viewer      main.py's viewer for each boat, http://127.0.0.1:8090 + n - 1
 #   --run=        where everything goes (default ~/vedc_sim/fleet_run): boat_n/{pi.log,stm32_sim.log,track.csv,...},
@@ -26,13 +28,14 @@ export GZ_PARTITION=vedc_fleet
 [ -n "$VEDC_INGEST_TOKEN" ] || { echo "set VEDC_INGEST_TOKEN to the Worker's INGEST_TOKEN" >&2; exit 2; }
 CLOUD="${VEDC_CLOUD_URL:-http://127.0.0.1:8787}"
 
-BOATS=3 WORLD=central HEADLESS=0 TDMA=1 VISION=all VIEWER=0 RUN="$SIM_DIR/fleet_run" DURATION="" HOLD=""
+BOATS=3 WORLD=central HEADLESS=0 TDMA=1 CLAIMS=1 VISION=all VIEWER=0 RUN="$SIM_DIR/fleet_run" DURATION="" HOLD=""
 for arg in "$@"; do
     case "$arg" in
         --boats=*)    BOATS="${arg#--boats=}" ;;
         --world=*)    WORLD="${arg#--world=}" ;;
         --headless)   HEADLESS=1 ;;
         --no-tdma)    TDMA=0 ;;
+        --no-claims)  CLAIMS=0 ;;
         --vision=*)   VISION="${arg#--vision=}" ;;
         --viewer)     VIEWER=1 ;;
         --run=*)      RUN="${arg#--run=}" ;;
@@ -122,10 +125,12 @@ sleep 3
 gcc -std=c11 -O1 -Wall -shared -fPIC -I"$REPO/STM32F4/App" -I"$REPO/esp32-lora-station/main" \
     "$VEDC_SIM_REPO/tools/route_radio_shim.c" "$REPO/STM32F4/App/route_link.c" "$REPO/STM32F4/App/shore_link.c" \
     "$REPO/STM32F4/App/event_queue.c" "$REPO/STM32F4/App/lora_slot.c" "$REPO/esp32-lora-station/main/route_downlink.c" \
-    "$REPO/esp32-lora-station/main/lora_payload.c" -lm -o "$RUN/librouteradio.so" || exit 1
+    "$REPO/esp32-lora-station/main/lora_payload.c" "$REPO/esp32-lora-station/main/victim_claims.c" -lm -o "$RUN/librouteradio.so" || exit 1
 
+STATION_ARGS=()
+[ "$CLAIMS" = 1 ] || STATION_ARGS+=(--no-claims)
 python3 -u "$VEDC_SIM_REPO/tools/shore_station_sim.py" --radio-lib "$RUN/librouteradio.so" --cloud "$CLOUD" --collisions \
-    --dir "$RUN" --station-pos "$VEDC_STATION_POS" > "$RUN/station_sim.log" 2>&1 &
+    --dir "$RUN" --station-pos "$VEDC_STATION_POS" "${STATION_ARGS[@]}" > "$RUN/station_sim.log" 2>&1 &
 PIDS="$PIDS $!"
 
 BOARD_ARGS=(--collisions)

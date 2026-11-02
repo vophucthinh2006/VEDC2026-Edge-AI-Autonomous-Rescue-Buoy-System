@@ -39,7 +39,7 @@ import urllib.request
 from pathlib import Path
 
 from helper_board_sim import post, station_json
-from lora_radio import BEACON_PORT, Air, StationRoute, airtime_s
+from lora_radio import BEACON_PORT, Air, StationClaims, StationRoute, airtime_s
 
 POLL_S = 5.0                 # DOWNLINK_POLL_MS
 TURNAROUND_S = 0.05          # LORA_TURNAROUND_MS
@@ -145,6 +145,8 @@ def main() -> int:
     parser.add_argument("--dir", type=Path, default=Path("."), help="where station_off and lights are looked for")
     parser.add_argument("--station-pos", help="lat,lon of the station's GPS, sent in every ACK; none: no fix")
     parser.add_argument("--collisions", action="store_true", help="lose frames that overlap on the shared channel (a fleet)")
+    parser.add_argument("--no-claims", action="store_true",
+                        help="no victim claims (docs/victim-claim.md): every boat stays with every person it sees, as before")
     args = parser.parse_args()
     station_pos = tuple(float(v) for v in args.station_pos.split(",")[:2]) if args.station_pos else None
     token = os.environ.get("VEDC_INGEST_TOKEN", "")
@@ -156,6 +158,10 @@ def main() -> int:
     lights: dict[str, int] = {}
     homes: dict[str, tuple[float, float]] = {}
     roles: dict[str, tuple[str, int, int]] = {}
+    claims = StationClaims(args.radio_lib)    # main.c: who looks after each person
+
+    def now_ms() -> int:
+        return int(time.monotonic() * 1000)
 
     def poll() -> None:
         file_rev, file_mtime = 0, None
@@ -187,6 +193,15 @@ def main() -> int:
                             log(f"formation: {buoy} keeps {role[1]} m right, {role[2]} m back of {role[0]}")
                     homes.clear(), homes.update(new_homes)
                     roles.clear(), roles.update(new_roles)
+                    # The Hub's word on each person (admin: rescued, let go), and the boats called home let go
+                    for c in data.get("claims", []) if isinstance(data.get("claims"), list) else []:
+                        try:
+                            claims.set(float(c[0]), float(c[1]), str(c[2]), int(c[3]), now_ms())
+                        except (TypeError, ValueError, IndexError):
+                            pass
+                    for buoy, mask in lights.items():
+                        if mask & 8:
+                            claims.release(buoy)
             if data is not None and (not args.route_file or int(data.get("rev", 0))):
                 kept: dict[str, StationRoute] = {}
                 for r in cloud_routes(data):
@@ -236,10 +251,12 @@ def main() -> int:
         time.sleep(TURNAROUND_S + airtime_s(len(frame)))   # arrives when it is off the air
         air.send(frame)
 
-    def ack(buoy: str, eseq: int) -> bytes:
-        """main.c tra_loi_phao: the command, the boat's own parking spot (else the station), its formation."""
+    def ack(buoy: str, eseq: int, verdict: int | None = None, position: tuple[float, float] | None = None) -> bytes:
+        """main.c tra_loi_phao: the command, the boat's own parking spot (else the station), its formation, and
+        a person to leave alone: the verdict on the person just reported first, else in turn those near the boat."""
         with lock:
-            return builder.ack(buoy, eseq, lights.get(buoy, 0), homes.get(buoy, station_pos), roles.get(buoy))
+            skip = None if args.no_claims else claims.skip_for(buoy, verdict, position, now_ms())
+            return builder.ack(buoy, eseq, lights.get(buoy, 0), homes.get(buoy, station_pos), roles.get(buoy), skip)
 
     def serve(data: bytes) -> None:
         if (args.dir / "station_off").exists():
@@ -254,7 +271,18 @@ def main() -> int:
             if args.cloud:
                 body = {"id": buoy, "rssi": -72, "snr": 9.5, "raw": raw[:99], "event": group}
                 threading.Thread(target=post, args=(args.cloud.rstrip("/") + "/api/ingest", token, body), daemon=True).start()
-            frame = ack(buoy, group["seq"])
+            at = (group["lat"], group["lon"]) if group.get("lat") is not None and group.get("lon") is not None else None
+            verdict = None
+            if not args.no_claims and at is not None:
+                with lock:
+                    if group.get("type") == "V":
+                        verdict = claims.report(buoy, at[0], at[1], now_ms())
+                        owner = StationClaims.owner(verdict)
+                        if owner and owner[1] != buoy:
+                            log(f"claims: {buoy} reported a person {'already rescued' if owner[0] == StationClaims.RESCUED else owner[1] + ' looks after'}: told to go on")
+                    elif group.get("type") == "C" and claims.confirm(buoy, at, now_ms()):
+                        log(f"claims: {buoy}'s confirm button: its person is rescued")
+            frame = ack(buoy, group["seq"], verdict, at)
             answer(frame)
             log(f"event {group}: sent {frame.decode()}")
             return
@@ -289,7 +317,8 @@ def main() -> int:
             right = body.get("lights", want & 3) == want & 3 and body.get("hold", (want >> 2) & 1) == (want >> 2) & 1
             frame = route.frame(buoy, w) if right and route is not None else b""
         if not frame:
-            frame = ack(buoy, 0)
+            at = (body["lat"], body["lon"]) if body.get("lat") is not None and body.get("lon") is not None else None
+            frame = ack(buoy, 0, None, at)
         answer(frame)
         log(f"beacon {buoy} w={w} L={body.get('lights', '-')}: sent {frame.decode()}")
 

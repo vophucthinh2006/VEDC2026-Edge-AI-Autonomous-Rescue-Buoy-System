@@ -59,6 +59,7 @@ start_stm32_standins() {
         "$VEDC_SIM_REPO/tools/route_radio_shim.c" "$repo/STM32F4/App/route_link.c" \
         "$repo/STM32F4/App/shore_link.c" "$repo/STM32F4/App/event_queue.c" "$repo/STM32F4/App/lora_slot.c" \
         "$repo/esp32-lora-station/main/route_downlink.c" "$repo/esp32-lora-station/main/lora_payload.c" \
+        "$repo/esp32-lora-station/main/victim_claims.c" \
         -lm -o "$run/librouteradio.so" || return 1
     if [ -n "$VEDC_ROUTE_FILE" ]; then
         station_args=(--route-file "$VEDC_ROUTE_FILE")
