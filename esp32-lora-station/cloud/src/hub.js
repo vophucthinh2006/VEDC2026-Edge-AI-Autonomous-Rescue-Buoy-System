@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { json } from "./util.js";
 import { Geocoder } from "./geocode.js";
+import { formationOffsets, planFormation, planSectors } from "./fleetplan.js";
 
 const MAX_BUOYS = 50;
 const MAX_HISTORY = 300;   // số mẫu RSSI/SNR/vị trí giữ cho mỗi phao
@@ -15,6 +16,42 @@ const MAX_ALERTS = 50;
 const VICTIM_MERGE_M = 5;              // phát hiện mới cách chấm cũ của cùng phao dưới 5 m: cùng một người
 const EVENT_DEDUP_MS = 10 * 60 * 1000; // phao gửi lặp sự kiện tới khi trạm ACK; phao khởi động lại thì seq đếm lại
 const MAX_SEEN = 64;                   // số sự kiện gần nhất nhớ cho mỗi phao để bỏ bản lặp
+const LOST_MS = 30 * 1000;             // phao im quá lâu này: cảnh báo mất liên lạc (beacon 5-8 s một lần)
+const LOST_WINDOW_MS = 60 * 60 * 1000; // phao im quá 1 giờ là phao của lần chạy cũ: không cảnh báo nữa
+const FLEET_RECENT_MS = 5 * 60 * 1000; // lệnh cả đội gửi cho các phao nghe được trong 5 phút gần nhất
+const HOME_SPACING_M = 8;              // khoảng cách giữa hai điểm đỗ cạnh nhau dọc bờ
+const HOME_AXIS_MOVE_M = 20;           // trạm dời xa hơn chừng này thì tính lại hướng ra nước
+
+// Điểm cách p một đoạn d mét theo hướng bearing (độ, la bàn); xấp xỉ phẳng, đủ cho vài chục mét
+function offsetM(p, bearing, d) {
+  const rad = Math.PI / 180;
+  const dn = d * Math.cos(bearing * rad), de = d * Math.sin(bearing * rad);
+  return { lat: p.lat + dn / 111320, lon: p.lon + de / (111320 * Math.cos(p.lat * rad)) };
+}
+
+function bearingDeg(a, b) {
+  const rad = Math.PI / 180;
+  const y = Math.sin((b.lon - a.lon) * rad) * Math.cos(b.lat * rad);
+  const x = Math.cos(a.lat * rad) * Math.sin(b.lat * rad) - Math.sin(a.lat * rad) * Math.cos(b.lat * rad) * Math.cos((b.lon - a.lon) * rad);
+  return (Math.atan2(y, x) / rad + 360) % 360;
+}
+
+// Ô đỗ của phao: PHAO-01 -> 0 (ngay tại trạm, như khi chỉ có một phao), PHAO-02 -> 1, ...
+export function homeSlot(id) {
+  const m = /(\d+)$/.exec(id);
+  if (m) return Math.max(0, parseInt(m[1], 10) - 1);
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 997;
+  return 8 + (h % 32);
+}
+
+// Ô k nằm trên đường dọc bờ qua trạm (vuông góc với hướng ra nước): 0 tại trạm, 1 bên phải 8 m, 2 bên trái
+// 8 m, 3 bên phải 16 m... để các phao về bờ đỗ cạnh nhau, không dồn vào một điểm.
+export function homePoint(station, waterBearing, slot) {
+  if (slot === 0) return { lat: station.lat, lon: station.lon };
+  const side = slot % 2 === 1 ? 90 : -90;
+  return offsetM(station, (waterBearing + side + 360) % 360, Math.ceil(slot / 2) * HOME_SPACING_M);
+}
 
 // Khoảng cách mặt đất (m) giữa hai điểm {lat, lon}
 function distM(a, b) {
@@ -30,8 +67,8 @@ const eventOnly = msg => (!!msg.event || !!msg.event_bad) && msg.yaw === undefin
 // in place of its last beacon
 const diagOnly = msg => (!!msg.diag || !!msg.diag_bad) && msg.yaw === undefined && msg.lat === undefined && !msg.event;
 
-// Bản tin cho trình duyệt: không kèm tọa độ (đã có trong bản tin mission)
-const downlinkSummary = d => ({ type: "downlink", rev: d.rev, id: d.id, loop: d.loop, n: d.pts.length, mission_rev: d.mission_rev, by: d.by, at: d.at, delivered: d.delivered || null });
+// Bản tin cho trình duyệt; kèm tọa độ để bảng đội tàu vẽ lộ trình riêng của từng phao (chia vùng, đội hình)
+const downlinkSummary = d => ({ type: "downlink", rev: d.rev, id: d.id, loop: d.loop, n: d.pts.length, pts: d.pts, mission_rev: d.mission_rev, by: d.by, at: d.at, delivered: d.delivered || null });
 
 // Phao đích báo Pi đã nhận đủ bản gửi này: cùng rev, đủ điểm, pi = 1
 const routeDelivered = (d, msg) => !!d.rev && !d.delivered && msg.id === d.id && !!msg.route &&
@@ -41,12 +78,17 @@ const routeDelivered = (d, msg) => !!d.rev && !d.delivered && msg.id === d.id &&
 const geocodeUserAgent = env =>
   `mliot-redgescue/1.0 (rescue buoy shore station dashboard${env?.GEOCODE_CONTACT ? "; " + env.GEOCODE_CONTACT : ""})`;
 
-// Một Durable Object duy nhất giữ vị trí mới nhất của từng phao, lộ trình chung,
-// và phát cả hai cho mọi trình duyệt đang mở.
+// Bản gửi gọn cho trạm: chỉ thứ trạm cần phát qua LoRa
+const routeForStation = d => ({ rev: d.rev, id: d.id, loop: d.loop, pts: d.pts });
+
+// Một Durable Object duy nhất giữ vị trí mới nhất của từng phao, lộ trình chung, và phát cho mọi trình duyệt
+// đang mở. Với nhiều phao nó là bộ quản lý đội tàu của trạm bờ: mỗi phao một bản gửi lộ trình, lệnh riêng
+// (đèn, dừng, về bờ), điểm đỗ riêng, nhiệm vụ hiện tại, và cảnh báo khi một phao mất liên lạc.
 export class Hub extends DurableObject {
   buoys = null;     // id -> { msg, t }
   mission = null;   // { rev, waypoints, poly, spacing, angle, speed, by?, at? }
-  downlink = null;  // lộ trình đang gửi xuống phao (docs/lora-route-downlink.md)
+  downlinks = null; // id -> lộ trình đang gửi xuống phao đó (docs/lora-route-downlink.md)
+  dlRev = null;     // rev của lần gửi gần nhất, một bộ đếm chung cho mọi phao như trước
   station = undefined;   // { msg, t } vị trí GPS trạm bờ; undefined = chưa tải, null = chưa có
   hist = {};        // id -> [{ t, rssi, snr, lat?, lon? }], mỗi phao một khóa lưu trữ `h:<id>`
   persistedAt = {}; // id -> thời điểm ghi kho gần nhất (chỉ trong bộ nhớ)
@@ -55,6 +97,13 @@ export class Hub extends DurableObject {
   events = null;
   lights = null;    // id -> { want, by, at }: lệnh đèn của admin, tách khỏi bản gửi lộ trình
   hold = null;      // id -> { want, by, at }: lệnh DỪNG của admin (want true = F407 khóa motor), như đèn
+  ret = null;       // id -> { want, by, at }: lệnh VỀ BỜ của admin (want true = Pi chạy về điểm đỗ), như đèn
+  tasks = null;     // id -> { kind: idle|sector|return|formation|victim, ref, since }: phao đang làm gì
+  lost = null;      // id -> lúc đã cảnh báo mất liên lạc (xóa khi nghe lại)
+  homeAxis = null;  // { bearing, lat, lon }: hướng từ trạm ra nước, tính một lần cho các điểm đỗ
+  // Đội hình đang chạy: { leader, shape, spacing, members: id -> { right, back }, route, loop, at }; null: không có.
+  // Chỉ phao dẫn đầu nhận lộ trình; các phao còn lại nghe beacon của nó và giữ chỗ của mình (fol trong downlink).
+  formation = undefined;
   diag = null;      // id -> { d, t }: khung chẩn đoán mới nhất của phao (lý do dừng, nhiệm vụ Pi, pin)
   geocoder = null;  // address search cache and rate limits (memory only, rebuilt after eviction)
 
@@ -67,11 +116,213 @@ export class Hub extends DurableObject {
     return this.mission;
   }
 
-  // Bản chụp lộ trình admin đã bấm "Gửi tới phao": { rev, id, loop, pts: [[lat, lon]], by, at, delivered? }
-  // delivered: lúc phao báo Pi đã nhận đủ; từ đó trạm không được mời gửi lại bản này
-  async loadDownlink() {
-    if (!this.downlink) this.downlink = (await this.ctx.storage.get("downlink")) || { rev: 0 };
-    return this.downlink;
+  // Bản chụp lộ trình admin đã bấm "Gửi tới phao", mỗi phao một bản: id -> { rev, id, loop, pts: [[lat, lon]],
+  // by, at, delivered? }. delivered: lúc phao báo Pi đã nhận đủ; từ đó trạm không được mời gửi lại bản này.
+  // Kho cũ chỉ có một bản "downlink": chuyển sang dạng mới khi đọc.
+  async loadDownlinks() {
+    if (!this.downlinks) {
+      this.downlinks = await this.ctx.storage.get("downlinks");
+      if (!this.downlinks) {
+        const old = await this.ctx.storage.get("downlink");
+        this.downlinks = old?.rev ? { [old.id]: old } : {};
+      }
+      this.dlRev = (await this.ctx.storage.get("dlRev")) ?? Math.max(0, ...Object.values(this.downlinks).map(d => d.rev));
+    }
+    return this.downlinks;
+  }
+
+  async loadRet() {
+    if (!this.ret) this.ret = (await this.ctx.storage.get("ret")) || {};
+    return this.ret;
+  }
+
+  // have = phao đang về hoặc đã đỗ (nhiệm vụ R/H trong khung chẩn đoán), null khi chưa báo
+  async retMessage(id) {
+    const r = (await this.loadRet())[id];
+    const mission = (await this.loadDiag())[id]?.d.mission;
+    const have = mission === undefined ? null : mission === "R" || mission === "H";
+    return { type: "ret", id, want: r ? r.want : null, have, by: r?.by ?? null, at: r?.at ?? null };
+  }
+
+  async loadTasks() {
+    if (!this.tasks) this.tasks = (await this.ctx.storage.get("tasks")) || {};
+    return this.tasks;
+  }
+
+  // Ghi nhiệm vụ hiện tại của phao và báo dashboard. Vấn đề 2 (nhiều phao thấy cùng một người) sẽ ghi
+  // kind "victim" ở đây khi trạm giao một người cho đúng một phao.
+  async setTask(id, kind, ref = null) {
+    const all = await this.loadTasks();
+    if (all[id]?.kind === kind && JSON.stringify(all[id].ref) === JSON.stringify(ref)) return;
+    all[id] = { kind, ref, since: Date.now() };
+    await this.ctx.storage.put("tasks", all);
+    this.broadcast({ type: "task", id, ...all[id] });
+  }
+
+  // Nhiệm vụ khi phao không về bờ: lộ trình nó đang giữ, hoặc không có gì
+  async routeTask(id) {
+    const dl = (await this.loadDownlinks())[id];
+    if (dl?.pts?.length) await this.setTask(id, "sector", { rev: dl.rev, n: dl.pts.length });
+    else await this.setTask(id, "idle");
+  }
+
+  async loadLost() {
+    if (!this.lost) this.lost = (await this.ctx.storage.get("lost")) || {};
+    return this.lost;
+  }
+
+  // Phao im quá LOST_MS: một cảnh báo "L" (mất liên lạc) và cờ trên dashboard. Gọi mỗi lần trạm hỏi downlink
+  // (5 s một lần) và mỗi gói đến, nên không cần hẹn giờ.
+  async checkLinks(now) {
+    const buoys = await this.loadBuoys();
+    const lost = await this.loadLost();
+    let changed = false;
+    for (const [id, b] of Object.entries(buoys)) {
+      const age = now - b.t;
+      if (age <= LOST_MS || age > LOST_WINDOW_MS || lost[id] || b.msg.link === "mavlink") continue;
+      lost[id] = now;
+      changed = true;
+      const ev = await this.loadEvents();
+      const alert = { type: "L", buoy: id, seq: 0, at: now, lat: b.msg.lat ?? null, lon: b.msg.lon ?? null, silent_s: Math.round(age / 1000) };
+      ev.alerts.push(alert);
+      if (ev.alerts.length > MAX_ALERTS) ev.alerts.splice(0, ev.alerts.length - MAX_ALERTS);
+      await this.ctx.storage.put("events", ev);
+      this.broadcast({ type: "alert", alert });
+      this.broadcast({ type: "link", id, lost: true, since: now });
+    }
+    if (changed) {
+      await this.ctx.storage.put("lost", lost);
+      await this.electLeader(now);
+    }
+  }
+
+  // Hướng từ trạm ra nước: từ trạm tới trọng tâm các phao có GPS. Giữ cố định tới khi trạm dời xa, để điểm đỗ
+  // không xoay theo khi các phao chạy về.
+  async waterBearing(station, now) {
+    if (this.homeAxis === null) this.homeAxis = (await this.ctx.storage.get("homeAxis")) || undefined;
+    const a = this.homeAxis;
+    if (a && distM(a, station) < HOME_AXIS_MOVE_M) return a.bearing;
+    const pts = Object.values(await this.loadBuoys())
+      .filter(b => now - b.t < LOST_WINDOW_MS && b.msg.lat !== undefined && distM(b.msg, station) > 5)
+      .map(b => b.msg);
+    if (!pts.length) return null;
+    const c = { lat: pts.reduce((s, p) => s + p.lat, 0) / pts.length, lon: pts.reduce((s, p) => s + p.lon, 0) / pts.length };
+    this.homeAxis = { bearing: Math.round(bearingDeg(station, c) * 10) / 10, lat: station.lat, lon: station.lon };
+    await this.ctx.storage.put("homeAxis", this.homeAxis);
+    return this.homeAxis.bearing;
+  }
+
+  // id -> [lat, lon]: điểm đỗ của các phao nghe được trong giờ qua; {} khi trạm chưa có GPS
+  async homes(now) {
+    const st = await this.loadStation();
+    if (!st || st.msg.lat === undefined) return {};
+    const bearing = await this.waterBearing(st.msg, now);
+    const out = {};
+    for (const [id, b] of Object.entries(await this.loadBuoys())) {
+      if (now - b.t > LOST_WINDOW_MS || b.msg.link === "mavlink") continue;
+      const slot = homeSlot(id);
+      if (slot !== 0 && bearing === null) continue;
+      const p = homePoint(st.msg, bearing ?? 0, slot);
+      out[id] = [+p.lat.toFixed(7), +p.lon.toFixed(7)];
+    }
+    return out;
+  }
+
+  // Bản gửi lộ trình mới cho phao id: rev mới, chưa giao; thay lệnh về bờ (phao đi lộ trình này)
+  async sendRoute(id, pts, loop, missionRev, by) {
+    const all = await this.loadDownlinks();
+    // rev 1..65535 trên LoRa, 0 nghĩa là "chưa có"; một bộ đếm chung để một phao không bao giờ gặp lại rev cũ
+    this.dlRev = (this.dlRev % 65535) + 1;
+    all[id] = { rev: this.dlRev, id, loop: !!loop, pts, mission_rev: missionRev, by: by || null, at: Date.now() };
+    await this.ctx.storage.put({ downlinks: all, dlRev: this.dlRev });
+    const summary = downlinkSummary(all[id]);
+    this.broadcast(summary);
+    if ((await this.loadRet())[id]?.want) await this.setRet(id, false, by);
+    else await this.routeTask(id);
+    return summary;
+  }
+
+  async loadFormation() {
+    if (this.formation === undefined) this.formation = (await this.ctx.storage.get("formation")) || null;
+    return this.formation;
+  }
+
+  async saveFormation(f) {
+    this.formation = f;
+    await this.ctx.storage.put("formation", f);
+    this.broadcast({ type: "formation", formation: f });
+  }
+
+  // Bắt đầu đội hình: lộ trình cho phao dẫn đầu, lộ trình rỗng cho các phao theo (bỏ dải quét cũ của chúng)
+  async startFormation(f, poly, loop, by) {
+    await this.saveFormation({ leader: f.leader, shape: f.shape, spacing: f.spacing, members: f.members, route: f.route, poly, loop, at: Date.now() });
+    await this.sendRoute(f.leader, f.route, loop, null, by);
+    await this.setTask(f.leader, "formation", { role: "leader", n: f.route.length });
+    for (const id of Object.keys(f.members)) {
+      await this.sendRoute(id, [], false, null, by);
+      await this.setTask(id, "formation", { role: "follower", leader: f.leader, ...f.members[id] });
+    }
+  }
+
+  // Các phao ids rời đội hình (phao dẫn đầu rời thì cả đội hình kết thúc); chúng đứng tại chỗ chờ lệnh
+  async leaveFormation(ids, by) {
+    const f = await this.loadFormation();
+    if (!f) return;
+    if (ids.includes(f.leader)) {
+      for (const id of Object.keys(f.members)) if (!ids.includes(id)) await this.sendRoute(id, [], false, null, by);
+      await this.saveFormation(null);
+      return;
+    }
+    const members = { ...f.members };
+    for (const id of ids) delete members[id];
+    await this.saveFormation({ ...f, members });
+  }
+
+  // Phao dẫn đầu mất liên lạc: phao theo còn liên lạc có tên nhỏ nhất lên dẫn đầu, nhận phần lộ trình phao cũ chưa
+  // đi (từ waypoint nó đang tới trong khung chẩn đoán), các phao còn lại xếp lại chỗ quanh phao mới.
+  async electLeader(now) {
+    const f = await this.loadFormation();
+    const lost = await this.loadLost();
+    if (!f || !lost[f.leader]) return;
+    const alive = Object.keys(f.members).filter(id => !lost[id]).sort();
+    if (!alive.length) return;
+    const [leader, ...followers] = alive;
+    const wp = (await this.loadDiag())[f.leader]?.d.wp ?? 0;
+    const route = f.route.slice(Math.max(0, wp - 1));
+    const members = formationOffsets(f.shape, followers, f.spacing);
+    const old = f.leader;
+    await this.saveFormation({ ...f, leader, members, route, at: now });
+    await this.sendRoute(leader, route, f.loop, null, "auto");
+    await this.setTask(leader, "formation", { role: "leader", n: route.length });
+    for (const id of followers) await this.setTask(id, "formation", { role: "follower", leader, ...members[id] });
+    await this.setTask(old, "idle");
+    const ev = await this.loadEvents();
+    const alert = { type: "E", buoy: leader, seq: 0, at: now, lat: null, lon: null, replaces: old };
+    ev.alerts.push(alert);
+    if (ev.alerts.length > MAX_ALERTS) ev.alerts.splice(0, ev.alerts.length - MAX_ALERTS);
+    await this.ctx.storage.put("events", ev);
+    this.broadcast({ type: "alert", alert });
+  }
+
+  async setHold(id, want, by) {
+    const all = await this.loadHold();
+    all[id] = { want, by: by || null, at: Date.now() };
+    await this.ctx.storage.put("hold", all);
+    const m = await this.holdMessage(id);
+    this.broadcast(m);
+    return m;
+  }
+
+  // Về bờ đổi nhiệm vụ của phao thành "return"; bỏ lệnh thì quay lại lộ trình đang giữ (nếu có)
+  async setRet(id, want, by) {
+    const all = await this.loadRet();
+    all[id] = { want, by: by || null, at: Date.now() };
+    await this.ctx.storage.put("ret", all);
+    const m = await this.retMessage(id);
+    this.broadcast(m);
+    if (want) await this.setTask(id, "return");
+    else await this.routeTask(id);
+    return m;
   }
 
   async loadStation() {
@@ -180,12 +431,18 @@ export class Hub extends DurableObject {
       const st = await this.loadStation();
       if (st) server.send(JSON.stringify({ type: "station", ...st.msg, age_s: Math.round((now - st.t) / 1000) }));
       server.send(JSON.stringify({ type: "mission", ...(await this.loadMission()) }));
-      const dl = await this.loadDownlink();
-      if (dl.rev) server.send(JSON.stringify(downlinkSummary(dl)));
+      for (const dl of Object.values(await this.loadDownlinks())) {
+        if (dl.rev) server.send(JSON.stringify(downlinkSummary(dl)));
+      }
       const ev = await this.loadEvents();
       if (ev.victims.length || ev.alerts.length) server.send(JSON.stringify({ type: "victims", victims: ev.victims, alerts: ev.alerts }));
       for (const id of Object.keys(await this.loadLights())) server.send(JSON.stringify(await this.lightsMessage(id)));
       for (const id of Object.keys(await this.loadHold())) server.send(JSON.stringify(await this.holdMessage(id)));
+      for (const id of Object.keys(await this.loadRet())) server.send(JSON.stringify(await this.retMessage(id)));
+      for (const [id, t] of Object.entries(await this.loadTasks())) server.send(JSON.stringify({ type: "task", id, ...t }));
+      for (const [id, since] of Object.entries(await this.loadLost())) server.send(JSON.stringify({ type: "link", id, lost: true, since }));
+      const formation = await this.loadFormation();
+      if (formation) server.send(JSON.stringify({ type: "formation", formation }));
       for (const [id, x] of Object.entries(await this.loadDiag())) {
         server.send(JSON.stringify({ type: "diag", id, ...x.d, age_s: Math.round((now - x.t) / 1000) }));
       }
@@ -201,29 +458,74 @@ export class Hub extends DurableObject {
 
     if (url.pathname === "/downlink") {
       if (request.method === "GET") {
-        // Đã giao thì trả {rev: 0}: F407 khởi động lại báo rev 0, gửi lại bản cũ là thuyền tự chạy trên bờ
-        const dl = await this.loadDownlink();
-        const out = dl.delivered ? { rev: 0 } : { ...dl };
+        const now = Date.now();
+        await this.checkLinks(now);
+        // Đã giao thì không mời gửi lại: F407 khởi động lại báo rev 0, gửi lại bản cũ là thuyền tự chạy trên bờ
+        const pending = Object.values(await this.loadDownlinks()).filter(d => d.rev && !d.delivered);
+        // Trạm cũ chỉ đọc một bản ở gốc: bản gửi mới nhất. Trạm mới đọc mọi bản trong routes.
+        const newest = pending.reduce((a, d) => (!a || d.at > a.at || (d.at === a.at && d.rev > a.rev) ? d : a), null);
+        const out = newest ? { ...newest } : { rev: 0 };
+        if (pending.length) out.routes = pending.map(routeForStation);
         // Lệnh đèn luôn đi kèm, kể cả khi không có lộ trình nào đang chờ giao
         const lights = Object.entries(await this.loadLights());
         if (lights.length) out.lights = Object.fromEntries(lights.map(([id, l]) => [id, l.want]));
         // Lệnh dừng cũng vậy: 1 = F407 khóa motor tới khi admin bấm "Chạy tiếp"
         const hold = Object.entries(await this.loadHold());
         if (hold.length) out.hold = Object.fromEntries(hold.map(([id, h]) => [id, h.want ? 1 : 0]));
+        // Về bờ: 1 = Pi bỏ lộ trình, chạy về điểm đỗ của nó tới khi admin cho chạy tiếp
+        const ret = Object.entries(await this.loadRet());
+        if (ret.length) out.ret = Object.fromEntries(ret.map(([id, r]) => [id, r.want ? 1 : 0]));
+        // Điểm đỗ riêng của từng phao: trạm gửi nó trong ACK thay cho GPS của trạm
+        const home = await this.homes(now);
+        if (Object.keys(home).length) out.home = home;
+        // Đội hình: phao theo -> [phao dẫn đầu, sang phải m, lùi sau m]; trạm gửi trong ACK của phao đó
+        const f = await this.loadFormation();
+        if (f && Object.keys(f.members).length) {
+          out.fol = Object.fromEntries(Object.entries(f.members).map(([id, m]) => [id, [f.leader, m.right, m.back]]));
+        }
         return json(out);
       }
       if (request.method === "PUT") {
-        const { id, loop, clear, by } = await request.json();
+        const { id, loop, clear, pts: given, by } = await request.json();
         const mission = await this.loadMission();
-        const prev = await this.loadDownlink();
-        const pts = clear ? [] : mission.waypoints.map(p => [p.lat, p.lon]);
-        // rev 1..65535 trên LoRa, 0 nghĩa là "chưa có"
-        this.downlink = { rev: (prev.rev % 65535) + 1, id, loop: !!loop, pts, mission_rev: mission.rev, by: by || null, at: Date.now() };
-        await this.ctx.storage.put("downlink", this.downlink);
-        const summary = downlinkSummary(this.downlink);
-        this.broadcast(summary);
-        return json(summary);
+        // pts: lộ trình riêng cho phao này (chia vùng trên dashboard); không có thì lộ trình chung
+        const own = Array.isArray(given);
+        const pts = clear ? [] : own ? given : mission.waypoints.map(p => [p.lat, p.lon]);
+        // Gửi tay một lộ trình cho phao đang ở đội hình: phao đó rời đội hình
+        if ((await this.loadFormation())?.members[id]) await this.leaveFormation([id], by);
+        return json(await this.sendRoute(id, pts, loop, own ? null : mission.rev, by));
       }
+    }
+
+    // Kế hoạch cho cả đội (src/fleetplan.js): { mode: sectors|formation, poly, ids, spacing?, angle?, shape?,
+    // leader?, loop?, dry?, by }. dry: chỉ trả kế hoạch để dashboard xem trước, không gửi gì.
+    if (url.pathname === "/plan" && request.method === "PUT") {
+      const req = await request.json();
+      const buoys = await this.loadBuoys();
+      const boats = req.ids.map(id => ({ id, ...(buoys[id]?.msg.lat !== undefined ? { lat: buoys[id].msg.lat, lon: buoys[id].msg.lon } : {}) }));
+      if (req.mode === "formation") {
+        const leaderId = req.leader && req.ids.includes(req.leader) ? req.leader : req.ids[0];
+        const leader = boats.find(b => b.id === leaderId);
+        const followers = boats.filter(b => b.id !== leaderId);
+        const f = planFormation(req.poly, leader, followers, req.shape, req.spacing, req.angle);
+        if (req.dry) return json({ mode: "formation", ...f });
+        await this.startFormation(f, req.poly, !!req.loop, req.by);
+        return json({ mode: "formation", ...f });
+      }
+      const routes = planSectors(req.poly, boats, req.spacing, req.angle);
+      if (req.dry) return json({ mode: "sectors", routes });
+      const formation = await this.loadFormation();
+      if (formation) await this.leaveFormation(Object.keys(formation.members).concat(formation.leader), req.by);
+      for (const r of routes) await this.sendRoute(r.id, r.pts, !!req.loop, null, req.by);
+      return json({ mode: "sectors", routes });
+    }
+
+    // Kết thúc đội hình: mọi phao đứng tại chỗ (lộ trình rỗng) chờ lệnh mới
+    if (url.pathname === "/formation" && request.method === "DELETE") {
+      const { by } = await request.json().catch(() => ({}));
+      const f = await this.loadFormation();
+      if (f) await this.leaveFormation(Object.keys(f.members).concat(f.leader), by);
+      return json({ ok: true });
     }
 
     // Admin bật/tắt hai đèn của phao: { id, lights: 0..3, by }. Không đụng tới bản gửi lộ trình.
@@ -243,11 +545,31 @@ export class Hub extends DurableObject {
       const { id, hold, by } = await request.json();
       const all = await this.loadHold();
       if (!all[id] && Object.keys(all).length >= MAX_BUOYS) return json({ error: "too many buoys" }, 429);
-      all[id] = { want: hold === true, by: by || null, at: Date.now() };
-      await this.ctx.storage.put("hold", all);
-      const m = await this.holdMessage(id);
-      this.broadcast(m);
-      return json(m);
+      return json(await this.setHold(id, hold === true, by));
+    }
+
+    // Admin cho một phao về bờ / bỏ lệnh về bờ: { id, ret: true|false, by }
+    if (url.pathname === "/return" && request.method === "PUT") {
+      const { id, ret, by } = await request.json();
+      const all = await this.loadRet();
+      if (!all[id] && Object.keys(all).length >= MAX_BUOYS) return json({ error: "too many buoys" }, 429);
+      return json(await this.setRet(id, ret === true, by));
+    }
+
+    // Lệnh cho cả đội: { action: hold|resume|return, ids?, by }. Không có ids: mọi phao nghe được trong 5 phút.
+    // resume bỏ cả DỪNG lẫn VỀ BỜ.
+    if (url.pathname === "/fleet" && request.method === "PUT") {
+      const { action, ids, by } = await request.json();
+      const now = Date.now();
+      const buoys = await this.loadBuoys();
+      const targets = Array.isArray(ids) ? ids
+        : Object.keys(buoys).filter(id => now - buoys[id].t < FLEET_RECENT_MS && buoys[id].msg.link !== "mavlink");
+      for (const id of targets) {
+        if (action === "hold" || action === "resume") await this.setHold(id, action === "hold", by);
+        if (action === "return") await this.setRet(id, true, by);
+        if (action === "resume" && (await this.loadRet())[id]?.want) await this.setRet(id, false, by);
+      }
+      return json({ action, ids: targets });
     }
 
     if (url.pathname === "/victims") {
@@ -328,12 +650,21 @@ export class Hub extends DurableObject {
         await this.ctx.storage.put({ buoys, ["h:" + msg.id]: points });
       }
       this.broadcast({ ...msg, age_s: 0 });
-      const dl = await this.loadDownlink();
-      if (routeDelivered(dl, msg)) {
-        this.downlink = { ...dl, delivered: now };
-        await this.ctx.storage.put("downlink", this.downlink);
-        this.broadcast(downlinkSummary(this.downlink));
+      const all = await this.loadDownlinks();
+      const dl = all[msg.id];
+      if (dl && routeDelivered(dl, msg)) {
+        all[msg.id] = { ...dl, delivered: now };
+        await this.ctx.storage.put("downlinks", all);
+        this.broadcast(downlinkSummary(all[msg.id]));
       }
+      // Phao đã bị báo mất liên lạc nay nghe lại
+      const lost = await this.loadLost();
+      if (lost[msg.id]) {
+        delete lost[msg.id];
+        await this.ctx.storage.put("lost", lost);
+        this.broadcast({ type: "link", id: msg.id, lost: false, since: now });
+      }
+      await this.checkLinks(now);
       // Đèn phao vừa đổi trạng thái thật: dashboard bỏ "đang gửi" khi khớp lệnh
       if (msg.lights !== undefined && msg.lights !== prev?.lights && (await this.loadLights())[msg.id]) {
         this.broadcast(await this.lightsMessage(msg.id));
