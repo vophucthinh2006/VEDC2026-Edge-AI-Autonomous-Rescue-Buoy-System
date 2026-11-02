@@ -73,6 +73,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to compile lora_payload_test' }
 & $parserExe
 if ($LASTEXITCODE -ne 0) { throw 'lora_payload_test failed' }
 
+$claimsExe = Join-Path $testDir 'victim_claims_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'esp32-lora-station/main') `
+  (Join-Path $repo 'esp32-lora-station/test/victim_claims_test.c') `
+  (Join-Path $repo 'esp32-lora-station/main/victim_claims.c') `
+  (Join-Path $repo 'esp32-lora-station/main/route_downlink.c') `
+  -lm -o $claimsExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile victim_claims_test' }
+& $claimsExe
+if ($LASTEXITCODE -ne 0) { throw 'victim_claims_test failed' }
+
 $routeExe = Join-Path $testDir 'route_link_test.exe'
 & gcc -std=c11 -Wall -Wextra -Werror `
   -I (Join-Path $repo 'STM32F4/App') `

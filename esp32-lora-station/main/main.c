@@ -23,6 +23,7 @@
 #include "nmea_gps.h"
 #include "lora_payload.h"
 #include "route_downlink.h"
+#include "victim_claims.h"
 #include "secrets.h"   // WIFI_SSID, WIFI_PASSWORD, CLOUD_INGEST_URL, CLOUD_INGEST_TOKEN (xem secrets.example.h)
 
 static const char *TAG = "tram_bo";
@@ -85,6 +86,16 @@ typedef struct {
 } light_cmd_t;
 static light_cmd_t lights[MAX_LIGHT_BUOYS];   // dưới downlink_lock
 static int light_count;
+
+// NHẬN NẠN NHÂN (docs/victim-claim.md): phao báo một người đầu tiên là chủ của người đó; phao khác báo cùng
+// chỗ thì được bảo bỏ qua ngay trong ACK của báo cáo ấy. Cloud có thể sửa (đã cứu, nhả) qua "claims".
+#define MAX_CLOUD_CLAIMS 16
+typedef struct { double lat, lon; char owner[32]; uint8_t status; } cloud_claim_t;
+static claims_t claims;   // dưới downlink_lock
+
+static uint32_t now_ms(void) {
+    return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+}
 
 // VỊ TRÍ TRẠM cho ACK: phao mất liên lạc quá 60 s thì tự chạy về đây.
 static gps_fix_t tram_fix;
@@ -353,6 +364,23 @@ static void tra_loi_phao(const char *raw) {
     double do_lat = co_diem_do ? lenh->home_lat : 0.0, do_lon = co_diem_do ? lenh->home_lon : 0.0;
     formation_role_t vai = { 0 };
     if (lenh) vai = lenh->role;
+    // Người phao này nên bỏ qua: phán quyết cho báo cáo vừa nghe trước, không thì lần lượt người có chủ gần phao
+    const claim_t *phan_quyet = NULL;
+    uint32_t bay_gio = now_ms();
+    if (la_su_kien && ev.type == 'V' && ev.has_position) {
+        phan_quyet = Claims_OnReport(&claims, id, ev.lat, ev.lon, bay_gio);
+        if (phan_quyet && phan_quyet->status == CLAIM_RESCUED)
+            ESP_LOGW(TAG, "[NAN NHAN] %s bao nguoi da duoc cuu: bao bo qua", id);
+        else if (phan_quyet && strcmp(phan_quyet->owner, id) != 0)
+            ESP_LOGW(TAG, "[NAN NHAN] %s bao nguoi %s da nhan: bao bo qua", id, phan_quyet->owner);
+    } else if (la_su_kien && ev.type == 'C') {
+        if (Claims_OnConfirm(&claims, id, ev.has_position, ev.lat, ev.lon, bay_gio))
+            ESP_LOGW(TAG, "[NAN NHAN] %s bam xac nhan: nguoi cua %s da duoc cuu", id, id);
+    }
+    bool co_vi_tri = la_su_kien ? ev.has_position : payload.has_position;
+    double vt_lat = la_su_kien ? ev.lat : payload.lat, vt_lon = la_su_kien ? ev.lon : payload.lon;
+    double bo_lat = 0.0, bo_lon = 0.0;
+    bool bo_qua = Claims_SkipFor(&claims, id, phan_quyet, co_vi_tri, vt_lat, vt_lon, bay_gio, &bo_lat, &bo_lon);
     const route_downlink_t *lo_trinh = RouteDownlink_Find(downlinks, DOWNLINK_SLOTS, id);
     uint16_t count = lo_trinh ? lo_trinh->count : 0U;
     route_ack_t ack = { 0 };
@@ -371,9 +399,11 @@ static void tra_loi_phao(const char *raw) {
         portEXIT_CRITICAL(&tram_fix_mux);
         // Điểm về: điểm đỗ riêng của phao (nhiều phao đỗ cạnh nhau dọc bờ), không có thì GPS trạm
         if (co_diem_do)
-            len = RouteDownlink_Ack(id, la_su_kien ? ev.seq : 0U, den, true, do_lat, do_lon, &vai, frame, sizeof(frame));
+            len = RouteDownlink_AckSkip(id, la_su_kien ? ev.seq : 0U, den, true, do_lat, do_lon, &vai,
+                                        bo_qua, bo_lat, bo_lon, frame, sizeof(frame));
         else
-            len = RouteDownlink_Ack(id, la_su_kien ? ev.seq : 0U, den, tram.fix_valid, tram.lat, tram.lon, &vai, frame, sizeof(frame));
+            len = RouteDownlink_AckSkip(id, la_su_kien ? ev.seq : 0U, den, tram.fix_valid, tram.lat, tram.lon, &vai,
+                                        bo_qua, bo_lat, bo_lon, frame, sizeof(frame));
         if (len == 0) return;
     }
     vTaskDelay(pdMS_TO_TICKS(LORA_TURNAROUND_MS));
@@ -471,16 +501,31 @@ static void doc_co(const cJSON *nhom, uint8_t bit, light_cmd_t *den, int *so_den
 }
 
 // {"rev":7,"id":"PHAO-01","loop":false,"pts":[...],"routes":[{rev,id,loop,pts},...],"lights":{"PHAO-01":1},
-//  "hold":{"PHAO-01":1},"ret":{"PHAO-02":1},"home":{"PHAO-02":[lat,lon]},"fol":{"PHAO-02":["PHAO-01",-12,0]}}
+//  "hold":{"PHAO-01":1},"ret":{"PHAO-02":1},"home":{"PHAO-02":[lat,lon]},"fol":{"PHAO-02":["PHAO-01",-12,0]},
+//  "claims":[[lat,lon,"PHAO-01",1],...]}   (claims: 1 có chủ, 2 đã cứu, 0 nhả cho phao khác)
 // -> mỗi phao một lộ trình (routes; Worker cũ chỉ có một bản ở gốc) và lệnh của từng phao. False nếu một lộ
 // trình sai dạng; lệnh sai dạng thì bỏ qua từng mục.
-static bool doc_downlink(const char *body, route_downlink_t *out, light_cmd_t *den, int *so_den) {
+static bool doc_downlink(const char *body, route_downlink_t *out, light_cmd_t *den, int *so_den,
+                         cloud_claim_t *nhan, int *so_nhan) {
     cJSON *root = cJSON_Parse(body);
     if (root == NULL) return false;
     bool ok = true;
     memset(out, 0, DOWNLINK_SLOTS * sizeof(*out));
     *so_den = 0;
+    *so_nhan = 0;
     const cJSON *muc;
+    cJSON_ArrayForEach(muc, cJSON_GetObjectItem(root, "claims")) {
+        const cJSON *lat = cJSON_GetArrayItem(muc, 0), *lon = cJSON_GetArrayItem(muc, 1);
+        const cJSON *chu = cJSON_GetArrayItem(muc, 2), *tt = cJSON_GetArrayItem(muc, 3);
+        if (*so_nhan >= MAX_CLOUD_CLAIMS || !cJSON_IsNumber(lat) || !cJSON_IsNumber(lon) || fabs(lat->valuedouble) > 90.0 ||
+            fabs(lon->valuedouble) > 180.0 || !cJSON_IsString(chu) || strlen(chu->valuestring) >= sizeof(nhan->owner) ||
+            !cJSON_IsNumber(tt) || tt->valueint < 0 || tt->valueint > 2) continue;
+        cloud_claim_t *c = &nhan[(*so_nhan)++];
+        c->lat = lat->valuedouble;
+        c->lon = lon->valuedouble;
+        strcpy(c->owner, chu->valuestring);
+        c->status = (uint8_t)tt->valueint;
+    }
     cJSON_ArrayForEach(muc, cJSON_GetObjectItem(root, "lights")) {
         if (!cJSON_IsNumber(muc) || muc->valueint < 0 || muc->valueint > 3) continue;
         light_cmd_t *m = muc_lenh(muc->string, den, so_den);
@@ -527,6 +572,7 @@ static void task_lay_lo_trinh(void *arg) {
     static char url[160];
     static route_downlink_t moi[DOWNLINK_SLOTS];      // 5 KB mỗi phao: không để trên stack của task
     static light_cmd_t den_moi[MAX_LIGHT_BUOYS];
+    static cloud_claim_t nhan_moi[MAX_CLOUD_CLAIMS];
     tao_url_downlink(url, sizeof(url));
     char *body = malloc(DOWNLINK_BODY_MAX);
     if (body == NULL) { ESP_LOGE(TAG, "Khong du bo nho cho lo trinh"); vTaskDelete(NULL); return; }
@@ -550,8 +596,8 @@ static void task_lay_lo_trinh(void *arg) {
         esp_http_client_cleanup(client);
         if (len >= 0) {
             body[len] = '\0';
-            int so_den = 0;
-            if (doc_downlink(body, moi, den_moi, &so_den)) {
+            int so_den = 0, so_nhan = 0;
+            if (doc_downlink(body, moi, den_moi, &so_den, nhan_moi, &so_nhan)) {
                 xSemaphoreTake(downlink_lock, portMAX_DELAY);
                 bool doi[DOWNLINK_SLOTS];
                 for (size_t k = 0; k < DOWNLINK_SLOTS; k++) {
@@ -567,6 +613,12 @@ static void task_lay_lo_trinh(void *arg) {
                 }
                 memcpy(lights, den_moi, sizeof(den_moi));
                 light_count = so_den;
+                // Lời của cloud về từng người (admin bấm Đã cứu / Nhả); phao bị gọi về bờ thì nhả người của nó
+                uint32_t bay_gio = now_ms();
+                for (int i = 0; i < so_nhan; i++)
+                    Claims_Set(&claims, nhan_moi[i].lat, nhan_moi[i].lon, nhan_moi[i].owner, (claim_status_t)nhan_moi[i].status, bay_gio);
+                for (int i = 0; i < so_den; i++)
+                    if (den_moi[i].mask & DOWNLINK_CMD_RETURN) Claims_Release(&claims, den_moi[i].id);
                 xSemaphoreGive(downlink_lock);
                 for (size_t k = 0; k < DOWNLINK_SLOTS; k++)
                     if (doi[k]) ESP_LOGW(TAG, "[LO TRINH] ban gui #%u: %u diem cho %s%s", moi[k].rev, moi[k].count, moi[k].id, moi[k].loop ? ", di vong" : "");
@@ -689,6 +741,7 @@ void app_main(void) {
 
     cloud_queue = xQueueCreate(CLOUD_QUEUE_LEN, sizeof(cloud_msg_t));
     downlink_lock = xSemaphoreCreateMutex();
+    Claims_Init(&claims);
 
     khoi_dong_wifi_sta();   // không chặn: WiFi kết nối ở nền
 
