@@ -261,7 +261,7 @@ bool lora_diag_parse(const char *message, lora_diag_t *out) {
             found_n = true;
             break;
         case 's':
-            if (value[0] == '\0' || value[1] != '\0' || strchr("IPFRBH-", value[0]) == NULL) return false;
+            if (value[0] == '\0' || value[1] != '\0' || strchr("IPFRBHO-", value[0]) == NULL) return false;
             out->mission = value[0] == '-' ? 0 : value[0];
             found_s = true;
             break;
