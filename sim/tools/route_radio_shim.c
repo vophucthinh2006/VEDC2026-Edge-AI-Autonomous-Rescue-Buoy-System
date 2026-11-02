@@ -29,8 +29,10 @@ bool sim_route_downlink_set(route_downlink_t *route, uint16_t rev, const char *i
 }
 
 /* The shore link and the event queue of the F407 (App/shore_link.c, App/event_queue.c), and the
- * station's event parser (lora_payload.c), for the same reason. */
+ * station's event parser (lora_payload.c), for the same reason. App/lora_slot.c (the fleet's time
+ * slots) needs no help: Python calls LoraSlot_FromId and LoraSlot_Wait as they are. */
 #include <stdio.h>
+#include "lora_slot.h"
 #include "shore_link.h"
 #include "event_queue.h"
 #include "lora_payload.h"
@@ -49,6 +51,34 @@ bool sim_shore_home(const shore_link_t *shore, double *lat, double *lon)
 }
 
 uint8_t sim_event_count(const event_queue_t *queue) { return queue->count; }
+
+/* RETURN and the formation of the dashboard (docs/fleet-control.md), as App/shore_link.c took them. */
+bool sim_shore_ret(const shore_link_t *shore) { return shore->ret; }
+
+bool sim_shore_follow(const shore_link_t *shore, char *leader, size_t size, int16_t *right_m, int16_t *back_m)
+{
+    if (!shore->follow || size == 0U) return false;
+    snprintf(leader, size, "%s", shore->leader);
+    *right_m = shore->right_m;
+    *back_m = shore->back_m;
+    return true;
+}
+
+/* A beacon of another boat (the leader of a formation), with the station's own parser (lora_payload.c):
+ * position, compass heading, course and speed over ground. False if it is not a beacon with a position. */
+bool sim_beacon_parse(const char *frame, char *id, size_t id_size, double *lat, double *lon, float *yaw,
+                      float *course, float *speed)
+{
+    lora_payload_t p;
+    if (!lora_payload_parse(frame, &p) || !p.has_position || id_size == 0U) return false;
+    snprintf(id, id_size, "%s", p.id);
+    *lat = p.lat;
+    *lon = p.lon;
+    *yaw = p.has_attitude ? p.yaw : -1.0f;
+    *course = p.has_course ? p.course : -1.0f;
+    *speed = p.has_speed ? p.speed : -1.0f;
+    return true;
+}
 
 /* The "event" group the station posts for an ev= frame (esp32-lora-station/main/main.c
  * xu_ly_su_kien), with the buoy id in front: "PHAO-01\t{...}". 0 if the frame is not an event. */
