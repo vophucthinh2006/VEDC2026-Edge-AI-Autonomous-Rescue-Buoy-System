@@ -11,6 +11,7 @@ import { initVictims, onVictimsSnapshot, onVictimMessage, onAlertMessage } from 
 import { initLights, onLightsMessage, revertLights } from './features/lights.js';
 import { initHold, onHoldMessage, revertHold, noteHold } from './features/hold.js';
 import { initSearch, renderPlace, minimizeSearch } from './features/search.js';
+import { initFleet, renderFleet, onFleetDownlink, onTaskMessage, onRetMessage, onLinkMessage, onFormationMessage } from './features/fleet.js';
 
 const $ = id => document.getElementById(id);
 const DEFAULT_VIEW = [10.762622, 106.660172];
@@ -135,7 +136,7 @@ function renderList() {
 function select(id) {
   state.selected = id;
   for (const k of state.buoys.keys()) updateMarker(k);
-  renderList(); renderDetail(); renderRoute(); updateStation();
+  renderList(); renderDetail(); renderRoute(); updateStation(); renderFleet();
   const b = state.buoys.get(id);
   if (b && b.hasPos) map.panTo([b.lat, b.lon]);
 }
@@ -214,6 +215,7 @@ let missionRev = 0;
 let saveTimer = null;
 let dragging = false;
 let downlink = null;   // { rev, id, loop, n, mission_rev, by, at, delivered }: lần gửi xuống phao gần nhất
+const downlinks = new Map();   // id -> lần gửi gần nhất cho phao đó: nhiều phao, mỗi phao một lộ trình
 let downlinkLogged = 0;
 
 function applyMission(m) {
@@ -292,7 +294,7 @@ function updateStart() {
 // The route still ahead of a buoy: the waypoint it goes to (its diagnostics frame, from the Pi) and the
 // points of the route it runs. Those are the map's when the last send was of this very mission; else unknown.
 function routeAhead(id) {
-  const d = state.diag.get(id), b = state.buoys.get(id);
+  const d = state.diag.get(id), b = state.buoys.get(id), downlink = downlinks.get(id);
   if (!d || !d.wp || !b || !b.hasPos || !downlink || downlink.id !== id || !downlink.n) return null;
   if (downlink.mission_rev !== missionRev || wps.length !== downlink.n || d.wp_total !== downlink.n || d.wp > wps.length) return null;
   let remaining = distM(b, wps[d.wp - 1]);
@@ -317,6 +319,7 @@ function onDiagMessage(m) {
 }
 
 function routeProgress(id) {
+  const downlink = downlinks.get(id);
   if (!downlink || !downlink.rev || downlink.id !== id) return null;
   const r = state.buoys.get(id)?.route;
   const n = downlink.n;
@@ -330,6 +333,7 @@ function routeProgress(id) {
 }
 
 function renderSendStatus() {
+  const downlink = downlinks.get(state.selected) || null;
   const r = downlink ? routeProgress(downlink.id) : null;
   const el = $('m-sendstat');
   el.hidden = !r;
@@ -427,6 +431,8 @@ $('m-clear').addEventListener('click', () => {
 // ---- Gửi lộ trình đang lưu xuống phao qua trạm bờ LoRa (docs/lora-route-downlink.md) ----
 function onDownlinkMessage(m) {
   downlink = m;
+  downlinks.set(m.id, m);
+  onFleetDownlink(m);
   // A fresh send (not the replay on page load) goes into the timeline once per rev
   if (m.rev && m.rev !== downlinkLogged && Date.now() - m.at < 15000) {
     log('route', m.n ? `Đã gửi lộ trình ${m.n} điểm tới ${m.id}` : `Đã yêu cầu ${m.id} bỏ lộ trình`, m.at);
@@ -517,7 +523,7 @@ function noteMovement(id, b, snapshot) {
 }
 
 // Route fully handed to the Pi for the current downlink rev
-const routeDone = (id, r) => !!(downlink && downlink.rev && downlink.id === id && r && r.rev === downlink.rev && r.have === downlink.n && r.pi === 1);
+const routeDone = (id, r) => { const d = downlinks.get(id); return !!(d && d.rev && r && r.rev === d.rev && r.have === d.n && r.pi === 1); };
 
 function onBuoyMessage(m) {
   const id = String(m.id || 'PHAO-01');
@@ -530,9 +536,10 @@ function onBuoyMessage(m) {
   noteHold(id);
   if (!state.selected) state.selected = id;
   if (!snapshot && prev && !prev.routeDone && routeDone(id, b.route)) {
-    log('route', downlink.n ? `${id} đã nhận lộ trình ${downlink.n} điểm` : `${id} đã bỏ lộ trình`);
+    const n = downlinks.get(id).n;
+    log('route', n ? `${id} đã nhận lộ trình ${n} điểm` : `${id} đã bỏ lộ trình`);
   }
-  if (downlink && downlink.id === id) renderSendStatus();
+  if (downlinks.has(id)) renderSendStatus();
 
   // MAVLink đến 1-2 gói/giây: lấy mẫu lịch sử mỗi 2 giây để 300 mẫu phủ được 10 phút vệt đi
   const sampleDue = b.link !== 'mavlink' || !(b.lastSample > b.lastSeen - 2000);
@@ -580,6 +587,7 @@ function onHistoryMessage(m) {
   updateTrail(String(m.id));
 }
 
+let wsLive = false;
 function setConn(up) {
   state.connected = up;
   $('conn').dataset.up = String(up);
@@ -589,7 +597,7 @@ function setConn(up) {
 function connect() {
   // Trên Cloudflare trang chạy qua https nên phải dùng wss; chạy cục bộ (http) thì ws
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => setConn(true);
+  ws.onopen = () => { setConn(true); wsLive = false; setTimeout(() => { wsLive = true; }, 1500); };   // the first messages replay the state
   ws.onclose = async () => {
     setConn(false);
     if (!MOCK) {   // phiên hết hạn thì quay lại màn hình đăng nhập thay vì thử lại mãi
@@ -612,6 +620,10 @@ function connect() {
     else if (m.type === 'lights') onLightsMessage(m);
     else if (m.type === 'hold') onHoldMessage(m);
     else if (m.type === 'diag') onDiagMessage(m);
+    else if (m.type === 'task') onTaskMessage(m);
+    else if (m.type === 'ret') onRetMessage(m);
+    else if (m.type === 'link') onLinkMessage(m, !wsLive);
+    else if (m.type === 'formation') onFormationMessage(m);
     else onBuoyMessage(m);
   };
 }
@@ -725,6 +737,7 @@ async function boot() {
   initLights({ onSet: sendLights });
   initHold({ onSet: sendHold });
   initSearch(map, { onShowBuoy: showBuoy, onOpen: () => setSheet(true) });   // phone: give the results the whole map
+  initFleet(map, { toast, onSelect: select, mock: !!MOCK });
   applyFollowBtn();
   setMode('monitor');
   renderList(); renderDetail();

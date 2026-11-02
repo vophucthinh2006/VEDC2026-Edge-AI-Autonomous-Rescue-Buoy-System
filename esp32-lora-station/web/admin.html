@@ -167,6 +167,45 @@
           <p id="m-sendstat" class="route-line" aria-live="polite" hidden></p>
         </div>
       </div>
+
+      <!-- Fleet mode: many boats, one shore station (docs/fleet-control.md) -->
+      <div class="panel" id="panel-fleet">
+        <section id="f-head">
+          <div class="sec-head"><h2>Đội tàu</h2><span id="f-count" class="count">0</span>
+            <button id="f-end" class="link-btn admin-only" type="button" hidden>Kết thúc đội hình</button></div>
+          <div id="f-list"></div>
+          <div class="f-cmds admin-only">
+            <button class="btn small danger" id="f-hold-all" type="button"><i class="ph ph-hand-palm" aria-hidden="true"></i>Dừng tất cả</button>
+            <button class="btn small" id="f-resume-all" type="button"><i class="ph ph-play" aria-hidden="true"></i>Chạy tiếp tất cả</button>
+            <button class="btn small" id="f-return-all" type="button"><i class="ph ph-house-line" aria-hidden="true"></i>Về bờ tất cả</button>
+          </div>
+        </section>
+        <section id="f-plan" class="admin-only" aria-labelledby="f-plan-title">
+          <div class="sec-head"><h2 id="f-plan-title">Giao nhiệm vụ</h2><span id="f-area-sum" class="sum"></span></div>
+          <p id="f-hint" class="quiet small"></p>
+          <div class="row">
+            <button class="btn small" id="f-area-undo" type="button"><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>Bỏ góc cuối</button>
+            <button class="btn small danger" id="f-area-clear" type="button"><i class="ph ph-trash" aria-hidden="true"></i>Xoá vùng</button>
+          </div>
+          <fieldset class="f-modes">
+            <legend class="sr-only">Cách giao</legend>
+            <label class="f-mode"><input type="radio" name="f-mode" value="sectors" checked><span><b>Chia vùng</b><small>Mỗi phao một dải, quét song song</small></span></label>
+            <label class="f-mode"><input type="radio" name="f-mode" value="formation"><span><b>Đội hình</b><small>Một phao dẫn, các phao giữ chỗ quanh nó</small></span></label>
+          </fieldset>
+          <div id="f-form-opts" class="f-opts" hidden>
+            <label>Dẫn đầu<select id="f-leader"></select></label>
+            <label>Dạng<select id="f-shape"><option value="line">Hàng ngang</option><option value="v">Chữ V</option><option value="column">Hàng dọc</option></select></label>
+          </div>
+          <div class="f-opts">
+            <label>Khoảng cách (m)<input id="f-spacing" type="number" min="2" max="200" step="1" value="10"></label>
+            <label class="check"><input id="f-loop" type="checkbox"><span>Đi vòng</span></label>
+          </div>
+          <div class="row">
+            <button class="btn" id="f-preview" type="button"><i class="ph ph-eye" aria-hidden="true"></i>Xem trước</button>
+            <button class="btn primary" id="f-send" type="button"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i>Gửi cho cả đội</button>
+          </div>
+        </section>
+      </div>
     </aside>
 
     <div id="map-wrap">
@@ -176,6 +215,7 @@
         <div id="mode" role="tablist" aria-label="Chế độ">
           <button type="button" data-m="monitor" role="tab"><i class="ph ph-binoculars" aria-hidden="true"></i><span>Giám sát</span></button>
           <button type="button" data-m="mission" role="tab"><i class="ph ph-path" aria-hidden="true"></i><span>Lộ trình</span></button>
+          <button type="button" data-m="fleet" role="tab"><i class="ph ph-boat" aria-hidden="true"></i><span>Đội tàu</span></button>
         </div>
         <div id="search-wrap">
           <form id="search" role="search" autocomplete="off">

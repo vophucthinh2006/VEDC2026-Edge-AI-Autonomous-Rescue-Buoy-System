@@ -16,6 +16,8 @@ const KINDS = {
   lost:    { icon: 'ph ph-cell-signal-slash',       tone: 'warn',   alert: true },
   back:    { icon: 'ph ph-cell-signal-full',        tone: 'ok' },
   battery: { icon: 'ph-fill ph-battery-warning',    tone: 'bad',    alert: true },
+  fleet:   { icon: 'ph-fill ph-boat',               tone: 'accent' },
+  leader:  { icon: 'ph-fill ph-crown-simple',       tone: 'warn',   alert: true },
 };
 
 const $ = id => document.getElementById(id);

@@ -21,6 +21,7 @@
 .panel{ display:none; flex-direction:column; flex:1; min-height:0; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--line-2) transparent; }
 body[data-mode="monitor"] #panel-monitor{ display:flex; }
 body[data-mode="mission"] #panel-mission{ display:flex; }
+body[data-mode="fleet"] #panel-fleet{ display:flex; }
 #map-wrap{ position:relative; min-height:0; }
 #map{ position:absolute; inset:0; z-index:0; background:#0B1118; }   /* own stacking context: Leaflet controls stay under our overlays */
 

@@ -163,6 +163,12 @@ export function onAlertMessage(m) {
   } else if (a.type === 'C') {
     log('rescue', `${a.buoy}: người gặp nạn đã nhận đồ cứu hộ`, a.at);
     toast(`${a.buoy}: người gặp nạn đã nhận đồ cứu hộ`, 'ok');
+  } else if (a.type === 'L') {
+    // The shore station has not heard the buoy for 30 s (docs/fleet-control.md); the timeline logs signal lost itself
+    toast(`${a.buoy} mất liên lạc ${a.silent_s ?? 30} giây`, 'bad');
+  } else if (a.type === 'E') {
+    log('leader', `${a.replaces} mất liên lạc: ${a.buoy} lên dẫn đầu đội hình, nhận phần lộ trình còn lại`, a.at);
+    toast(`${a.buoy} lên dẫn đầu đội hình thay ${a.replaces}`, 'bad');
   } else if (a.type === 'V' && RISKS[a.risk]) {
     log('victim', `${a.buoy} phát hiện người, mức ${RISKS[a.risk].name.toLowerCase()} (phao chưa có GPS)`, a.at);
     toast(`${a.buoy} phát hiện người (chưa có vị trí)`, 'bad');
