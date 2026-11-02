@@ -4,7 +4,7 @@
  * The station answers every frame of the boat: with an RTE frame while a route is still going
  * across, otherwise with
  *
- *     ACK,<id>,<eseq>,<cmd>,<lat>,<lon>[,<leader>,<right_m>,<back_m>]*CS
+ *     ACK,<id>,<eseq>,<cmd>,<lat>,<lon>[,<leader>,<right_m>,<back_m>[,<skip_lat>,<skip_lon>]]*CS
  *
  * eseq: the event frame being acknowledged (App/event_queue.h), 0 for a plain beacon.
  * cmd: the admin's commands from the dashboard, 0..15. Bit 0 = RELAY1 PC3, bit 1 = RELAY2 PC2 (the
@@ -14,7 +14,9 @@
  * empty while there is none.
  * leader, right_m, back_m: only while the boat sails in formation: it keeps right_m metres to the right
  * of and back_m behind the leader, in the leader's frame (negative: left, ahead). The plain ACK (six
- * fields) ends the formation.
+ * fields) ends the formation; with eleven fields the three may be empty (no formation).
+ * skip_lat, skip_lon: a person to leave alone, another boat looks after them or they are rescued
+ * (docs/victim-claim.md); the Pi gets each once as $SKP.
  *
  * Any frame from the station counts as hearing it. Silent for SHORE_LINK_TIMEOUT_MS after it was
  * heard once, the link is lost and the Pi takes the boat home ($LNK). Never heard yet counts as fine:
@@ -41,6 +43,9 @@ typedef struct {
     char leader[32];
     int16_t right_m;
     int16_t back_m;
+    bool skip_new;             /* a person to leave alone came in and is not passed on to the Pi yet */
+    int32_t skip_lat_e6;
+    int32_t skip_lon_e6;
     uint32_t acks_ok;          /* ACK frames taken (debug) */
     uint32_t acks_bad;         /* ACK frames for this buoy that were refused */
 } shore_link_t;
@@ -65,3 +70,7 @@ size_t ShoreLink_PiLine(const shore_link_t *shore, uint16_t seq, uint32_t now_ms
 /* Payload of the $FOL line for the Pi: "seq,leader,right_m,back_m", or "seq,,," outside a formation.
  * Returns the length, 0 if it did not fit. */
 size_t ShoreLink_FollowLine(const shore_link_t *shore, uint16_t seq, char *buf, size_t size);
+
+/* Payload of the $SKP line for the Pi: "seq,lat,lon", the person the last ACK said to leave alone, once:
+ * 0 when there is no new one (nothing to send). */
+size_t ShoreLink_SkipLine(shore_link_t *shore, uint16_t seq, char *buf, size_t size);

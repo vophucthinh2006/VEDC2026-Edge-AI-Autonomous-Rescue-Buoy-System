@@ -365,6 +365,16 @@ size_t LoraBeacon_LinkLine(uint16_t seq, uint32_t now_ms, char *buf, size_t size
 #endif
 }
 
+size_t LoraBeacon_SkipLine(uint16_t seq, char *buf, size_t size)
+{
+#if LORA_ENABLED
+    return ShoreLink_SkipLine(&shore, seq, buf, size);
+#else
+    (void)seq; (void)buf; (void)size;
+    return 0U;
+#endif
+}
+
 void LoraBeacon_SetDiag(const diag_t *latest)
 {
 #if LORA_ENABLED

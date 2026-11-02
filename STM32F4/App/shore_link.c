@@ -7,6 +7,7 @@
 #define MAX_FRAME 128U
 #define ACK_FIELDS 6U
 #define ACK_FIELDS_FORMATION 9U
+#define ACK_FIELDS_SKIP 11U
 #define FORMATION_MAX_M 500L
 
 void ShoreLink_Init(shore_link_t *shore)
@@ -68,27 +69,33 @@ bool ShoreLink_OnFrame(shore_link_t *shore, const char *frame, const char *buoy_
     copy[length] = '\0';
 
     /* Split at commas, keeping empty fields: lat and lon are empty while the station has no fix. */
-    char *fields[ACK_FIELDS_FORMATION];
+    char *fields[ACK_FIELDS_SKIP];
     unsigned count = 0U;
     fields[count++] = copy;
     for (char *p = copy; *p != '\0'; p++) {
         if (*p != ',') continue;
-        if (count == ACK_FIELDS_FORMATION) { shore->acks_bad++; return false; }
+        if (count == ACK_FIELDS_SKIP) { shore->acks_bad++; return false; }
         *p = '\0';
         fields[count++] = p + 1;
     }
-    if (count != ACK_FIELDS && count != ACK_FIELDS_FORMATION) { shore->acks_bad++; return false; }
+    if (count != ACK_FIELDS && count != ACK_FIELDS_FORMATION && count != ACK_FIELDS_SKIP) { shore->acks_bad++; return false; }
     if (strcmp(fields[1], buoy_id) != 0) return false;
 
     unsigned long acked, lights;
     int32_t lat = 0, lon = 0;
     bool has_home = fields[4][0] != '\0' || fields[5][0] != '\0';
     long right = 0L, back = 0L;
-    bool follow = count == ACK_FIELDS_FORMATION;
+    /* Eleven fields: the formation ones may be empty (no formation), then the person to leave alone. */
+    bool skip = count == ACK_FIELDS_SKIP;
+    bool follow = count == ACK_FIELDS_FORMATION || (skip && fields[6][0] != '\0');
+    bool no_role = skip && !follow && fields[7][0] == '\0' && fields[8][0] == '\0';
+    int32_t skip_lat = 0, skip_lon = 0;
     if (!parse_uint(fields[2], 0xFFFFUL, &acked) || !parse_uint(fields[3], 15UL, &lights) ||
         (has_home && (!parse_coord(fields[4], 90.0, &lat) || !parse_coord(fields[5], 180.0, &lon))) ||
+        (count >= ACK_FIELDS_FORMATION && !follow && !no_role) ||
         (follow && (fields[6][0] == '\0' || strlen(fields[6]) >= sizeof(shore->leader) ||
-                    !parse_int(fields[7], FORMATION_MAX_M, &right) || !parse_int(fields[8], FORMATION_MAX_M, &back)))) {
+                    !parse_int(fields[7], FORMATION_MAX_M, &right) || !parse_int(fields[8], FORMATION_MAX_M, &back))) ||
+        (skip && (!parse_coord(fields[9], 90.0, &skip_lat) || !parse_coord(fields[10], 180.0, &skip_lon)))) {
         shore->acks_bad++;
         return false;
     }
@@ -107,6 +114,11 @@ bool ShoreLink_OnFrame(shore_link_t *shore, const char *frame, const char *buoy_
         shore->back_m = 0;
     }
     shore->lights_known = true;
+    if (skip) {
+        shore->skip_new = true;
+        shore->skip_lat_e6 = skip_lat;
+        shore->skip_lon_e6 = skip_lon;
+    }
     if (has_home) {
         /* A station without a fix keeps the last home it gave. */
         shore->home_valid = true;
@@ -156,5 +168,17 @@ size_t ShoreLink_FollowLine(const shore_link_t *shore, uint16_t seq, char *buf, 
           ? snprintf(buf, size, "%u,%s,%d,%d", (unsigned)seq, shore->leader, shore->right_m, shore->back_m)
           : snprintf(buf, size, "%u,,,", (unsigned)seq);
     if (n < 0 || (size_t)n >= size) return 0U;
+    return (size_t)n;
+}
+
+size_t ShoreLink_SkipLine(shore_link_t *shore, uint16_t seq, char *buf, size_t size)
+{
+    if (!shore->skip_new) return 0U;
+    char lat[16], lon[16];
+    format_e6(lat, sizeof(lat), shore->skip_lat_e6);
+    format_e6(lon, sizeof(lon), shore->skip_lon_e6);
+    int n = snprintf(buf, size, "%u,%s,%s", (unsigned)seq, lat, lon);
+    if (n < 0 || (size_t)n >= size) return 0U;
+    shore->skip_new = false;
     return (size_t)n;
 }

@@ -73,6 +73,8 @@ bool LoraBeacon_ShoreOk(uint32_t now_ms);
  * boot until the first ACK says otherwise. */
 bool LoraBeacon_Hold(void);
 size_t LoraBeacon_LinkLine(uint16_t seq, uint32_t now_ms, char *buf, size_t size);
+/* $SKP payload for the Pi: a person the station said to leave alone, once (0: nothing new). */
+size_t LoraBeacon_SkipLine(uint16_t seq, char *buf, size_t size);
 
 /* Route from the dashboard, for the Pi: the revision the Pi's $HBT reports, and the next $RTE line
  * payload to send (false: nothing now). Call NextPiRouteLine once per telemetry period. */

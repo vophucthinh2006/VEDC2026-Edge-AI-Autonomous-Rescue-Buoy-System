@@ -95,6 +95,27 @@ int main(void)
     assert(ShoreLink_OnFrame(&shore, frame, "PHAO-03", 84000U, &eseq));
     assert(!shore.follow && shore.leader[0] == '\0');
 
+    /* A person to leave alone (docs/victim-claim.md): eleven fields, passed to the Pi once as $SKP. */
+    char skp[48];
+    assert(ShoreLink_SkipLine(&shore, 3U, skp, sizeof(skp)) == 0U);
+    RouteDownlink_AckSkip("PHAO-03", 5U, 0U, true, 10.883438, 106.796019, NULL, true, 10.883500, -106.796100, frame, sizeof(frame));
+    assert(ShoreLink_OnFrame(&shore, frame, "PHAO-03", 85000U, &eseq) && eseq == 5U && !shore.follow);
+    assert(ShoreLink_SkipLine(&shore, 4U, skp, sizeof(skp)) > 0U && strcmp(skp, "4,10.883500,-106.796100") == 0);
+    assert(ShoreLink_SkipLine(&shore, 5U, skp, sizeof(skp)) == 0U);
+    /* In formation as well: the role and the skip point both taken. */
+    formation_role_t lead = { .on = true, .leader = "PHAO-01", .right_m = 8, .back_m = -2 };
+    RouteDownlink_AckSkip("PHAO-03", 0U, 0U, true, 10.883438, 106.796019, &lead, true, 10.883600, 106.796200, frame, sizeof(frame));
+    assert(ShoreLink_OnFrame(&shore, frame, "PHAO-03", 86000U, &eseq));
+    assert(shore.follow && strcmp(shore.leader, "PHAO-01") == 0 && shore.right_m == 8 && shore.back_m == -2);
+    assert(ShoreLink_SkipLine(&shore, 6U, skp, sizeof(skp)) > 0U && strcmp(skp, "6,10.883600,106.796200") == 0);
+    /* Half a role, or a bad skip point: refused. */
+    uint32_t bad = shore.acks_bad;
+    assert(!ShoreLink_OnFrame(&shore, with_cs("ACK,PHAO-03,0,0,,,,5,,10.0,106.0"), "PHAO-03", 87000U, &eseq));
+    assert(!ShoreLink_OnFrame(&shore, with_cs("ACK,PHAO-03,0,0,,,,,,91.0,106.0"), "PHAO-03", 87000U, &eseq));
+    assert(!ShoreLink_OnFrame(&shore, with_cs("ACK,PHAO-03,0,0,,,,,,,"), "PHAO-03", 87000U, &eseq));
+    assert(!ShoreLink_OnFrame(&shore, with_cs("ACK,PHAO-03,0,0,,,,,,10.0,106.0,1"), "PHAO-03", 87000U, &eseq));
+    assert(shore.acks_bad == bad + 4U && shore.follow);
+
     ShoreLink_Heard(&shore, 70000U);          /* an RTE frame */
     assert(ShoreLink_Ok(&shore, 70001U));
     /* The tick counter wrapping round does not lose it. */
