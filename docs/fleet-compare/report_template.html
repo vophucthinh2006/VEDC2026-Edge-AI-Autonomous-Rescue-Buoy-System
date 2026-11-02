@@ -27,7 +27,7 @@ p{ margin:0; max-width:70ch; }
 header{ display:grid; gap:10px; }
 section{ display:grid; gap:12px; min-width:0; }
 .findings{ display:grid; gap:10px; margin:0; padding:0; list-style:none; }
-.findings li{ padding:12px 14px; background:var(--panel); border:1px solid var(--line); border-radius:10px; }
+.findings li{ min-width:0; padding:12px 14px; background:var(--panel); border:1px solid var(--line); border-radius:10px; }
 .findings b{ color:var(--ink); }
 .tbl{ overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
 table{ border-collapse:collapse; width:100%; min-width:760px; font-size:14px; }
@@ -37,12 +37,12 @@ thead th{ font-weight:600; color:var(--ink-2); font-size:12.5px; }
 tbody tr:last-child td{ border-bottom:0; }
 td{ font-variant-numeric:tabular-nums; }
 td small{ color:var(--ink-3); }
-.charts{ display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; }
+.charts{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap:14px; }
 .chart{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; display:grid; gap:8px; min-width:0; }
 .chart h3{ margin:0; font-size:14px; }
 .chart p{ font-size:12.5px; color:var(--ink-3); }
 .bars{ display:grid; gap:6px; }
-.bar{ display:grid; grid-template-columns:minmax(110px, 38%) 1fr auto; align-items:center; gap:8px; font-size:13px; }
+.bar{ display:grid; grid-template-columns:minmax(110px, 55%) 1fr auto; align-items:center; gap:8px; font-size:13px; }
 .bar span:first-child{ color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .track{ height:14px; background:var(--water); border-radius:3px; position:relative; }
 .fill{ position:absolute; inset:0 auto 0 0; background:var(--accent); border-radius:0 4px 4px 0; }
@@ -60,8 +60,8 @@ code{ font:13px var(--mono); }
 
 <main>
   <header>
-    <span class="eyebrow">VEDC 2026 · Chung kết · Vấn đề 1</span>
-    <h1>Một trạm bờ, ba tàu: chia vùng hay đi đội hình?</h1>
+    <span class="eyebrow">VEDC 2026 · Chung kết · Vấn đề 1 và 2</span>
+    <h1>Một trạm bờ, ba tàu: chia vùng, đội hình, và một người một tàu</h1>
     <p class="lead" id="lead"></p>
   </header>
 
@@ -93,7 +93,9 @@ const DATA = /*DATA*/[];
 const TEXT = /*TEXT*/{};
 const NAMES = { "1_single": "Phố · 1 tàu", "2_sectors": "Phố · 3 tàu chia vùng", "3_formation": "Phố · 3 tàu đội hình",
   "4_sectors_no_tdma": "Phố · chia vùng, không chia khe", "5_formation_leader_lost": "Phố · đội hình, mất tàu dẫn đầu",
-  "w1_single": "Vùng rộng · 1 tàu", "w2_sectors": "Vùng rộng · 3 tàu chia vùng", "w3_formation": "Vùng rộng · 3 tàu đội hình" };
+  "w1_single": "Vùng rộng · 1 tàu", "w2_sectors": "Vùng rộng · 3 tàu chia vùng", "w3_formation": "Vùng rộng · 3 tàu đội hình",
+  "cw2_sectors": "Vùng rộng · chia vùng + nhận nạn nhân", "cw3_formation": "Vùng rộng · đội hình + nhận nạn nhân",
+  "c2_sectors": "Phố · chia vùng + nhận nạn nhân", "c3_formation": "Phố · đội hình + nhận nạn nhân" };
 const name = r => NAMES[r.name] || r.name;
 const fmt = v => v === null || v === undefined ? "—" : v;
 const $ = id => document.getElementById(id);
@@ -112,6 +114,7 @@ const cols = [
   ["Quãng đường", r => `${r.distance_m} m`],
   ["Năng lượng", r => `${r.energy}`],
   ["Báo trùng", r => `${r.repeat_reports} <small>(${r.people_by_several} người)</small>`],
+  ["Dừng trùng", r => r.dup_stop_s === undefined ? "—" : `${r.dup_stop_s} s`],
   ["Gần nhau < 3 m", r => `${r.close_s} s`],
   ["LoRa mất / nghe", r => r.lora && r.lora.received ? `${(r.lora.collided || 0) + (r.lora.deaf || 0)} / ${r.lora.received}` : "—"],
   ["Lệch đội hình", r => r.formation && r.formation.median_m !== null ? `${r.formation.median_m} m` : "—"],
@@ -132,6 +135,7 @@ barChart("Số người tìm thấy", "Trong cả lượt chạy; nhiều hơn l
 barChart("Thời gian thấy một nửa số người", "Từ lúc gửi kế hoạch; ngắn hơn là tốt hơn", r => r.time_half_s, " s");
 barChart("Diện tích đã nằm trong tầm camera", "Trong cả lượt chạy; cao hơn là tốt hơn", r => r.seen_pct, "%");
 barChart("Số lần báo trùng một người", "Nhiều tàu cùng báo một người: tốn tài nguyên (vấn đề 2)", r => r.repeat_reports, "");
+barChart("Giây dừng trùng", "Tàu đứng theo một người mà tàu khác đã báo trước; nhận nạn nhân cắt phần này", r => r.boats > 1 ? r.dup_stop_s : null, " s");
 barChart("Tổng quãng đường cả đội", "Cả đội cộng lại", r => r.distance_m, " m");
 
 // Maps: the search area of each run (r.area_xy) with a margin; the street of the central scene also gets its houses

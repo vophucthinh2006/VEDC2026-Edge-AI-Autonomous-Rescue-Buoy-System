@@ -35,7 +35,7 @@ STM32F4/
 │   ├── imu.c/.h           lớp đệm trên driver BNO055
 │   ├── lora_beacon.c/.h   beacon, khung sự kiện, cửa sổ nhận sau mỗi khung (mục 14)
 │   ├── route_link.c/.h    ráp lộ trình từ dashboard, chuyển cho Pi (`$RTE`)
-│   ├── shore_link.c/.h    ACK của trạm: còn liên lạc không, điểm về, lệnh đèn (C thuần)
+│   ├── shore_link.c/.h    ACK của trạm: còn liên lạc không, điểm về, lệnh đèn, người tàu khác đã nhận ($SKP, C thuần)
 │   ├── event_queue.c/.h   sự kiện người / lật / nút xác nhận, gửi lại tới khi có ACK (C thuần)
 │   ├── battery.c/.h       % pin từ INA226
 │   ├── lights.c/.h        hai đèn trên relay PC3 / PC2, chỉ theo lệnh dashboard
@@ -427,6 +427,7 @@ $IMU,seq,pitch,roll,yaw,imu_ok,overturned*CS\n
 $GPS,seq,lat,lon,fix,hdop,speed,course*CS\n
 $SYS,seq,battery_v,motor_fault,estop,link_ok,armed,auto,confirm_presses,battery_pct*CS\n
 $LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon,hold,ret*CS\n     (mỗi giây)
+$SKP,seq,lat,lon*CS\n                                                  (một lần mỗi khi ACK mang người cần bỏ qua)
 $ACK,seq,TXD,ACCEPTED*CS\n
 $RTE,seq,rev,first,total,loop,lat;lon,...*CS\n
 ```
