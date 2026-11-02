@@ -70,6 +70,15 @@ function sanitizeReturn(m) {
   return { id, ret: m.ret };
 }
 
+// Admin về một người (docs/victim-claim.md): { action: rescued|release|assign, id? } (assign cần tên phao)
+export function sanitizeVictimAction(m) {
+  if (!m || typeof m !== "object" || !["rescued", "release", "assign"].includes(m.action)) return null;
+  if (m.action !== "assign") return { action: m.action };
+  if (typeof m.id !== "string") return null;
+  const id = m.id.replace(/[^\w.\-]/g, "").slice(0, 31);
+  return id ? { action: m.action, id } : null;
+}
+
 // Lệnh cả đội: { action: hold|resume|return, ids?: [tên phao] } (không có ids: mọi phao nghe được gần đây)
 export function sanitizeFleet(m) {
   if (!m || typeof m !== "object" || !["hold", "resume", "return"].includes(m.action)) return null;
@@ -236,6 +245,20 @@ export default {
     // ---- Bật/tắt đèn phao, dừng phao, về bờ, lệnh cả đội, xóa chấm người: admin (hoặc token ADMIN_API_TOKEN) ----
     const COMMANDS = { "/api/lights": [sanitizeLights, "lights"], "/api/hold": [sanitizeHold, "hold"],
       "/api/return": [sanitizeReturn, "return"], "/api/fleet": [sanitizeFleet, "fleet"] };
+    // Admin về một người (docs/victim-claim.md): đã cứu, nhả cho phao khác, giao cho một phao
+    const victimPath = path.match(/^\/api\/victims\/(\d+)$/);
+    if (victimPath) {
+      if (request.method !== "POST") return json({ error: "method" }, 405);
+      const caller = await adminCaller(request, env, session);
+      if (caller.error) return caller.error;
+      const body = await request.text();
+      if (body.length > MAX_BODY) return json({ error: "too large" }, 413);
+      let req = null;
+      try { req = sanitizeVictimAction(JSON.parse(body)); } catch { /* báo lỗi bên dưới */ }
+      if (!req) return json({ error: "bad request" }, 400);
+      return hub().fetch("https://hub/victim", { method: "PUT", body: JSON.stringify({ ...req, vid: Number(victimPath[1]), by: caller.by }) });
+    }
+
     if (COMMANDS[path] || path === "/api/victims/clear") {
       if (request.method !== "POST") return json({ error: "method" }, 405);
       const caller = await adminCaller(request, env, session);

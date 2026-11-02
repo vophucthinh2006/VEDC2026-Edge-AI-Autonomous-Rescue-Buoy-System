@@ -150,13 +150,15 @@ test("a detection within 5 m of a stored person updates it, farther away adds on
   assert.equal(update.victim.vid, victims[0].vid);
   // ~11 m away: a second person
   await call(hub, "POST", "/ingest", victim(3, { lat: 10.8835 }));
-  // Same spot seen by another buoy: kept as its own dot
+  // Same spot seen by another buoy: the same person, still the first buoy's (docs/victim-claim.md)
   await call(hub, "POST", "/ingest", { ...victim(1), id: "PHAO-02" });
   ({ victims } = await call(hub, "GET", "/victims"));
-  assert.deepEqual(victims.map(v => v.buoy), ["PHAO-01", "PHAO-01", "PHAO-02"]);
+  assert.deepEqual(victims.map(v => v.buoy), ["PHAO-01", "PHAO-01"]);
+  assert.deepEqual(victims[0].seen_by, ["PHAO-01", "PHAO-02"]);
+  assert.equal(victims[0].owner, "PHAO-01");
   // Survives a reload
   const { hub: reloaded } = makeHub(store);
-  assert.equal((await call(reloaded, "GET", "/victims")).victims.length, 3);
+  assert.equal((await call(reloaded, "GET", "/victims")).victims.length, 2);
 });
 
 test("overturn, confirm and a person without a position become alerts", async () => {
