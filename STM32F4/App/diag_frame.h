@@ -13,8 +13,8 @@
  *
  *   n  the reason of the Pi's last NAV command (Rasp_Pi/modules/navigation.py, safety.py), "-" unknown,
  *      pi_silent when no $HBT came for DIAG_PI_SILENT_MS (the Pi off, main.py stopped, the UART lost)
- *   s  the Pi's mission: I idle, P patrol, F follow a person, R home (shore lost), B home (battery
- *      low), H holding at home, - unknown
+ *   s  the Pi's mission: I idle, P patrol, F follow a person, R home (shore lost, or called home),
+ *      B home (battery low), H holding at home, O in formation behind a leader, - unknown
  *   w  waypoint the Pi is going to / waypoints in the route, 0/0 without a route
  *   a  arm_block (App/control.h): 0 armed, 1 no fresh IMU, 2 overturned
  *   d  drive_block (App/control.h): 0 driving, 1 disarmed, 2 the Pi gives no NAV AUTO, 3 IMU stale,
