@@ -1,10 +1,12 @@
 // Người phao phát hiện (chấm màu theo mức nguy hiểm), khối "Người cần cứu" ở cột trái,
 // và cảnh báo lật phao / xác nhận nhận đồ cứu hộ.
-// Máy chủ đã bỏ bản phao gửi lặp và gộp phát hiện gần nhau (5 m), ở đây chỉ vẽ và báo.
+// Máy chủ đã bỏ bản phao gửi lặp và gộp báo cáo của mọi phao cách nhau dưới 6 m thành một người; phao báo đầu là
+// chủ (docs/victim-claim.md). Viền chấm theo màu phao chủ; admin đánh dấu đã cứu, nhả, hoặc giao cho phao khác.
 import { state, RISKS, LORA_GOOD_M, LORA_WEAK_M } from '../state.js';
 import { hm, fmtAgo } from '../util/format.js';
 import { distM } from '../util/geo.js';
 import { log } from './timeline.js';
+import { colorOf } from './fleet.js';
 
 export { RISKS };
 const LIST_MAX = 3;   // rows shown before "Xem thêm"
@@ -16,7 +18,12 @@ const dots = new Map();      // vid -> circleMarker
 const victims = new Map();   // vid -> latest victim record
 let map = null;
 let toast = () => {};
+let onAction = () => {};
 let showAll = false;
+
+const STATUS_TEXT = { claimed: 'đang được cứu', rescued: 'đã cứu', released: 'chờ phao nhận' };
+const ownerOf = v => v.owner ?? (v.status ? null : v.buoy);
+const seenBy = v => v.seen_by || [v.buoy];
 
 const timeText = t => hm(new Date(t));
 
@@ -35,15 +42,44 @@ function victimPopup(v) {
   const dl = document.createElement('dl');
   row(dl, 'Độ tin cậy', Math.round(v.conf * 100) + '%');
   row(dl, 'Thấy lần cuối', `${timeText(v.last_at)} (${fmtAgo(v.last_at)})`);
-  row(dl, 'Phao báo', v.buoy);
+  if (v.status) row(dl, 'Trạng thái', STATUS_TEXT[v.status] + (ownerOf(v) ? ` · ${ownerOf(v)}` : ''));
+  else row(dl, 'Phao báo', v.buoy);
+  if (seenBy(v).length > 1) row(dl, 'Thấy bởi', seenBy(v).join(', '));
   box.append(h, dl);
+  if (state.role === 'admin' && v.status && v.status !== 'rescued') box.appendChild(adminActions(v));
   return box;
+}
+
+// Admin: đã cứu, nhả cho phao khác nhận, giao cho một phao (nó nhận lộ trình tới chỗ người này)
+function adminActions(v) {
+  const bar = document.createElement('div');
+  bar.className = 'v-actions';
+  const button = (text, cls, fn) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = ('btn small ' + cls).trim(); b.textContent = text;
+    b.addEventListener('click', fn);
+    bar.appendChild(b);
+  };
+  button('Đã cứu', 'primary', () => onAction(v.vid, 'rescued'));
+  if (v.status === 'claimed') button('Nhả', '', () => onAction(v.vid, 'release'));
+  const others = [...state.buoys.keys()].filter(id => id !== ownerOf(v) && state.buoys.get(id).link !== 'mavlink').sort();
+  if (others.length) {
+    const pick = document.createElement('select');
+    pick.setAttribute('aria-label', 'Phao nhận người này');
+    for (const id of others) pick.add(new Option(id, id));
+    bar.appendChild(pick);
+    button('Giao', '', () => onAction(v.vid, 'assign', pick.value));
+  }
+  return bar;
 }
 
 function putVictim(v) {
   if (!RISKS[v.risk] || !Number.isFinite(v.lat) || !Number.isFinite(v.lon)) return;
   victims.set(v.vid, v);
-  const style = { radius: 7 + v.risk, color: '#F8FAFC', weight: 2, fillColor: RISKS[v.risk].color, fillOpacity: .95 };
+  // Viền theo màu phao chủ; đã cứu: nhạt đi, viền trắng
+  const owner = ownerOf(v), rescued = v.status === 'rescued';
+  const style = { radius: 7 + v.risk, color: rescued || !owner ? '#F8FAFC' : colorOf(owner), weight: owner && !rescued ? 3 : 2,
+    dashArray: v.status === 'released' ? '3 3' : null, fillColor: RISKS[v.risk].color, fillOpacity: rescued ? .35 : .95 };
   const m = dots.get(v.vid);
   if (m) m.setLatLng([v.lat, v.lon]).setStyle(style).setRadius(style.radius).setPopupContent(() => victimPopup(v));
   else dots.set(v.vid, L.circleMarker([v.lat, v.lon], style).bindPopup(() => victimPopup(v), { className: 'pop' }).addTo(dotLayer));
@@ -78,8 +114,9 @@ function noteCapsize(a) {
   if (!(state.capsizedAt.get(a.buoy) >= a.at)) state.capsizedAt.set(a.buoy, a.at);
 }
 
-// Highest risk first, then the most recently seen
-const ordered = () => [...victims.values()].sort((a, b) => b.risk - a.risk || b.last_at - a.last_at);
+// Not rescued first, then the highest risk, then the most recently seen
+const ordered = () => [...victims.values()].sort((a, b) =>
+  (a.status === 'rescued') - (b.status === 'rescued') || b.risk - a.risk || b.last_at - a.last_at);
 
 // The "Người cần cứu" block in the left column
 function renderVictims() {
@@ -90,7 +127,7 @@ function renderVictims() {
   $('victims-count').textContent = all.length;
   $('victims-empty').hidden = all.length > 0;
   $('btn-clear-victims').hidden = !admin || !all.length;
-  $('victims').classList.toggle('has-victims', all.some(v => v.risk > 0));
+  $('victims').classList.toggle('has-victims', all.some(v => v.risk > 0 && v.status !== 'rescued'));
   list.replaceChildren();
   const shown = showAll ? all : all.slice(0, LIST_MAX);
   for (const v of shown) {
@@ -98,16 +135,21 @@ function renderVictims() {
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'victim';
     btn.style.setProperty('--risk', RISKS[v.risk].color);
+    btn.classList.toggle('rescued', v.status === 'rescued');
     const dot = document.createElement('span'); dot.className = 'risk-dot'; dot.setAttribute('aria-hidden', 'true');
     const main = document.createElement('span'); main.className = 'v-main';
     const name = document.createElement('b'); name.textContent = RISKS[v.risk].name;
     const conf = document.createElement('span'); conf.className = 'v-conf'; conf.textContent = `${Math.round(v.conf * 100)}%`;
     conf.title = 'Độ tin cậy';
     main.append(name, conf);
-    const sub = document.createElement('span'); sub.className = 'v-sub'; sub.textContent = `${v.buoy} · ${fmtAgo(v.last_at)}`;
+    const who = v.status === 'rescued' ? 'đã cứu' : v.status === 'released' ? 'chờ phao nhận' : ownerOf(v) || v.buoy;
+    // Các phao khác cũng thấy người này (và đi tiếp): "+1" trong dòng, đủ chữ khi đọc / di chuột
+    const n = seenBy(v).length, many = n > 1 ? ` +${n - 1}` : '';
+    const sub = document.createElement('span'); sub.className = 'v-sub'; sub.textContent = `${who}${many} · ${fmtAgo(v.last_at)}`;
+    if (n > 1) sub.title = `${n} phao thấy: ${seenBy(v).join(', ')}`;
     const go = document.createElement('i'); go.className = 'ph ph-arrow-right'; go.setAttribute('aria-hidden', 'true');
     btn.append(dot, main, sub, go);
-    btn.setAttribute('aria-label', `${RISKS[v.risk].name}, tin cậy ${Math.round(v.conf * 100)}%, ${v.buoy} báo ${fmtAgo(v.last_at)}. Xem trên bản đồ`);
+    btn.setAttribute('aria-label', `${RISKS[v.risk].name}, tin cậy ${Math.round(v.conf * 100)}%, ${who}${n > 1 ? `, ${n} phao thấy` : ''}, ${fmtAgo(v.last_at)}. Xem trên bản đồ`);
     btn.addEventListener('click', () => flyTo(v.vid));
     li.appendChild(btn);
     list.appendChild(li);
@@ -142,12 +184,21 @@ export function onVictimMessage(m) {
   if (!v || !RISKS[v.risk]) return;
   state.eventBuoys.add(v.buoy);
   const before = victims.get(v.vid);
+  const was = before && { status: before.status, owner: before.owner, seen: seenBy(before).length };
   putVictim(v);
   renderVictims();
   if (m.new || !before) {
     const risk = RISKS[v.risk].name;
     log('victim', `${v.buoy} phát hiện người, mức ${risk.toLowerCase()}`, v.first_at);
     toast(`${v.buoy} phát hiện người (${risk})`, 'bad');
+    return;
+  }
+  // Nhận nạn nhân: một phao khác thấy cùng người (nó đi tiếp), người đã được cứu, được nhả, đổi chủ
+  if (seenBy(v).length > was.seen) log('claim', `${seenBy(v).at(-1)} cũng thấy người của ${ownerOf(v) || v.buoy}: đi tiếp, không dừng`, v.last_at);
+  if (v.status !== was.status || v.owner !== was.owner) {
+    if (v.status === 'rescued') { log('rescue', `Người của ${ownerOf(v) || v.buoy} đã được cứu`, v.status_at); toast('Đã cứu một người', 'ok'); }
+    else if (v.status === 'released') log('claim', `Người của ${was.owner || v.buoy} được nhả: phao khác thấy sẽ nhận`, v.status_at);
+    else if (v.status === 'claimed') log('claim', `${v.owner} nhận người${v.status_by ? ' (admin giao)' : ''}`, v.status_at);
   }
 }
 
@@ -206,9 +257,10 @@ function legendControl() {
   return ctl;
 }
 
-export function initVictims(leafletMap, { toast: t, onClear }) {
+export function initVictims(leafletMap, { toast: t, onClear, onVictimAction }) {
   map = leafletMap;
   toast = t;
+  onAction = (vid, action, id) => { map.closePopup(); onVictimAction(vid, action, id); };
   alertLayer.addTo(map);
   dotLayer.addTo(map);
   legendControl().addTo(map);

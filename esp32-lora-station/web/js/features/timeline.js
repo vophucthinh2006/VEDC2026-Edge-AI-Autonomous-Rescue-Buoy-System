@@ -8,6 +8,7 @@ const KINDS = {
   victim:  { icon: 'ph-fill ph-person-simple-swim', tone: 'bad',    alert: true },
   capsize: { icon: 'ph-fill ph-warning',            tone: 'bad',    alert: true },
   rescue:  { icon: 'ph-fill ph-hand-heart',         tone: 'ok' },
+  claim:   { icon: 'ph ph-hand-pointing',            tone: 'info' },
   stop:    { icon: 'ph-fill ph-hand-palm',          tone: 'bad' },
   run:     { icon: 'ph-fill ph-play',               tone: 'ok' },
   idle:    { icon: 'ph-fill ph-pause-circle',       tone: 'accent' },
