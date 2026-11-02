@@ -44,14 +44,41 @@ function sanitizeMission(m) {
   return { waypoints: cleanPts(m.waypoints), poly: cleanPts(poly), spacing, angle, speed, cid };
 }
 
-// Yêu cầu gửi lộ trình xuống phao: { id?: tên phao, loop?: đi vòng, clear?: gửi lộ trình rỗng }
-function sanitizeSend(m) {
+// Yêu cầu gửi lộ trình xuống phao: { id?: tên phao, loop?: đi vòng, clear?: gửi lộ trình rỗng,
+// pts?: [[lat, lon], ...] lộ trình riêng cho phao này (chia vùng), thay cho lộ trình chung đang lưu }
+export function sanitizeSend(m) {
   if (!m || typeof m !== "object") return null;
   const id = m.id === undefined ? "PHAO-01" : typeof m.id === "string" ? m.id.replace(/[^\w.\-]/g, "").slice(0, 31) : "";
   if (!id) return null;
   if (m.loop !== undefined && typeof m.loop !== "boolean") return null;
   if (m.clear !== undefined && typeof m.clear !== "boolean") return null;
-  return { id, loop: m.loop === true, clear: m.clear === true };
+  const out = { id, loop: m.loop === true, clear: m.clear === true };
+  if (m.pts !== undefined) {
+    if (!Array.isArray(m.pts) || m.pts.length > MAX_POINTS) return null;
+    const pts = m.pts.map(p => (Array.isArray(p) ? { lat: p[0], lon: p[1] } : null));
+    if (!pts.every(validPt)) return null;
+    out.pts = cleanPts(pts).map(p => [p.lat, p.lon]);
+  }
+  return out;
+}
+
+// Lệnh về bờ: { id: tên phao, ret: true (về điểm đỗ) | false (đi tiếp lộ trình) }
+function sanitizeReturn(m) {
+  if (!m || typeof m !== "object" || typeof m.id !== "string") return null;
+  const id = m.id.replace(/[^\w.\-]/g, "").slice(0, 31);
+  if (!id || typeof m.ret !== "boolean") return null;
+  return { id, ret: m.ret };
+}
+
+// Lệnh cả đội: { action: hold|resume|return, ids?: [tên phao] } (không có ids: mọi phao nghe được gần đây)
+export function sanitizeFleet(m) {
+  if (!m || typeof m !== "object" || !["hold", "resume", "return"].includes(m.action)) return null;
+  const out = { action: m.action };
+  if (m.ids !== undefined) {
+    if (!Array.isArray(m.ids) || m.ids.length > 50 || !m.ids.every(id => typeof id === "string")) return null;
+    out.ids = m.ids.map(id => id.replace(/[^\w.\-]/g, "").slice(0, 31)).filter(Boolean);
+  }
+  return out;
 }
 
 // Lệnh đèn: { id: tên phao, lights: 0..3 } (bit0 = đèn 1 PC3, bit1 = đèn 2 PC2)
@@ -68,6 +95,24 @@ function sanitizeHold(m) {
   const id = m.id.replace(/[^\w.\-]/g, "").slice(0, 31);
   if (!id || typeof m.hold !== "boolean") return null;
   return { id, hold: m.hold };
+}
+
+// Kế hoạch cho cả đội (src/fleetplan.js): { mode: "sectors" | "formation", poly: [{lat, lon}] (3..300 điểm),
+// ids: [tên phao] (1..8), spacing? 2..200 m, angle? 0..359 độ, shape? line|v|column, leader?, loop?, dry? }
+export function sanitizePlan(m) {
+  if (!m || typeof m !== "object" || !["sectors", "formation"].includes(m.mode)) return null;
+  if (!Array.isArray(m.poly) || m.poly.length < 3 || m.poly.length > MAX_POINTS || !m.poly.every(validPt)) return null;
+  if (!Array.isArray(m.ids) || m.ids.length < 1 || m.ids.length > 8 || !m.ids.every(id => typeof id === "string")) return null;
+  const ids = [...new Set(m.ids.map(id => id.replace(/[^\w.\-]/g, "").slice(0, 31)).filter(Boolean))];
+  if (!ids.length) return null;
+  const spacing = m.spacing === undefined ? 10 : num(m.spacing);
+  const angle = m.angle === undefined || m.angle === null ? null : num(m.angle);
+  if (spacing === null || spacing < 2 || spacing > 200) return null;
+  if (angle !== null && (angle < 0 || angle >= 360)) return null;
+  const shape = m.shape === undefined ? "line" : m.shape;
+  if (!["line", "v", "column"].includes(shape)) return null;
+  const leader = typeof m.leader === "string" ? m.leader.replace(/[^\w.\-]/g, "").slice(0, 31) : null;
+  return { mode: m.mode, poly: cleanPts(m.poly), ids, spacing, angle, shape, leader, loop: m.loop === true, dry: m.dry === true };
 }
 
 // Lệnh admin: phiên admin từ trình duyệt (kèm Origin đúng), hoặc Bearer ADMIN_API_TOKEN cho script thử.
@@ -161,33 +206,48 @@ export default {
       return json({ error: "not found" }, 404);
     }
 
-    // ---- Gửi lộ trình đang lưu xuống phao qua trạm bờ: chỉ admin ----
+    // ---- Gửi lộ trình xuống một phao qua trạm bờ: admin (hoặc token ADMIN_API_TOKEN cho script chạy thử) ----
     if (path === "/api/mission/send") {
-      if (!session) return json({ error: "unauthenticated" }, 401);
       if (request.method !== "POST") return json({ error: "method" }, 405);
-      if (session.role !== "admin") return json({ error: "Chỉ admin được gửi lộ trình" }, 403);
-      if (!originOk(request)) return json({ error: "forbidden origin" }, 403);
+      const caller = await adminCaller(request, env, session);
+      if (caller.error) return caller.error;
       const body = await request.text();
-      if (body.length > MAX_BODY) return json({ error: "too large" }, 413);
+      if (body.length > MAX_MISSION_BODY) return json({ error: "too large" }, 413);
       let req = null;
       try { req = sanitizeSend(body ? JSON.parse(body) : {}); } catch { /* báo lỗi bên dưới */ }
       if (!req) return json({ error: "bad request" }, 400);
-      return hub().fetch("https://hub/downlink", { method: "PUT", body: JSON.stringify({ ...req, by: session.email }) });
+      return hub().fetch("https://hub/downlink", { method: "PUT", body: JSON.stringify({ ...req, by: caller.by }) });
     }
 
-    // ---- Bật/tắt đèn phao, dừng phao, xóa chấm người: admin (hoặc token ADMIN_API_TOKEN) ----
-    if (path === "/api/lights" || path === "/api/hold" || path === "/api/victims/clear") {
+    // ---- Kế hoạch cho cả đội (chia vùng / đội hình), kết thúc đội hình: admin (hoặc token ADMIN_API_TOKEN) ----
+    if (path === "/api/fleet/plan" || path === "/api/formation/end") {
+      if (request.method !== "POST") return json({ error: "method" }, 405);
+      const caller = await adminCaller(request, env, session);
+      if (caller.error) return caller.error;
+      if (path === "/api/formation/end") return hub().fetch("https://hub/formation", { method: "DELETE", body: JSON.stringify({ by: caller.by }) });
+      const body = await request.text();
+      if (body.length > MAX_MISSION_BODY) return json({ error: "too large" }, 413);
+      let req = null;
+      try { req = sanitizePlan(JSON.parse(body)); } catch { /* báo lỗi bên dưới */ }
+      if (!req) return json({ error: "bad request" }, 400);
+      return hub().fetch("https://hub/plan", { method: "PUT", body: JSON.stringify({ ...req, by: caller.by }) });
+    }
+
+    // ---- Bật/tắt đèn phao, dừng phao, về bờ, lệnh cả đội, xóa chấm người: admin (hoặc token ADMIN_API_TOKEN) ----
+    const COMMANDS = { "/api/lights": [sanitizeLights, "lights"], "/api/hold": [sanitizeHold, "hold"],
+      "/api/return": [sanitizeReturn, "return"], "/api/fleet": [sanitizeFleet, "fleet"] };
+    if (COMMANDS[path] || path === "/api/victims/clear") {
       if (request.method !== "POST") return json({ error: "method" }, 405);
       const caller = await adminCaller(request, env, session);
       if (caller.error) return caller.error;
       if (path === "/api/victims/clear") return hub().fetch("https://hub/victims", { method: "DELETE" });
       const body = await request.text();
       if (body.length > MAX_BODY) return json({ error: "too large" }, 413);
+      const [sanitize, target] = COMMANDS[path];
       let req = null;
-      const hold = path === "/api/hold";
-      try { req = (hold ? sanitizeHold : sanitizeLights)(JSON.parse(body)); } catch { /* báo lỗi bên dưới */ }
+      try { req = sanitize(JSON.parse(body)); } catch { /* báo lỗi bên dưới */ }
       if (!req) return json({ error: "bad request" }, 400);
-      return hub().fetch(hold ? "https://hub/hold" : "https://hub/lights", { method: "PUT", body: JSON.stringify({ ...req, by: caller.by }) });
+      return hub().fetch("https://hub/" + target, { method: "PUT", body: JSON.stringify({ ...req, by: caller.by }) });
     }
 
     // ---- Address search for the map: guest or admin session, answered by Nominatim through the Hub ----

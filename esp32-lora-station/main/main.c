@@ -58,7 +58,7 @@ static const char *TAG = "tram_bo";
 
 // LỘ TRÌNH GỬI XUỐNG PHAO (docs/lora-route-downlink.md)
 #define DOWNLINK_POLL_MS       5000   // chu kỳ hỏi Worker bản admin đã bấm "Gửi tới phao"
-#define DOWNLINK_BODY_MAX      16384  // 300 điểm khoảng 8 KB JSON
+#define DOWNLINK_BODY_MAX      32768  // 300 điểm khoảng 8 KB JSON; nhiều phao thì mỗi phao một lộ trình
 #define LORA_TURNAROUND_MS     50     // phao chuyển sang nghe ngay khi phát xong beacon
 #define LORA_TX_TIMEOUT_MS     2000   // khung 120 byte ở SF9 mất khoảng 0.5 s
 
@@ -67,14 +67,22 @@ typedef struct { char json[JSON_MAX]; bool station; } cloud_msg_t;   // station:
 static sx127x_t lora_dev;
 static EventGroupHandle_t wifi_event_group;
 static QueueHandle_t cloud_queue;
-static route_downlink_t downlink;          // bản đang gửi, rev = 0: không có gì để gửi
+static route_downlink_t downlinks[DOWNLINK_SLOTS];   // mỗi phao một bản đang gửi, rev = 0: ô trống
 static SemaphoreHandle_t downlink_lock;
 
-// LỆNH ĐÈN admin bật trên dashboard, theo từng phao (GET /api/downlink, trường "lights").
-// Phao bật relay đúng theo giá trị này mỗi lần nhận ACK; phao chưa có lệnh: tắt (0).
+// LỆNH admin trên dashboard, theo từng phao (GET /api/downlink: "lights", "hold", "ret", "home", "fol").
+// Phao làm đúng theo giá trị này mỗi lần nhận ACK; phao chưa có lệnh: tắt đèn, được chạy.
 #define MAX_LIGHT_BUOYS 8
-// mask = trường lệnh trong ACK: bit 0 đèn 1, bit 1 đèn 2, bit 2 DỪNG (F407 khóa motor tới khi admin cho chạy tiếp)
-typedef struct { char id[32]; uint8_t mask; } light_cmd_t;
+// mask = trường lệnh trong ACK: bit 0 đèn 1, bit 1 đèn 2, bit 2 DỪNG (F407 khóa motor tới khi admin cho chạy
+// tiếp), bit 3 VỀ BỜ (Pi chạy về điểm đỗ). home: điểm đỗ riêng của phao, thay GPS trạm trong ACK.
+// role: chỗ của phao trong đội hình (đi theo phao dẫn đầu), on = false khi không ở đội hình.
+typedef struct {
+    char id[32];
+    uint8_t mask;
+    bool has_home;
+    double home_lat, home_lon;
+    formation_role_t role;
+} light_cmd_t;
 static light_cmd_t lights[MAX_LIGHT_BUOYS];   // dưới downlink_lock
 static int light_count;
 
@@ -308,11 +316,16 @@ static void xu_ly_goi_lora(const char *raw, int rssi, float snr) {
     xep_hang_cloud(&m);
 }
 
-// Lệnh đèn của phao id (gọi khi đang giữ downlink_lock); chưa có lệnh: tắt.
-static uint8_t lenh_den(const char *id) {
+// Lệnh của phao id (gọi khi đang giữ downlink_lock); NULL khi chưa có lệnh nào: tắt đèn, được chạy.
+static const light_cmd_t *lenh_phao(const char *id) {
     for (int i = 0; i < light_count; i++)
-        if (strcmp(lights[i].id, id) == 0) return lights[i].mask;
-    return 0U;
+        if (strcmp(lights[i].id, id) == 0) return &lights[i];
+    return NULL;
+}
+
+static uint8_t lenh_den(const char *id) {
+    const light_cmd_t *l = lenh_phao(id);
+    return l ? l->mask : 0U;
 }
 
 // ------------------------------------------------- Trả lời MỌI khung của phao
@@ -334,15 +347,21 @@ static void tra_loi_phao(const char *raw) {
     char frame[DOWNLINK_FRAME_MAX + 1];
     size_t len = 0;
     xSemaphoreTake(downlink_lock, portMAX_DELAY);
-    uint8_t den = lenh_den(id);
-    uint16_t count = downlink.count;
+    const light_cmd_t *lenh = lenh_phao(id);
+    uint8_t den = lenh ? lenh->mask : 0U;
+    bool co_diem_do = lenh && lenh->has_home;
+    double do_lat = co_diem_do ? lenh->home_lat : 0.0, do_lon = co_diem_do ? lenh->home_lon : 0.0;
+    formation_role_t vai = { 0 };
+    if (lenh) vai = lenh->role;
+    const route_downlink_t *lo_trinh = RouteDownlink_Find(downlinks, DOWNLINK_SLOTS, id);
+    uint16_t count = lo_trinh ? lo_trinh->count : 0U;
     route_ack_t ack = { 0 };
     // RTE chỉ khi đèn và trạng thái dừng của phao đã đúng lệnh: lệnh dừng không phải chờ hết lộ trình
     bool den_dung = !payload.has_lights || payload.lights == (den & 3U);
     bool dung_dung = !payload.has_hold || payload.hold == ((den >> 2) & 1U);
     if (!la_su_kien && den_dung && dung_dung) {
         ack = (route_ack_t){ .has = payload.has_route, .rev = payload.route_rev, .have = payload.route_have, .pi = payload.route_pi };
-        len = RouteDownlink_Frame(&downlink, id, &ack, frame, sizeof(frame));
+        if (lo_trinh) len = RouteDownlink_Frame(lo_trinh, id, &ack, frame, sizeof(frame));
     }
     xSemaphoreGive(downlink_lock);
     bool la_rte = len > 0;
@@ -350,7 +369,11 @@ static void tra_loi_phao(const char *raw) {
         portENTER_CRITICAL(&tram_fix_mux);
         gps_fix_t tram = tram_fix;
         portEXIT_CRITICAL(&tram_fix_mux);
-        len = RouteDownlink_Ack(id, la_su_kien ? ev.seq : 0U, den, tram.fix_valid, tram.lat, tram.lon, frame, sizeof(frame));
+        // Điểm về: điểm đỗ riêng của phao (nhiều phao đỗ cạnh nhau dọc bờ), không có thì GPS trạm
+        if (co_diem_do)
+            len = RouteDownlink_Ack(id, la_su_kien ? ev.seq : 0U, den, true, do_lat, do_lon, &vai, frame, sizeof(frame));
+        else
+            len = RouteDownlink_Ack(id, la_su_kien ? ev.seq : 0U, den, tram.fix_valid, tram.lat, tram.lon, &vai, frame, sizeof(frame));
         if (len == 0) return;
     }
     vTaskDelay(pdMS_TO_TICKS(LORA_TURNAROUND_MS));
@@ -397,68 +420,112 @@ static void tao_url_downlink(char *out, size_t n) {
     else   snprintf(out, n, "%s", u);
 }
 
-// {"rev":7,"id":"PHAO-01","loop":false,"pts":[[lat,lon],...],"lights":{"PHAO-01":1},"hold":{"PHAO-01":1}}
-// -> downlink và lệnh của từng phao (đèn ở bit 0-1, dừng ở bit 2). False nếu lộ trình sai dạng; lệnh sai
-// dạng thì bỏ qua từng mục.
+// Một lộ trình {"rev":7,"id":"PHAO-01","loop":false,"pts":[[lat,lon],...]} -> out. False nếu sai dạng.
+static bool doc_mot_lo_trinh(const cJSON *obj, route_downlink_t *out) {
+    memset(out, 0, sizeof(*out));
+    const cJSON *rev = cJSON_GetObjectItem(obj, "rev");
+    if (!cJSON_IsNumber(rev) || rev->valueint <= 0 || rev->valueint > 0xFFFF) return false;
+    const cJSON *id = cJSON_GetObjectItem(obj, "id");
+    const cJSON *loop = cJSON_GetObjectItem(obj, "loop");
+    const cJSON *pts = cJSON_GetObjectItem(obj, "pts");
+    int n = cJSON_IsArray(pts) ? cJSON_GetArraySize(pts) : -1;
+    if (!cJSON_IsString(id) || strlen(id->valuestring) >= sizeof(out->id) || n < 0 || n > (int)DOWNLINK_MAX_POINTS) return false;
+    out->rev = (uint16_t)rev->valueint;
+    strcpy(out->id, id->valuestring);
+    out->loop = cJSON_IsTrue(loop);
+    for (int i = 0; i < n; i++) {
+        const cJSON *pt = cJSON_GetArrayItem(pts, i);
+        const cJSON *lat = cJSON_GetArrayItem(pt, 0), *lon = cJSON_GetArrayItem(pt, 1);
+        if (!cJSON_IsNumber(lat) || !cJSON_IsNumber(lon) || fabs(lat->valuedouble) > 90.0 || fabs(lon->valuedouble) > 180.0) {
+            memset(out, 0, sizeof(*out));
+            return false;
+        }
+        out->lat[i] = lat->valuedouble;
+        out->lon[i] = lon->valuedouble;
+    }
+    out->count = (uint16_t)n;
+    return true;
+}
+
+// Mục lệnh của phao ten trong den[], thêm mới nếu chưa có; NULL khi bảng đầy hoặc tên quá dài
+static light_cmd_t *muc_lenh(const char *ten, light_cmd_t *den, int *so_den) {
+    if (ten == NULL || strlen(ten) >= sizeof(den->id)) return NULL;
+    for (int i = 0; i < *so_den; i++)
+        if (strcmp(den[i].id, ten) == 0) return &den[i];
+    if (*so_den >= MAX_LIGHT_BUOYS) return NULL;
+    light_cmd_t *m = &den[(*so_den)++];
+    memset(m, 0, sizeof(*m));
+    strcpy(m->id, ten);
+    return m;
+}
+
+// Cờ 0/1 của từng phao ({"PHAO-01":1}) vào bit `bit` của lệnh
+static void doc_co(const cJSON *nhom, uint8_t bit, light_cmd_t *den, int *so_den) {
+    const cJSON *muc;
+    cJSON_ArrayForEach(muc, nhom) {
+        if (!cJSON_IsNumber(muc) || (muc->valueint != 0 && muc->valueint != 1)) continue;
+        light_cmd_t *m = muc_lenh(muc->string, den, so_den);
+        if (m == NULL) continue;
+        if (muc->valueint) m->mask |= bit; else m->mask &= (uint8_t)~bit;
+    }
+}
+
+// {"rev":7,"id":"PHAO-01","loop":false,"pts":[...],"routes":[{rev,id,loop,pts},...],"lights":{"PHAO-01":1},
+//  "hold":{"PHAO-01":1},"ret":{"PHAO-02":1},"home":{"PHAO-02":[lat,lon]},"fol":{"PHAO-02":["PHAO-01",-12,0]}}
+// -> mỗi phao một lộ trình (routes; Worker cũ chỉ có một bản ở gốc) và lệnh của từng phao. False nếu một lộ
+// trình sai dạng; lệnh sai dạng thì bỏ qua từng mục.
 static bool doc_downlink(const char *body, route_downlink_t *out, light_cmd_t *den, int *so_den) {
     cJSON *root = cJSON_Parse(body);
     if (root == NULL) return false;
-    bool ok = false;
-    memset(out, 0, sizeof(*out));
+    bool ok = true;
+    memset(out, 0, DOWNLINK_SLOTS * sizeof(*out));
     *so_den = 0;
-    const cJSON *lights_json = cJSON_GetObjectItem(root, "lights");
     const cJSON *muc;
-    cJSON_ArrayForEach(muc, lights_json) {
-        if (*so_den >= MAX_LIGHT_BUOYS || muc->string == NULL || strlen(muc->string) >= sizeof(den->id)) continue;
+    cJSON_ArrayForEach(muc, cJSON_GetObjectItem(root, "lights")) {
         if (!cJSON_IsNumber(muc) || muc->valueint < 0 || muc->valueint > 3) continue;
-        strcpy(den[*so_den].id, muc->string);
-        den[*so_den].mask = (uint8_t)muc->valueint;
-        (*so_den)++;
+        light_cmd_t *m = muc_lenh(muc->string, den, so_den);
+        if (m) m->mask = (uint8_t)((m->mask & ~3U) | (unsigned)muc->valueint);
     }
-    cJSON_ArrayForEach(muc, cJSON_GetObjectItem(root, "hold")) {
-        if (muc->string == NULL || strlen(muc->string) >= sizeof(den->id)) continue;
-        if (!cJSON_IsNumber(muc) || (muc->valueint != 0 && muc->valueint != 1)) continue;
-        int i = 0;
-        while (i < *so_den && strcmp(den[i].id, muc->string) != 0) i++;
-        if (i == *so_den) {
-            if (*so_den >= MAX_LIGHT_BUOYS) continue;
-            strcpy(den[i].id, muc->string);
-            den[i].mask = 0U;
-            (*so_den)++;
-        }
-        if (muc->valueint) den[i].mask |= 4U; else den[i].mask &= 3U;
+    doc_co(cJSON_GetObjectItem(root, "hold"), 4U, den, so_den);
+    doc_co(cJSON_GetObjectItem(root, "ret"), 8U, den, so_den);
+    cJSON_ArrayForEach(muc, cJSON_GetObjectItem(root, "home")) {
+        const cJSON *lat = cJSON_GetArrayItem(muc, 0), *lon = cJSON_GetArrayItem(muc, 1);
+        if (!cJSON_IsNumber(lat) || !cJSON_IsNumber(lon) || fabs(lat->valuedouble) > 90.0 || fabs(lon->valuedouble) > 180.0) continue;
+        light_cmd_t *m = muc_lenh(muc->string, den, so_den);
+        if (m) { m->has_home = true; m->home_lat = lat->valuedouble; m->home_lon = lon->valuedouble; }
     }
-    const cJSON *rev = cJSON_GetObjectItem(root, "rev");
-    if (cJSON_IsNumber(rev) && rev->valueint == 0) {
-        ok = true;                                    // chưa gửi gì
-    } else if (cJSON_IsNumber(rev) && rev->valueint > 0 && rev->valueint <= 0xFFFF) {
-        const cJSON *id = cJSON_GetObjectItem(root, "id");
-        const cJSON *loop = cJSON_GetObjectItem(root, "loop");
-        const cJSON *pts = cJSON_GetObjectItem(root, "pts");
-        int n = cJSON_IsArray(pts) ? cJSON_GetArraySize(pts) : -1;
-        if (cJSON_IsString(id) && strlen(id->valuestring) < sizeof(out->id) && n >= 0 && n <= (int)DOWNLINK_MAX_POINTS) {
-            out->rev = (uint16_t)rev->valueint;
-            strcpy(out->id, id->valuestring);
-            out->loop = cJSON_IsTrue(loop);
-            ok = true;
-            for (int i = 0; i < n && ok; i++) {
-                const cJSON *pt = cJSON_GetArrayItem(pts, i);
-                const cJSON *lat = cJSON_GetArrayItem(pt, 0), *lon = cJSON_GetArrayItem(pt, 1);
-                ok = cJSON_IsNumber(lat) && cJSON_IsNumber(lon) && fabs(lat->valuedouble) <= 90.0 && fabs(lon->valuedouble) <= 180.0;
-                if (ok) { out->lat[i] = lat->valuedouble; out->lon[i] = lon->valuedouble; }
-            }
-            out->count = (uint16_t)n;
+    cJSON_ArrayForEach(muc, cJSON_GetObjectItem(root, "fol")) {
+        const cJSON *ld = cJSON_GetArrayItem(muc, 0), *r = cJSON_GetArrayItem(muc, 1), *b = cJSON_GetArrayItem(muc, 2);
+        if (!cJSON_IsString(ld) || strlen(ld->valuestring) >= sizeof(den->role.leader) ||
+            !cJSON_IsNumber(r) || !cJSON_IsNumber(b) || fabs(r->valuedouble) > 500.0 || fabs(b->valuedouble) > 500.0) continue;
+        light_cmd_t *m = muc_lenh(muc->string, den, so_den);
+        if (m == NULL) continue;
+        m->role.on = true;
+        strcpy(m->role.leader, ld->valuestring);
+        m->role.right_m = (int16_t)lround(r->valuedouble);
+        m->role.back_m = (int16_t)lround(b->valuedouble);
+    }
+    const cJSON *routes = cJSON_GetObjectItem(root, "routes");
+    if (cJSON_IsArray(routes)) {
+        size_t o = 0;
+        cJSON_ArrayForEach(muc, routes) {
+            if (o == DOWNLINK_SLOTS) { ESP_LOGW(TAG, "[LO TRINH] qua %u phao cho lo trinh, bo bot", (unsigned)DOWNLINK_SLOTS); break; }
+            if (doc_mot_lo_trinh(muc, &out[o])) o++; else ok = false;
         }
+    } else {
+        const cJSON *rev = cJSON_GetObjectItem(root, "rev");
+        if (!cJSON_IsNumber(rev)) ok = false;
+        else if (rev->valueint != 0) ok = doc_mot_lo_trinh(root, &out[0]);   // rev 0: chưa gửi gì
     }
     cJSON_Delete(root);
-    if (!ok) memset(out, 0, sizeof(*out));
+    if (!ok) memset(out, 0, DOWNLINK_SLOTS * sizeof(*out));
     return ok;
 }
 
 // ------------------------------------------------- Task lấy lộ trình admin đã bấm gửi
 static void task_lay_lo_trinh(void *arg) {
     static char url[160];
-    static route_downlink_t moi;                      // 5 KB: không để trên stack của task
+    static route_downlink_t moi[DOWNLINK_SLOTS];      // 5 KB mỗi phao: không để trên stack của task
     static light_cmd_t den_moi[MAX_LIGHT_BUOYS];
     tao_url_downlink(url, sizeof(url));
     char *body = malloc(DOWNLINK_BODY_MAX);
@@ -484,20 +551,25 @@ static void task_lay_lo_trinh(void *arg) {
         if (len >= 0) {
             body[len] = '\0';
             int so_den = 0;
-            if (doc_downlink(body, &moi, den_moi, &so_den)) {
+            if (doc_downlink(body, moi, den_moi, &so_den)) {
                 xSemaphoreTake(downlink_lock, portMAX_DELAY);
-                bool doi = moi.rev != downlink.rev;
-                downlink = moi;
+                bool doi[DOWNLINK_SLOTS];
+                for (size_t k = 0; k < DOWNLINK_SLOTS; k++) {
+                    const route_downlink_t *cu = RouteDownlink_Find(downlinks, DOWNLINK_SLOTS, moi[k].id);
+                    doi[k] = moi[k].rev != 0 && (cu == NULL || cu->rev != moi[k].rev);
+                }
+                memcpy(downlinks, moi, sizeof(moi));
                 for (int i = 0; i < so_den; i++) {
                     if (lenh_den(den_moi[i].id) != den_moi[i].mask)
-                        ESP_LOGW(TAG, "[LENH] %s: %u (den 1 %s, den 2 %s, %s)", den_moi[i].id, den_moi[i].mask,
+                        ESP_LOGW(TAG, "[LENH] %s: %u (den 1 %s, den 2 %s, %s%s)", den_moi[i].id, den_moi[i].mask,
                                  den_moi[i].mask & 1U ? "bat" : "tat", den_moi[i].mask & 2U ? "bat" : "tat",
-                                 den_moi[i].mask & 4U ? "DUNG" : "duoc chay");
+                                 den_moi[i].mask & 4U ? "DUNG" : "duoc chay", den_moi[i].mask & 8U ? ", VE BO" : "");
                 }
                 memcpy(lights, den_moi, sizeof(den_moi));
                 light_count = so_den;
                 xSemaphoreGive(downlink_lock);
-                if (doi && moi.rev) ESP_LOGW(TAG, "[LO TRINH] ban gui #%u: %u diem cho %s%s", moi.rev, moi.count, moi.id, moi.loop ? ", di vong" : "");
+                for (size_t k = 0; k < DOWNLINK_SLOTS; k++)
+                    if (doi[k]) ESP_LOGW(TAG, "[LO TRINH] ban gui #%u: %u diem cho %s%s", moi[k].rev, moi[k].count, moi[k].id, moi[k].loop ? ", di vong" : "");
             } else {
                 ESP_LOGW(TAG, "[LO TRINH] Worker tra ve lo trinh sai dang");
             }

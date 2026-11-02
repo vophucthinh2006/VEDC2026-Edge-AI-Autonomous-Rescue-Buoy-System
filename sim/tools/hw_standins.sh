@@ -57,7 +57,7 @@ start_stm32_standins() {
     # The route code of both firmwares, compiled for this machine and run through ctypes.
     gcc -std=c11 -O1 -Wall -shared -fPIC -I"$repo/STM32F4/App" -I"$repo/esp32-lora-station/main" \
         "$VEDC_SIM_REPO/tools/route_radio_shim.c" "$repo/STM32F4/App/route_link.c" \
-        "$repo/STM32F4/App/shore_link.c" "$repo/STM32F4/App/event_queue.c" \
+        "$repo/STM32F4/App/shore_link.c" "$repo/STM32F4/App/event_queue.c" "$repo/STM32F4/App/lora_slot.c" \
         "$repo/esp32-lora-station/main/route_downlink.c" "$repo/esp32-lora-station/main/lora_payload.c" \
         -lm -o "$run/librouteradio.so" || return 1
     if [ -n "$VEDC_ROUTE_FILE" ]; then

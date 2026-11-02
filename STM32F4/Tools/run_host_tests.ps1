@@ -97,6 +97,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to compile shore_link_test' }
 & $shoreExe
 if ($LASTEXITCODE -ne 0) { throw 'shore_link_test failed' }
 
+$slotExe = Join-Path $testDir 'lora_slot_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'STM32F4/App') `
+  (Join-Path $repo 'STM32F4/Tests/lora_slot_test.c') `
+  (Join-Path $repo 'STM32F4/App/lora_slot.c') `
+  -o $slotExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile lora_slot_test' }
+& $slotExe
+if ($LASTEXITCODE -ne 0) { throw 'lora_slot_test failed' }
+
 $eventExe = Join-Path $testDir 'event_queue_test.exe'
 & gcc -std=c11 -Wall -Wextra -Werror `
   -I (Join-Path $repo 'STM32F4/App') `

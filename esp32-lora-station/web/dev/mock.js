@@ -118,7 +118,43 @@
             routes[id] = { rev: dl.rev, n: count, have: 0, pi: 0 };
           },
           clearVictims() { send({ type: 'victims', victims: [], alerts: [] }); },
+          // Đội tàu (js/features/fleet.js): về bờ, lệnh cả đội, kế hoạch (một kế hoạch thô: mỗi phao một đường chéo vùng)
+          setReturn(id, ret) {
+            send({ type: 'ret', id, want: ret, have: null, at: now() });
+            send({ type: 'task', id, kind: ret ? 'return' : 'idle', ref: null, since: now() });
+          },
+          fleet(action) {
+            for (const b of buoys) {
+              if (action !== 'return') window.mockServer.setHold(b.id, action === 'hold');
+              if (action !== 'hold') window.mockServer.setReturn(b.id, action === 'return');
+            }
+          },
+          plan(body) {
+            const ids = body.ids, poly = body.poly.map(p => [p.lat, p.lon]);
+            if (body.mode === 'formation') {
+              const followers = ids.filter(i => i !== body.leader);
+              const members = Object.fromEntries(followers.map((id, k) => [id, { right: (k % 2 ? -1 : 1) * Math.ceil((k + 1) / 2) * body.spacing, back: 0 }]));
+              if (!body.dry) {
+                send({ type: 'formation', formation: { leader: body.leader, shape: body.shape, spacing: body.spacing, members } });
+                send({ type: 'task', id: body.leader, kind: 'formation', ref: { role: 'leader' }, since: now() });
+                for (const [id, m] of Object.entries(members)) send({ type: 'task', id, kind: 'formation', ref: { role: 'follower', leader: body.leader, ...m }, since: now() });
+              }
+              return { mode: 'formation', leader: body.leader, route: poly, members };
+            }
+            const plan = ids.map((id, k) => ({ id, pts: [poly[k % poly.length], poly[(k + 2) % poly.length]] }));
+            if (!body.dry) {
+              for (const r of plan) {
+                dl = { rev: dl.rev + 1, id: r.id, loop: false, n: r.pts.length, pts: r.pts, by: 'mock@local', at: now(), delivered: null };
+                send({ type: 'downlink', ...dl });
+                routes[r.id] = { rev: dl.rev, n: r.pts.length, have: 0, pi: 0 };
+                send({ type: 'task', id: r.id, kind: 'sector', ref: { rev: dl.rev, n: r.pts.length }, since: now() });
+              }
+            }
+            return { mode: 'sectors', routes: plan };
+          },
         };
+        send({ type: 'task', id: 'PHAO-01', kind: 'sector', ref: { rev: 1, n: 4 }, since: now() });
+        send({ type: 'link', id: 'PHAO-03', lost: false, since: now() });
 
         // Gói mới mỗi 3 giây
         let n = 0;

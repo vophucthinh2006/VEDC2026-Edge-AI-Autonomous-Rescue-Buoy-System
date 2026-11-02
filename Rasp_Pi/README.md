@@ -167,7 +167,8 @@ Phao STM32 (`config/boat_stm32.yaml`), gọi cổng theo **ổ USB** (`/dev/seri
 
 Giao thức với F407 ở `STM32F4/README.md` mục 11. Pi đọc thêm:
 
-- `$LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon` mỗi giây: `shore_ok` 0/1, `heard_ago_s` số giây từ
+- `$LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon[,hold[,ret]]` mỗi giây (`ret` 1: admin gọi về bờ, đi tới
+  điểm đỗ và giữ ở đó; `$FOL` và `$LDR` cho đội hình: [docs/fleet-control.md](../docs/fleet-control.md)): `shore_ok` 0/1, `heard_ago_s` số giây từ
   lần cuối nghe trạm bờ (-1: chưa nghe), `home_valid` 0/1 và vị trí trạm (6 chữ số thập phân, có thể để trống khi
   `home_valid` = 0). Firmware chưa có `$LNK`: Pi coi liên lạc bờ luôn tốt và không có nhà.
 - `$SYS` trường thứ 9 `battery_pct` (0..100, -1 không rõ); trường 1 `battery` là volt.

@@ -50,6 +50,27 @@ class Stm32LinesTest(unittest.TestCase):
         self.assertFalse(self.state.snapshot().link.hold)
         self.feed("LNK", 9, 1, "1.0", 1, "10.762600", "106.660100")   # older firmware: no hold field
         self.assertFalse(self.state.snapshot().link.hold)
+        self.assertFalse(self.state.snapshot().link.ret)
+        self.feed("LNK", 10, 1, "1.0", 1, "10.762700", "106.660200", 0, 1)   # called home to its parking spot
+        link = self.state.snapshot().link
+        self.assertTrue(link.ret)
+        self.assertFalse(link.hold)
+        self.assertEqual(link.home, (10.7627, 106.6602))
+        self.feed("LNK", 11, 1, "1.0", 1, "10.762700", "106.660200", 0, 0)
+        self.assertFalse(self.state.snapshot().link.ret)
+
+    def test_fol_and_ldr_bring_the_formation_and_its_leader(self):
+        self.feed("FOL", 1, "PHAO-01", -12, 5)
+        self.feed("LDR", 1, "PHAO-01", "10.762600", "106.660100", "87.5", "0.31")
+        snap = self.state.snapshot()
+        self.assertEqual(snap.link.follow, ("PHAO-01", -12.0, 5.0))
+        self.assertEqual((snap.leader.buoy, snap.leader.heading_deg, snap.leader.speed_mps), ("PHAO-01", 87.5, 0.31))
+        self.feed("LNK", 12, 1, "1.0", 0, "", "", 0, 0)                  # the link line keeps the formation
+        self.assertIsNotNone(self.state.snapshot().link.follow)
+        self.feed("FOL", 2, "", "", "")
+        snap = self.state.snapshot()
+        self.assertIsNone(snap.link.follow)
+        self.assertIsNone(snap.leader)
 
     def test_lnk_home_valid_0_ignores_any_position(self):
         self.feed("LNK", 6, 0, "75.0", 0, "10.762600", "106.660100")

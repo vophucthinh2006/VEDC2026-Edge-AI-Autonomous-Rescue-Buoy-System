@@ -277,3 +277,161 @@ test("a diagnostics frame is kept beside the buoy, never in place of its beacon"
   void res;
   assert.ok(opened.some(m => m.type === "diag" && m.id === "PHAO-01" && m.reason === "obstacle_too_close"));
 });
+
+// ---- Đội tàu: mỗi phao một bản gửi, lệnh về bờ, lệnh cả đội, điểm đỗ, mất liên lạc ----
+
+const beaconOf = (id, route, extra = {}) => ({ ...beacon(route), id, ...extra });
+
+test("routes for two buoys do not overwrite each other, and are delivered one by one", async () => {
+  const { hub, store } = makeHub();
+  await sendRoute(hub);
+  const own = [[10.8840, 106.7970], [10.8841, 106.7971]];
+  const two = await call(hub, "PUT", "/downlink", { id: "PHAO-02", loop: true, pts: own });
+  assert.equal(two.rev, 2);
+  let dl = await call(hub, "GET", "/downlink");
+  assert.deepEqual(dl.routes.map(r => [r.id, r.rev, r.pts.length]), [["PHAO-01", 1, 3], ["PHAO-02", 2, 2]]);
+  assert.equal(dl.id, "PHAO-02");                 // an old station reads the newest one at the top
+  assert.deepEqual(dl.routes[1].pts, own);
+
+  await call(hub, "POST", "/ingest", beaconOf("PHAO-02", { rev: 2, have: 2, pi: 1 }));
+  dl = await call(hub, "GET", "/downlink");
+  assert.deepEqual(dl.routes.map(r => r.id), ["PHAO-01"]);
+  assert.equal(dl.id, "PHAO-01");
+  await call(hub, "POST", "/ingest", beacon({ rev: 1, have: 3, pi: 1 }));
+  assert.deepEqual(await call(hub, "GET", "/downlink"), { rev: 0 });
+  // A new send still gets a rev no buoy has seen
+  const { hub: reloaded } = makeHub(store);
+  assert.equal((await sendRoute(reloaded)).rev, 3);
+});
+
+test("a hub stored by the old code (one downlink) keeps offering that route", async () => {
+  const store = new Map([["downlink", { rev: 7, id: "PHAO-01", loop: false, pts: [[10.88, 106.79]], at: 1 }]]);
+  const { hub } = makeHub(store);
+  const dl = await call(hub, "GET", "/downlink");
+  assert.equal(dl.rev, 7);
+  assert.deepEqual(dl.routes.map(r => r.rev), [7]);
+  assert.equal((await call(hub, "PUT", "/downlink", { id: "PHAO-02", pts: [] })).rev, 8);
+});
+
+test("return home rides along the downlink, changes the task, and a new route lifts it", async () => {
+  const { hub, sent } = makeHub();
+  await sendRoute(hub);
+  assert.deepEqual(sent.filter(m => m.type === "task").at(-1), { type: "task", id: "PHAO-01", kind: "sector", ref: { rev: 1, n: 3 }, since: sent.filter(m => m.type === "task").at(-1).since });
+  const m = await call(hub, "PUT", "/return", { id: "PHAO-01", ret: true, by: "admin@example.com" });
+  assert.deepEqual([m.type, m.want], ["ret", true]);
+  assert.deepEqual((await call(hub, "GET", "/downlink")).ret, { "PHAO-01": 1 });
+  assert.equal(sent.filter(x => x.type === "task").at(-1).kind, "return");
+  await sendRoute(hub);
+  assert.deepEqual((await call(hub, "GET", "/downlink")).ret, { "PHAO-01": 0 });
+  assert.equal(sent.filter(x => x.type === "task").at(-1).kind, "sector");
+});
+
+test("fleet commands reach every buoy heard lately, or the ones named", async () => {
+  const { hub } = makeHub();
+  for (const id of ["PHAO-01", "PHAO-02", "PHAO-03"]) await call(hub, "POST", "/ingest", beaconOf(id));
+  const r = await call(hub, "PUT", "/fleet", { action: "hold" });
+  assert.deepEqual(r.ids, ["PHAO-01", "PHAO-02", "PHAO-03"]);
+  assert.deepEqual((await call(hub, "GET", "/downlink")).hold, { "PHAO-01": 1, "PHAO-02": 1, "PHAO-03": 1 });
+  await call(hub, "PUT", "/fleet", { action: "return", ids: ["PHAO-02", "PHAO-03"] });
+  assert.deepEqual((await call(hub, "GET", "/downlink")).ret, { "PHAO-02": 1, "PHAO-03": 1 });
+  await call(hub, "PUT", "/fleet", { action: "resume" });
+  const dl = await call(hub, "GET", "/downlink");
+  assert.deepEqual(dl.hold, { "PHAO-01": 0, "PHAO-02": 0, "PHAO-03": 0 });
+  assert.deepEqual(dl.ret, { "PHAO-02": 0, "PHAO-03": 0 });
+});
+
+test("each buoy gets its own parking spot along the shore, PHAO-01 at the station", async () => {
+  const { hub } = makeHub();
+  const station = { lat: 10.8830, lon: 106.7960 };
+  await call(hub, "POST", "/station", { fix: 1, ...station });
+  // The buoys are north of the station: the water is north, the spots run east-west
+  for (const [i, id] of ["PHAO-01", "PHAO-02", "PHAO-03"].entries()) {
+    await call(hub, "POST", "/ingest", { ...beaconOf(id), lat: 10.8840, lon: 106.7960 + i * 0.0001 });
+  }
+  const { home } = await call(hub, "GET", "/downlink");
+  assert.deepEqual(home["PHAO-01"], [station.lat, station.lon]);
+  const d = (a, b) => Math.hypot((a[0] - b[0]) * 111320, (a[1] - b[1]) * 111320 * Math.cos(station.lat * Math.PI / 180));
+  assert.ok(Math.abs(d(home["PHAO-02"], home["PHAO-01"]) - 8) < 0.5);
+  assert.ok(Math.abs(d(home["PHAO-03"], home["PHAO-01"]) - 8) < 0.5);
+  assert.ok(Math.abs(d(home["PHAO-02"], home["PHAO-03"]) - 16) < 0.5);
+  assert.ok(Math.abs(home["PHAO-02"][0] - station.lat) < 1e-5);   // along the shore, not out on the water
+  // Buoys coming home do not turn the line
+  await call(hub, "POST", "/ingest", { ...beaconOf("PHAO-02"), lat: 10.8830, lon: 106.79605 });
+  assert.deepEqual((await call(hub, "GET", "/downlink")).home["PHAO-02"], home["PHAO-02"]);
+});
+
+test("a buoy silent for 30 s raises one lost alert, cleared when it is heard again", async () => {
+  const { hub, sent } = makeHub();
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  try {
+    await call(hub, "POST", "/ingest", beaconOf("PHAO-01"));
+    await call(hub, "POST", "/ingest", beaconOf("PHAO-02"));
+    now += 20_000;
+    await call(hub, "POST", "/ingest", beaconOf("PHAO-01"));
+    now += 15_000;
+    await call(hub, "GET", "/downlink");
+    await call(hub, "GET", "/downlink");
+    const alerts = sent.filter(m => m.type === "alert" && m.alert.type === "L");
+    assert.deepEqual(alerts.map(m => m.alert.buoy), ["PHAO-02"]);
+    assert.deepEqual(sent.filter(m => m.type === "link").map(m => [m.id, m.lost]), [["PHAO-02", true]]);
+    await call(hub, "POST", "/ingest", beaconOf("PHAO-02"));
+    assert.deepEqual(sent.filter(m => m.type === "link").map(m => [m.id, m.lost]), [["PHAO-02", true], ["PHAO-02", false]]);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+// ---- Kế hoạch đội tàu: chia vùng, đội hình, bầu lại phao dẫn đầu ----
+
+const kx = 111320 * Math.cos(10.8834 * Math.PI / 180), ky = 111320;
+const at = (x, y) => ({ lat: 10.8834 + y / ky, lon: 106.7960 + x / kx });
+const AREA = [at(0, 0), at(120, 0), at(120, 60), at(0, 60)];
+
+test("a sector plan sends each buoy its own strip; dry only shows it", async () => {
+  const { hub } = makeHub();
+  for (const [i, id] of ["PHAO-01", "PHAO-02", "PHAO-03"].entries()) {
+    await call(hub, "POST", "/ingest", { ...beaconOf(id), ...at(0, 55 - i * 25) });
+  }
+  const dry = await call(hub, "PUT", "/plan", { mode: "sectors", poly: AREA, ids: ["PHAO-01", "PHAO-02", "PHAO-03"], spacing: 10, dry: true });
+  assert.equal(dry.routes.length, 3);
+  assert.deepEqual(await call(hub, "GET", "/downlink"), { rev: 0 });
+  await call(hub, "PUT", "/plan", { mode: "sectors", poly: AREA, ids: ["PHAO-01", "PHAO-02", "PHAO-03"], spacing: 10 });
+  const dl = await call(hub, "GET", "/downlink");
+  assert.deepEqual(dl.routes.map(r => r.id).sort(), ["PHAO-01", "PHAO-02", "PHAO-03"]);
+  assert.ok(dl.routes.every(r => r.pts.length === 4));
+  assert.equal(dl.fol, undefined);
+});
+
+test("a formation sends the route to the leader, places to the followers, and a new leader takes over when it is lost", async () => {
+  const { hub, sent } = makeHub();
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  try {
+    for (const id of ["PHAO-01", "PHAO-02", "PHAO-03"]) await call(hub, "POST", "/ingest", { ...beaconOf(id), ...at(0, 0) });
+    const f = await call(hub, "PUT", "/plan", { mode: "formation", poly: AREA, ids: ["PHAO-01", "PHAO-02", "PHAO-03"], leader: "PHAO-02", shape: "line", spacing: 10 });
+    assert.equal(f.leader, "PHAO-02");
+    let dl = await call(hub, "GET", "/downlink");
+    assert.deepEqual(dl.fol, { "PHAO-01": ["PHAO-02", 10, 0], "PHAO-03": ["PHAO-02", -10, 0] });
+    const leaderRoute = dl.routes.find(r => r.id === "PHAO-02");
+    assert.equal(leaderRoute.pts.length, 4);                     // two lanes 30 m apart over the 60 m
+    assert.deepEqual(dl.routes.filter(r => r.id !== "PHAO-02").map(r => r.pts.length), [0, 0]);
+    // The leader reports it is going to waypoint 3, then falls silent
+    await call(hub, "POST", "/ingest", { id: "PHAO-02", fix: 0, rssi: -80, snr: 7, raw: "", diag: { reason: "", mission: "P", wp: 3, wp_total: 4, arm: 0, drive: 0, i2c: 0, imu: 0 } });
+    now += 20_000;
+    for (const id of ["PHAO-01", "PHAO-03"]) await call(hub, "POST", "/ingest", { ...beaconOf(id), ...at(0, 0) });
+    now += 15_000;
+    dl = await call(hub, "GET", "/downlink");
+    assert.deepEqual(dl.fol, { "PHAO-03": ["PHAO-01", 10, 0] });
+    const taken = dl.routes.find(r => r.id === "PHAO-01");
+    assert.deepEqual(taken.pts, leaderRoute.pts.slice(2));          // what the old leader had not done yet
+    assert.ok(sent.some(m => m.type === "alert" && m.alert.type === "E" && m.alert.buoy === "PHAO-01" && m.alert.replaces === "PHAO-02"));
+    // A sector plan ends the formation
+    await call(hub, "PUT", "/plan", { mode: "sectors", poly: AREA, ids: ["PHAO-01", "PHAO-03"], spacing: 10 });
+    assert.equal((await call(hub, "GET", "/downlink")).fol, undefined);
+  } finally {
+    Date.now = realNow;
+  }
+});

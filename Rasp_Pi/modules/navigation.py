@@ -192,6 +192,15 @@ class BapfNavigator:
             desired_heading = imu.yaw_deg
             desired_speed = float(self.v["max_speed_mps"])
             reason = "bow_no_gps"
+        elif goal is not None and snapshot.goal_speed is not None:
+            # In formation (modules/formation.py): the point moves with the leader and the mission sets
+            # the speed that keeps the boat at its place; 0 with the leader still and the boat there.
+            self._at_standoff = False
+            desired_heading = bearing_deg(gps.lat_deg, gps.lon_deg, goal[0], goal[1])
+            desired_speed = min(max(snapshot.goal_speed, 0.0), float(self.v["max_speed_mps"]))
+            reason = "formation"
+            if desired_speed <= 0.0:
+                return NavCommand("STOP", 0.0, imu.yaw_deg, "formation_place")
         elif goal is not None:
             self._at_standoff = False
             desired_heading = bearing_deg(gps.lat_deg, gps.lon_deg, goal[0], goal[1])

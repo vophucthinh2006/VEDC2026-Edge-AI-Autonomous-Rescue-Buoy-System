@@ -29,7 +29,7 @@ void Diag_SetPi(diag_t *diag, bool heard, const char *reason, char mission, uint
 
 static bool mission_known(char m)
 {
-    return m == 'I' || m == 'P' || m == 'F' || m == 'R' || m == 'B' || m == 'H';
+    return m == 'I' || m == 'P' || m == 'F' || m == 'R' || m == 'B' || m == 'H' || m == 'O';
 }
 
 size_t DiagFrame_Build(char *buf, size_t size, const char *buoy_id, const diag_t *diag)

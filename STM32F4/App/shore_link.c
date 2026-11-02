@@ -6,6 +6,8 @@
 
 #define MAX_FRAME 128U
 #define ACK_FIELDS 6U
+#define ACK_FIELDS_FORMATION 9U
+#define FORMATION_MAX_M 500L
 
 void ShoreLink_Init(shore_link_t *shore)
 {
@@ -24,6 +26,18 @@ static bool parse_uint(const char *text, unsigned long max, unsigned long *out)
     if (*text < '0' || *text > '9') return false;
     unsigned long value = strtoul(text, &end, 10);
     if (*end != '\0' || value > max) return false;
+    *out = value;
+    return true;
+}
+
+/* "-12" or "7": a whole number of metres, |value| <= limit. */
+static bool parse_int(const char *text, long limit, long *out)
+{
+    char *end = NULL;
+    const char *digits = *text == '-' ? text + 1 : text;
+    if (*digits < '0' || *digits > '9') return false;
+    long value = strtol(text, &end, 10);
+    if (*end != '\0' || value > limit || value < -limit) return false;
     *out = value;
     return true;
 }
@@ -54,28 +68,44 @@ bool ShoreLink_OnFrame(shore_link_t *shore, const char *frame, const char *buoy_
     copy[length] = '\0';
 
     /* Split at commas, keeping empty fields: lat and lon are empty while the station has no fix. */
-    char *fields[ACK_FIELDS];
+    char *fields[ACK_FIELDS_FORMATION];
     unsigned count = 0U;
     fields[count++] = copy;
     for (char *p = copy; *p != '\0'; p++) {
         if (*p != ',') continue;
-        if (count == ACK_FIELDS) { shore->acks_bad++; return false; }
+        if (count == ACK_FIELDS_FORMATION) { shore->acks_bad++; return false; }
         *p = '\0';
         fields[count++] = p + 1;
     }
-    if (count != ACK_FIELDS || strcmp(fields[1], buoy_id) != 0) return false;
+    if (count != ACK_FIELDS && count != ACK_FIELDS_FORMATION) { shore->acks_bad++; return false; }
+    if (strcmp(fields[1], buoy_id) != 0) return false;
 
     unsigned long acked, lights;
     int32_t lat = 0, lon = 0;
     bool has_home = fields[4][0] != '\0' || fields[5][0] != '\0';
-    if (!parse_uint(fields[2], 0xFFFFUL, &acked) || !parse_uint(fields[3], 7UL, &lights) ||
-        (has_home && (!parse_coord(fields[4], 90.0, &lat) || !parse_coord(fields[5], 180.0, &lon)))) {
+    long right = 0L, back = 0L;
+    bool follow = count == ACK_FIELDS_FORMATION;
+    if (!parse_uint(fields[2], 0xFFFFUL, &acked) || !parse_uint(fields[3], 15UL, &lights) ||
+        (has_home && (!parse_coord(fields[4], 90.0, &lat) || !parse_coord(fields[5], 180.0, &lon))) ||
+        (follow && (fields[6][0] == '\0' || strlen(fields[6]) >= sizeof(shore->leader) ||
+                    !parse_int(fields[7], FORMATION_MAX_M, &right) || !parse_int(fields[8], FORMATION_MAX_M, &back)))) {
         shore->acks_bad++;
         return false;
     }
     ShoreLink_Heard(shore, now_ms);
     shore->lights = (uint8_t)(lights & 0x03UL);
     shore->hold = (lights & 0x04UL) != 0UL;
+    shore->ret = (lights & 0x08UL) != 0UL;
+    shore->follow = follow;
+    if (follow) {
+        strcpy(shore->leader, fields[6]);
+        shore->right_m = (int16_t)right;
+        shore->back_m = (int16_t)back;
+    } else {
+        shore->leader[0] = '\0';
+        shore->right_m = 0;
+        shore->back_m = 0;
+    }
     shore->lights_known = true;
     if (has_home) {
         /* A station without a fix keeps the last home it gave. */
@@ -114,8 +144,17 @@ size_t ShoreLink_PiLine(const shore_link_t *shore, uint16_t seq, uint32_t now_ms
         format_e6(lat, sizeof(lat), shore->home_lat_e6);
         format_e6(lon, sizeof(lon), shore->home_lon_e6);
     }
-    int n = snprintf(buf, size, "%u,%u,%s,%u,%s,%s,%u", (unsigned)seq, ShoreLink_Ok(shore, now_ms) ? 1U : 0U, ago,
-                     shore->home_valid ? 1U : 0U, lat, lon, shore->hold ? 1U : 0U);
+    int n = snprintf(buf, size, "%u,%u,%s,%u,%s,%s,%u,%u", (unsigned)seq, ShoreLink_Ok(shore, now_ms) ? 1U : 0U, ago,
+                     shore->home_valid ? 1U : 0U, lat, lon, shore->hold ? 1U : 0U, shore->ret ? 1U : 0U);
+    if (n < 0 || (size_t)n >= size) return 0U;
+    return (size_t)n;
+}
+
+size_t ShoreLink_FollowLine(const shore_link_t *shore, uint16_t seq, char *buf, size_t size)
+{
+    int n = shore->follow
+          ? snprintf(buf, size, "%u,%s,%d,%d", (unsigned)seq, shore->leader, shore->right_m, shore->back_m)
+          : snprintf(buf, size, "%u,,,", (unsigned)seq);
     if (n < 0 || (size_t)n >= size) return 0U;
     return (size_t)n;
 }

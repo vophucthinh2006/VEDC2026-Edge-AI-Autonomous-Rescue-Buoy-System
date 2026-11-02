@@ -77,7 +77,7 @@ function sanitizeEvent(e) {
 // Diagnostics of the STM32 boat (STM32F4/App/diag_frame.h, the station's "dg=" frame), every 10 s:
 // the Pi's NAV reason and mission, the waypoint it goes to, why the F407 does not drive, the pack, and
 // the I2C/IMU recoveries. Null when any field is out of range.
-const MISSIONS = ["I", "P", "F", "R", "B", "H"];
+const MISSIONS = ["I", "P", "F", "R", "B", "H", "O"];   // O: in formation behind a leader (docs/fleet-control.md)
 const intIn = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
 export function sanitizeDiag(d) {
   if (!d || typeof d !== "object") return null;

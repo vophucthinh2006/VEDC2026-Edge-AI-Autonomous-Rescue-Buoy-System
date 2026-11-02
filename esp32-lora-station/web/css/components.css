@@ -220,7 +220,8 @@ body:not([data-role]) .guest-only{ display:none !important; }
 /* ---------- Map overlays ---------- */
 #map.dark .leaflet-tile-pane{ filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.55); }
 .leaflet-container{ font-family:var(--sans); }
-body[data-mode="mission"][data-role="admin"] #map .leaflet-grab{ cursor:crosshair; }
+body[data-mode="mission"][data-role="admin"] #map .leaflet-grab,
+body[data-mode="fleet"][data-role="admin"] #map .leaflet-grab{ cursor:crosshair; }
 .leaflet-control-scale-line{ background:rgba(12,19,27,.85); color:var(--text); border-color:var(--muted); font-size:11px; }
 .leaflet-control-zoom{ border:0 !important; box-shadow:var(--shadow) !important; }
 .leaflet-control-zoom a{ width:40px !important; height:40px !important; line-height:38px !important; background:var(--panel); color:var(--text); border-color:var(--line-2) !important; }
@@ -234,6 +235,7 @@ body[data-mode="mission"][data-role="admin"] #map .leaflet-grab{ cursor:crosshai
 #mode button{ display:inline-flex; align-items:center; gap:7px; border:0; background:transparent; color:var(--muted); padding:7px 12px; border-radius:6px; font-size:14px; font-weight:700; min-height:38px; }
 #mode button .ph{ font-size:17px; }
 body[data-mode="monitor"] #mode [data-m="monitor"],
+body[data-mode="fleet"] #mode [data-m="fleet"],
 body[data-mode="mission"] #mode [data-m="mission"]{ background:var(--accent); color:var(--accent-ink); }
 
 #search-wrap{ position:relative; flex:0 1 400px; min-width:0; }
@@ -433,3 +435,34 @@ body[data-mode="mission"] #empty{ display:none; }
 .kv dd[data-tone="bad"], .kv-line[data-tone="bad"]{ color:var(--bad); font-weight:700; }
 .kv dd[data-tone="idle"]{ color:var(--muted); }
 .kv-card h3 small[data-tone="lost"]{ color:var(--bad); }
+
+/* ---- Đội tàu (js/features/fleet.js) ---- */
+#f-head{ padding:14px 16px 12px; border-bottom:1px solid var(--line); }
+#f-list{ display:grid; gap:4px; }
+.f-row{ --boat:var(--accent); display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; padding:6px 8px;
+  border:1px solid transparent; border-radius:var(--r); }
+.f-row[aria-current="true"]{ background:var(--panel-2); border-color:var(--line-2); box-shadow:inset 3px 0 0 var(--boat); }
+.f-pick{ width:18px; height:18px; margin:0; accent-color:var(--boat); }
+.f-main{ display:grid; gap:2px; min-width:0; padding:2px 0; border:0; background:none; color:inherit; text-align:left; cursor:pointer; }
+.f-head{ display:flex; align-items:center; gap:8px; min-width:0; }
+.f-head b{ font-size:15px; white-space:nowrap; }
+.f-main small{ color:var(--muted); font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.f-dot{ display:none; }
+.f-head::before{ content:""; width:10px; height:10px; border-radius:50%; background:var(--boat); flex:none; }
+.f-cmds{ display:grid; grid-template-columns:repeat(auto-fit, minmax(96px, 1fr)); gap:6px; margin-top:12px; }
+.f-cmds .btn{ padding:5px 6px; font-size:12.5px; line-height:1.2; white-space:normal; text-align:center; }
+#f-plan{ display:grid; gap:10px; padding:14px 16px 16px; }
+#f-plan .sec-head{ margin-bottom:0; }
+#f-plan .row{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+#f-hint{ margin:0; }
+.f-modes{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0; padding:0; border:0; }
+.f-mode{ display:flex; gap:8px; align-items:flex-start; padding:10px; border:1px solid var(--line-2); border-radius:var(--r); cursor:pointer; }
+.f-mode:has(input:checked){ border-color:var(--accent); background:var(--accent-bg); }
+.f-mode input{ margin:3px 0 0; accent-color:var(--accent); }
+.f-mode span{ display:grid; gap:2px; }
+.f-mode small{ color:var(--muted); font-size:12px; line-height:1.35; }
+.f-opts{ display:flex; flex-wrap:wrap; align-items:end; gap:10px; }
+.f-opts label:not(.check){ display:grid; gap:4px; font-size:13px; color:var(--muted); }
+.f-opts select,.f-opts input[type="number"]{ min-height:34px; padding:4px 8px; border:1px solid var(--line-2); border-radius:var(--r);
+  background:var(--panel-2); color:var(--text); font:inherit; font-size:14px; }
+.f-opts input[type="number"]{ width:90px; }

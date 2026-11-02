@@ -1,6 +1,7 @@
 // Map extras: scale bar and the always-on movement trail of each buoy.
 import { state } from '../state.js';
 import { distM } from '../util/geo.js';
+import { colorOf } from './fleet.js';
 
 const TRAIL_MIN_STEP_M = 3;     // bỏ điểm cách điểm trước dưới 3 m để vệt không rối
 const TRAIL_MAX_POINTS = 200;
@@ -25,7 +26,7 @@ export function updateTrail(id) {
   let line = trailLines.get(id);
   if (pts.length < 2) { if (line) { trailLayer.removeLayer(line); trailLines.delete(id); } return; }
   if (!line) {
-    line = L.polyline(pts, { color: '#22D3EE', weight: 2, opacity: .35, interactive: false, lineCap: 'round' });
+    line = L.polyline(pts, { color: colorOf(id), weight: 2, opacity: .45, interactive: false, lineCap: 'round' });
     trailLines.set(id, line);
     trailLayer.addLayer(line);
   } else {

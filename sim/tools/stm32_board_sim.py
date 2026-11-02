@@ -19,6 +19,13 @@ STM32F4/Modules/PiLink/uart_protocol.c) and does in Gazebo what the F407 does on
                            person, overturned, the confirm button) in frames of their own until
                            the station's ACK (App/event_queue.c), whose lights it drives
 
+A fleet (docs/fleet-control.md, sim/tools/fleet_sim.sh): each boat is a model of its own (--model
+vedc_buoy_2 ...) with its own --buoy-id, all on the one simulated channel (lora_radio.Air). --tdma
+puts the boat's frames in its own time slot (App/lora_slot.c), --collisions loses what overlaps on the
+air. Called home from the dashboard, $LNK carries ret 1; sailing in formation, $FOL names the leader and
+the boat's place, and every beacon of the leader heard on the channel goes to the Pi as $LDR. Once a
+second the boat's track goes to <dir>/track.csv, for sim/tools/fleet_compare.py.
+
 There is no RC transmitter, as on the boat (STM32F4/App/control.c): the board is armed whenever it is
 safe and AUTO is the only mode; the motors turn while the Pi drives. PE4 is the victim's confirm button, not an E-stop: a file named
 "confirm" in --dir is one press (counted in $SYS, then the file is removed).
@@ -74,7 +81,8 @@ CELL_VOLTS = (3.27, 3.61, 3.69, 3.71, 3.73, 3.77, 3.79, 3.84, 3.92, 4.02, 4.20) 
 # seen from above) on the rear pods turns the bow right; the front pod swings the other way.
 POD_RAD_PER_US = math.radians(45.0) / 500.0
 EARTH_RADIUS_M = 6378137.0
-TOPIC = "/model/vedc_buoy/joint/{}/{}"
+TOPIC = "/model/{}/joint/{}/{}"
+TDMA_SLOTS, TDMA_SLOT_S = 4, 2.0   # App/lora_slot.h LORA_SLOT_COUNT, LORA_SLOT_MS
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -172,7 +180,7 @@ def heading_mix(u: float, throttle: float) -> tuple[float, float, float]:
 
 
 class Buoy:
-    """The buoy's state from /model/vedc_buoy/odometry: world x east, y north (ENU), sim time."""
+    """The buoy's state from /model/<model>/odometry: world x east, y north (ENU), sim time."""
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
@@ -205,15 +213,15 @@ class Board:
     def __init__(self, args: argparse.Namespace, node: Node) -> None:
         self.args = args
         self.buoy = Buoy()
-        node.subscribe(Odometry, "/model/vedc_buoy/odometry", self.buoy.on_odometry)
-        self.pub = {name: node.advertise(topic, Double) for name, topic in (
-            ("left", TOPIC.format("prop_rear_left_joint", "cmd_thrust")),
-            ("right", TOPIC.format("prop_rear_right_joint", "cmd_thrust")),
-            ("front", TOPIC.format("prop_front_joint", "cmd_thrust")),
-            ("pod_left", TOPIC.format("pod_rear_left_joint", "cmd_pos")),
-            ("pod_right", TOPIC.format("pod_rear_right_joint", "cmd_pos")),
-            ("pod_front", TOPIC.format("pod_front_joint", "cmd_pos")),
-            ("pan", TOPIC.format("camera_pan_joint", "cmd_pos")))}
+        node.subscribe(Odometry, f"/model/{args.model}/odometry", self.buoy.on_odometry)
+        self.pub = {name: node.advertise(TOPIC.format(args.model, joint, kind), Double) for name, joint, kind in (
+            ("left", "prop_rear_left_joint", "cmd_thrust"),
+            ("right", "prop_rear_right_joint", "cmd_thrust"),
+            ("front", "prop_front_joint", "cmd_thrust"),
+            ("pod_left", "pod_rear_left_joint", "cmd_pos"),
+            ("pod_right", "pod_rear_right_joint", "cmd_pos"),
+            ("pod_front", "pod_front_joint", "cmd_pos"),
+            ("pan", "camera_pan_joint", "cmd_pos"))}
         self.pid = HeadingController()
         # pi_command_t of uart_protocol.h
         self.nav_mode, self.nav_speed, self.nav_heading, self.nav_ttl = "STOP", 0.0, 0.0, 0.0
@@ -241,6 +249,13 @@ class Board:
         self.lights = 0               # App/lights.c: RELAY1 PC3 bit 0, RELAY2 PC2 bit 1
         self.events = (args.dir / "stm32_events.log").open("a", buffering=1)
         self.seq_drops = 0
+        # The track for sim/tools/fleet_compare.py: once a second where the boat is and what it does
+        self.track = (args.dir / "track.csv").open("a", buffering=1)
+        if self.track.tell() == 0:
+            self.track.write("t,buoy,x,y,lat,lon,heading,speed,state,mission,throttle,victims,ret,follow\n")
+        self.next_track = 0.0
+        self.fd = -1                    # the pseudo-terminal, once main() has opened it
+        self.leader_seq = 0
 
     def event(self, text: str) -> None:
         self.events.write(f"{time.time():.2f} {text}\n")
@@ -433,8 +448,16 @@ class Board:
         self.send(fd, "SYS", seq, f"{volts:.2f}", 0, int(self.estop), int(self.link_ok), int(self.armed), 1,
                   self.confirm_presses, cell_percent(volts / BATTERY_CELLS))
         if self.lora is not None and seq % 10 == 0:
-            # Once a second the shore link and the way home: the Pi takes the boat home when it is lost.
+            # Once a second the shore link and the way home: the Pi takes the boat home when it is lost,
+            # or when the admin calls it home; and its place in a formation, if it sails in one.
             self.send(fd, "LNK", self.lora.shore.pi_line(seq, int(now * 1000)))
+            self.send(fd, "FOL", self.lora.shore.follow_line(seq))
+        if now >= self.next_track:
+            self.next_track = now + 1.0
+            follow = self.lora.shore.follow if self.lora is not None else None
+            self.track.write(f"{time.time():.2f},{self.args.buoy_id},{x:.2f},{y:.2f},{lat:.7f},{lon:.7f},{heading:.1f},{speed:.2f},"
+                             f"{self.state},{self.pi_mission or '-'},{(self.esc[0] + self.esc[1]) / 2:.3f},{self.victims},"
+                             f"{int(bool(self.lora and self.lora.shore.ret))},{follow[0] if follow else ''}\n")
         if self.lora is not None:
             # Route from the dashboard: one $RTE line a period until $HBT reports its revision.
             self.lora.route.set_pi_rev(self.pi_route_rev)
@@ -443,6 +466,15 @@ class Board:
                 self.send(fd, "RTE", line)
                 if line.split(",")[2] == "0":
                     self.event(f"RTE rev {line.split(',')[1]} to the Pi ({line.split(',')[3]} points)")
+
+    def leader_heard(self, beacon: dict) -> None:
+        """$LDR,seq,id,lat,lon,heading,speed: a beacon of the leader this boat follows, as soon as it is
+        heard; heading the GPS course while the leader moves, else its compass; -1 unknown."""
+        speed = beacon["speed"] if beacon["speed"] is not None else -1.0
+        heading = beacon["course"] if beacon["course"] is not None and speed >= 0.3 else beacon["yaw"]
+        self.leader_seq = (self.leader_seq + 1) & 0xFFFF
+        self.send(self.fd, "LDR", self.leader_seq, beacon["id"], f"{beacon['lat']:.6f}", f"{beacon['lon']:.6f}",
+                  f"{heading if heading is not None else -1:.1f}", f"{speed:.2f}")
 
     def battery_v(self) -> float:
         """The pack: SIM_BATTERY_V, or the volts written in a file named battery in --dir (a low pack
@@ -458,7 +490,7 @@ class Board:
             reason, mission, wp, fps = self.pi_reason or "-", self.pi_mission, self.pi_wp, self.pi_fps
         else:
             reason, mission, wp, fps = "pi_silent", "", "0/0", None      # the Pi's last word no longer holds
-        mission = mission if mission in ("I", "P", "F", "R", "B", "H") else "-"
+        mission = mission if mission in ("I", "P", "F", "R", "B", "H", "O") else "-"
         return (f"dg={self.args.buoy_id},n={reason},s={mission},w={wp},a={self.arm_block},"
                 f"d={self.drive_block},u={round(self.battery_v() * 100)},j=0,k=0:0" + ("" if fps is None else f",f={fps}"))
 
@@ -500,27 +532,40 @@ class Lora:
     PERIOD_S, ROUTE_PERIOD_S, RX_WINDOW_S = 5.0, 1.5, 1.5
 
     def __init__(self, board: Board, lib: Path) -> None:
-        import socket
-        from lora_radio import BEACON_PORT, DOWNLINK_PORT, BuoyEvents, BuoyRoute, BuoyShore, airtime_s
+        from lora_radio import Air, BeaconParser, BuoyEvents, BuoyRoute, BuoyShore, Slots, airtime_s, boat_port
         self.board, self.route, self.airtime_s = board, BuoyRoute(lib), airtime_s
         self.shore, self.events = BuoyShore(lib), BuoyEvents(lib)
+        self.beacons = BeaconParser(lib)
         self.event_due = 0.0
-        self.was_ok = True
-        self.tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.rx.bind(("127.0.0.1", DOWNLINK_PORT))
-        self.rx.setblocking(False)
-        self.station = ("127.0.0.1", BEACON_PORT)
-        self.state, self.next_tx, self.until, self.frame = "idle", time.monotonic() + 1.0, 0.0, ""
+        self.was_ok, self.was_ret, self.was_follow = True, False, None
+        self.air = Air(boat_port(board.args.buoy_id), collisions=board.args.collisions)
+        # --tdma: every frame at the start of the boat's own slot (App/lora_slot.c), one frame and its answer a slot
+        self.slots = Slots(lib, board.args.buoy_id, TDMA_SLOTS, TDMA_SLOT_S) if board.args.tdma else None
+        first = time.monotonic() + (self.slots.wait_s() if self.slots else 1.0)
+        self.state, self.next_tx, self.until, self.frame = "idle", first, 0.0, ""
+        self.slot_end = 0.0
         self.next_diag, self.listen = self.next_tx + self.PERIOD_S / 2, True
 
     def _received(self) -> list[bytes]:
+        """The station's frames this radio heard. A beacon of the leader the boat follows goes to the Pi as
+        $LDR whenever the radio is not sending (the follower listens in the leader's slot); every other
+        boat's frame is passed over."""
         out = []
-        while True:
-            try:
-                out.append(self.rx.recv(256))
-            except BlockingIOError:
-                return out
+        follow = self.shore.follow
+        own = self.board.args.buoy_id.encode()
+        for frame in self.air.receive():
+            if frame.startswith((b"RTE,", b"ACK,")):
+                if frame.split(b",")[1] == own:   # the station's answer to another boat on the channel: not ours
+                    out.append(frame)
+            elif follow is not None and frame.startswith(b"id="):
+                beacon = self.beacons.parse(frame)
+                if beacon is not None and beacon["id"] == follow[0]:
+                    self.board.leader_heard(beacon)
+        return out
+
+    def _next_slot(self, now: float) -> float:
+        """When the boat may next talk: the start of its next slot, at least 0.1 s from now."""
+        return now + 0.1 + self.slots.wait_s(0.1)
 
     def event_now(self, eseq: int) -> None:
         self.event_due = time.monotonic()
@@ -532,20 +577,41 @@ class Lora:
         if ok != self.was_ok:
             self.board.event("shore station heard again" if ok else "shore station lost: silent for 60 s, $LNK shore_ok 0")
             self.was_ok = ok
+        if self.shore.ret != self.was_ret:
+            self.was_ret = self.shore.ret
+            self.board.event("called HOME from the dashboard: $LNK ret 1" if self.was_ret else "released from going home")
+        if self.shore.follow != self.was_follow:
+            self.was_follow = self.shore.follow
+            self.board.event(f"formation: {self.was_follow[1]} m right, {self.was_follow[2]} m back of {self.was_follow[0]}"
+                             if self.was_follow else "formation ended")
         if self.state == "idle":
-            self._received()                     # not listening: the radio hears nothing
+            self._received()                     # not listening for the station: its frames pass
             frame = ""
-            if self.events.pending and now >= self.event_due:
-                frame = self.events.frame(self.board.args.buoy_id)
-                self.event_due = now + LORA_EVENT_RETRY_S
             self.listen = True
-            if not frame and now >= self.next_tx:
-                frame = self.board.beacon(now)
-                self.next_tx = now + (self.ROUTE_PERIOD_S if self.route.receiving else self.PERIOD_S)
-            elif not frame and now >= self.next_diag and not self.route.receiving:
-                # App/lora_beacon.c: the diagnostics between two beacons, unanswered
-                frame, self.listen = self.board.diag(), False
-                self.next_diag = now + LORA_DIAG_PERIOD_S
+            if self.slots is not None:
+                # One frame a slot: an event waiting for its ACK first, else the beacon; the diagnostics after
+                # the answer, while the slot still has room for them.
+                if now >= self.next_tx:
+                    self.slot_end = now + TDMA_SLOT_S - 0.05
+                    self.next_tx = self._next_slot(now)
+                    if self.events.pending:
+                        frame = self.events.frame(self.board.args.buoy_id)
+                    else:
+                        frame = self.board.beacon(now)
+                elif now >= self.next_diag and not self.route.receiving and now + self.airtime_s(90) < self.slot_end:
+                    frame, self.listen = self.board.diag(), False
+                    self.next_diag = now + LORA_DIAG_PERIOD_S
+            else:
+                if self.events.pending and now >= self.event_due:
+                    frame = self.events.frame(self.board.args.buoy_id)
+                    self.event_due = now + LORA_EVENT_RETRY_S
+                if not frame and now >= self.next_tx:
+                    frame = self.board.beacon(now)
+                    self.next_tx = now + (self.ROUTE_PERIOD_S if self.route.receiving else self.PERIOD_S)
+                elif not frame and now >= self.next_diag and not self.route.receiving:
+                    # App/lora_beacon.c: the diagnostics between two beacons, unanswered
+                    frame, self.listen = self.board.diag(), False
+                    self.next_diag = now + LORA_DIAG_PERIOD_S
             if not frame:
                 return
             self.frame = frame
@@ -554,7 +620,7 @@ class Lora:
             self._received()
             if now < self.until:
                 return
-            self.tx.sendto(self.frame.encode(), self.station)   # the station has it once it is off the air
+            self.air.send(self.frame.encode())   # the station has it once it is off the air
             self.state, self.until = ("rx", now + self.RX_WINDOW_S) if self.listen else ("idle", now)
         else:
             # One answer per frame: listening stops once ours is in. An answer to another buoy on the
@@ -569,7 +635,7 @@ class Lora:
                 if self.route.on_frame(frame, self.board.args.buoy_id):
                     self.shore.heard(now_ms)
                     self.board.event(f"LoRa RTE taken: rev {self.route.rev}, {self.route.have}/{self.route.total} points")
-                    if not self.route.receiving and (was_receiving or self.route.total == 0):
+                    if not self.route.receiving and (was_receiving or self.route.total == 0) and self.slots is None:
                         self.next_tx = now       # tell the station at once that the route is complete
                 elif (eseq := self.shore.on_frame(frame, self.board.args.buoy_id, now_ms)) is not None:
                     if self.shore.hold != getattr(self, "_was_held", False):
@@ -581,7 +647,7 @@ class Lora:
                         self.board.lights = self.shore.lights
                     if eseq and self.events.ack(eseq):
                         self.board.event(f"LoRa event {eseq} acknowledged")
-                        if self.events.pending:
+                        if self.events.pending and self.slots is None:
                             self.event_due = now
                 else:
                     ours = False
@@ -590,10 +656,10 @@ class Lora:
                 self.state = "idle"
 
 
-def set_start(node: Node, world: str, east: float, north: float, heading_deg: float) -> bool:
+def set_start(node: Node, world: str, east: float, north: float, heading_deg: float, model: str = "vedc_buoy") -> bool:
     """Puts the buoy at a start pose: east, north in metres from the world origin, compass heading."""
     req = Pose()
-    req.name = "vedc_buoy"
+    req.name = model
     req.position.x, req.position.y, req.position.z = east, north, 0.0
     yaw = math.radians(90.0 - heading_deg)
     req.orientation.w, req.orientation.z = math.cos(yaw / 2), math.sin(yaw / 2)
@@ -613,6 +679,9 @@ def main() -> int:
     parser.add_argument("--radio-lib", type=Path, help="librouteradio.so: with it the board beacons over the simulated LoRa "
                         "(tools/lora_radio.py) and takes routes from tools/shore_station_sim.py")
     parser.add_argument("--buoy-id", default="PHAO-01", help="LORA_BUOY_ID")
+    parser.add_argument("--model", default="vedc_buoy", help="the Gazebo model this board drives (vedc_buoy_2 ... in a fleet)")
+    parser.add_argument("--tdma", action="store_true", help="talk only in the boat's own time slot (App/lora_slot.c), as a fleet does")
+    parser.add_argument("--collisions", action="store_true", help="lose what overlaps on the shared channel")
     args = parser.parse_args()
     args.home = tuple(float(value) for value in args.home.split(",")[:2])
 
@@ -623,7 +692,7 @@ def main() -> int:
     if args.start:
         east, north, heading = (float(value) for value in args.start.split(","))
         for _ in range(10):
-            if set_start(node, args.world, east, north, heading):
+            if set_start(node, args.world, east, north, heading, args.model):
                 board.event(f"start pose {east:.1f} E {north:.1f} N heading {heading:.0f}")
                 break
             time.sleep(1.0)
@@ -636,6 +705,7 @@ def main() -> int:
         args.pty.unlink()
     args.pty.symlink_to(os.ttyname(slave))
     os.set_blocking(master, False)
+    board.fd = master
     print(f"STM32F407 board on {args.pty} -> {os.ttyname(slave)}, no RC: AUTO", flush=True)
     board.event("board up, no RC: AUTO")
 

@@ -1,7 +1,7 @@
 """Thread-safe latest-value state. Never retain mutable scan arrays without copying."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import Lock
 from time import monotonic
 
@@ -52,6 +52,20 @@ class LinkState:
     home: tuple[float, float] | None = None
     timestamp: float = 0.0
     hold: bool = False        # STOP from the dashboard: the F407 keeps the motors off until released
+    ret: bool = False         # RETURN from the dashboard: go to home (this boat's own parking spot) and stay
+    # $FOL: (leader, right_m, back_m) while the boat sails in formation behind leader, None otherwise
+    follow: tuple[str, float, float] | None = None
+
+
+@dataclass(frozen=True)
+class LeaderState:
+    """$LDR: the last beacon of the formation's leader the F407 heard on the LoRa channel."""
+    buoy: str
+    lat: float
+    lon: float
+    heading_deg: float          # its GPS course while it moves, else its compass; -1 unknown
+    speed_mps: float
+    timestamp: float
 
 
 @dataclass(frozen=True)
@@ -102,6 +116,8 @@ class Snapshot:
     focus: tuple[float, float] | None = None     # lat, lon of the person the rescue logic wants watched
     nav: NavState = NavState()
     link: LinkState = LinkState()
+    leader: LeaderState | None = None            # the formation's leader, when one is heard
+    goal_speed: float | None = None              # set by the mission in formation: the speed to go to waypoint at
 
 
 class StateStore:
@@ -119,10 +135,23 @@ class StateStore:
         self._vehicle = VehicleState()
         self._nav = NavState()
         self._link = LinkState()
+        self._leader: LeaderState | None = None
 
-    def update_link(self, shore_ok: bool, heard_ago_s: float, home: tuple[float, float] | None, hold: bool = False) -> None:
+    def update_link(self, shore_ok: bool, heard_ago_s: float, home: tuple[float, float] | None, hold: bool = False,
+                    ret: bool = False) -> None:
         with self._lock:
-            self._link = LinkState(shore_ok, heard_ago_s, home, monotonic(), hold)
+            self._link = LinkState(shore_ok, heard_ago_s, home, monotonic(), hold, ret, self._link.follow)
+
+    def update_follow(self, follow: tuple[str, float, float] | None) -> None:
+        """$FOL: the boat's place in a formation, None when it sails in none."""
+        with self._lock:
+            self._link = replace(self._link, follow=follow)
+            if follow is None or (self._leader is not None and self._leader.buoy != follow[0]):
+                self._leader = None
+
+    def update_leader(self, leader: LeaderState) -> None:
+        with self._lock:
+            self._leader = leader
 
     def update_vehicle(self, mode: str, armed: bool, mission_seq: int, mission_total: int = 0, wp_dist_m: float = -1.0,
                        wp_bearing_deg: float = 0.0) -> None:
@@ -177,4 +206,4 @@ class StateStore:
     def snapshot(self) -> Snapshot:
         with self._lock:
             return Snapshot(self._imu, self._gps, self._system, self._obstacles, self._scan_timestamp, self._waypoint, self._human_target, self._vehicle,
-                            self._human_targets, self._focus, self._nav, self._link)
+                            self._human_targets, self._focus, self._nav, self._link, self._leader)
