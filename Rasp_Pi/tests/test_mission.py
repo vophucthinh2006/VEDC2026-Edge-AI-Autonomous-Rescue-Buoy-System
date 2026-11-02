@@ -15,12 +15,12 @@ CONFIG = {"follow": {"confirm_frames": 3, "confirm_s": 2.5, "lost_s": 4.0, "repo
           "return": {"arrive_radius_m": 3.0, "fence_margin_m": 2.0}}
 
 
-def snap(t, at=BOAT, people=(), shore_ok=True, home=None, presses=-1, fix=3, yaw=0.0, battery=-1):
+def snap(t, at=BOAT, people=(), shore_ok=True, home=None, presses=-1, fix=3, yaw=0.0, battery=-1, ret=False):
     """people: (bearing from the bow, distance, risk) seen in a detector pass at t."""
     targets = tuple(HumanTarget(bearing, distance, 0.6, t, risk) for bearing, distance, risk in people)
     return Snapshot(ImuState(yaw_deg=yaw, imu_ok=True, timestamp=t), GpsState(*at, fix=fix, timestamp=t),
                     SysState(timestamp=t, confirm_presses=presses, battery_pct=battery), (), t, None, targets[0] if targets else None,
-                    human_targets=targets, link=LinkState(shore_ok, 1.0 if shore_ok else 75.0, home, t))
+                    human_targets=targets, link=LinkState(shore_ok, 1.0 if shore_ok else 75.0, home, t, ret=ret))
 
 
 class MissionTest(unittest.TestCase):
@@ -54,6 +54,26 @@ class MissionTest(unittest.TestCase):
         self.mission.step(snap(1.0, shore_ok=False, home=HOME), 1.0)
         self.assertNotEqual(self.mission.state, IDLE)
         self.assertTrue(self.mission.detecting)
+
+    def test_called_home_goes_home_and_stays_until_released(self):
+        self.give_route(WP1, WP2)
+        self.mission.step(snap(0.0, home=HOME), 0.0)
+        self.assertEqual(self.mission.state, PATROL)
+        step = self.mission.step(snap(1.0, home=HOME, ret=True, people=[(0.0, 5.0, HIGH)]), 1.0)
+        self.assertEqual(self.mission.state, RETURN)
+        self.assertEqual(step.planned.waypoint, HOME)
+        self.assertIsNone(step.planned.human_target)      # nobody followed on the way home
+        self.mission.step(snap(2.0, at=HOME, home=HOME, ret=True), 2.0)
+        self.assertEqual(self.mission.state, HOME_HOLD)
+        self.mission.step(snap(30.0, at=HOME, home=HOME, ret=True), 30.0)
+        self.assertEqual(self.mission.state, HOME_HOLD)   # the shore link is fine: still held by the admin
+        step = self.mission.step(snap(31.0, at=HOME, home=HOME), 31.0)
+        self.assertEqual(self.mission.state, PATROL)       # released: on to the waypoint it was going to
+        self.assertEqual(step.planned.waypoint, WP1)
+
+    def test_called_home_from_idle_too(self):
+        self.mission.step(snap(0.0, home=HOME, ret=True), 0.0)
+        self.assertEqual(self.mission.state, RETURN)
 
     def test_route_done_is_idle(self):
         self.give_route(WP1)

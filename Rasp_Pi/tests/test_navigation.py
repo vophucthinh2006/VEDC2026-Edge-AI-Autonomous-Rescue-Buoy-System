@@ -18,6 +18,16 @@ class NavigationTest(unittest.TestCase):
         return Snapshot(ImuState(yaw_deg=0, imu_ok=True, timestamp=now), GpsState(lat_deg=10, lon_deg=106, fix=3, speed_mps=speed, course_deg=course, timestamp=now),
                         SysState(timestamp=now), tuple(obstacles), now, (10.001, 106), None)
 
+    def test_in_formation_the_speed_is_the_missions_and_the_goal_never_arrives(self) -> None:
+        from dataclasses import replace
+        navigator = BapfNavigator(self.vehicle, self.planner)
+        near = replace(self._snap([]), waypoint=(10.000001, 106), goal_speed=0.4)   # well inside arrive_radius_m
+        command = navigator.plan(near)
+        self.assertEqual((command.mode, command.reason), ("AUTO", "formation"))
+        self.assertAlmostEqual(command.speed_mps, 0.4, places=2)
+        self.assertEqual(navigator.plan(replace(near, goal_speed=0.9)).speed_mps, 0.5)   # capped at max_speed_mps
+        self.assertEqual(navigator.plan(replace(near, goal_speed=0.0)).reason, "formation_place")
+
     def test_close_obstacle_ahead_is_left_at_a_creep_not_waited_out(self) -> None:
         # 1.4 m dead ahead (0.55 m clear of the hull, inside the stop distance), the waypoint behind
         # it. The field points away from it and the bow has room to swing: the boat follows that

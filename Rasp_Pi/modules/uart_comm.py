@@ -19,7 +19,7 @@ import serial
 REOPEN_S = 1.0
 
 from modules.lora_route import LoraRoute, RouteAssembler
-from modules.state_store import StateStore
+from modules.state_store import LeaderState, StateStore
 from utils.nmea_packet import Packet, decode, encode, gga_fix_type
 
 
@@ -78,15 +78,26 @@ class Stm32Uart(threading.Thread):
                     armed, auto = bool(int(packet.fields[5])), bool(int(packet.fields[6]))
                     self._state.update_vehicle("AUTO" if auto else "MANUAL", armed, 0)
             elif packet.command == "LNK" and len(packet.fields) >= 4:
-                # $LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon[,hold], once a second: the
-                # shore station's link as the F407 hears it over LoRa, the station's position (home) and
-                # whether the admin stopped the boat from the dashboard (the F407 then keeps the motors off).
+                # $LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon[,hold[,ret]], once a second: the
+                # shore station's link as the F407 hears it over LoRa, home (this boat's parking spot by the
+                # station, or the station's position), whether the admin stopped the boat from the dashboard
+                # (the F407 then keeps the motors off) and whether the admin called it home.
                 _, shore_ok, heard_ago, home_valid = packet.fields[:4]
                 home = None
                 if int(home_valid) and len(packet.fields) >= 6 and packet.fields[4] and packet.fields[5]:
                     home = (float(packet.fields[4]), float(packet.fields[5]))
                 hold = len(packet.fields) >= 7 and packet.fields[6] == "1"
-                self._state.update_link(bool(int(shore_ok)), float(heard_ago) if heard_ago else -1.0, home, hold)
+                ret = len(packet.fields) >= 8 and packet.fields[7] == "1"
+                self._state.update_link(bool(int(shore_ok)), float(heard_ago) if heard_ago else -1.0, home, hold, ret)
+            elif packet.command == "FOL" and len(packet.fields) >= 4:
+                # $FOL,seq,leader,right_m,back_m once a second: the boat's place in a formation
+                # (docs/fleet-control.md); "seq,,," while it sails in none.
+                _, leader, right, back = packet.fields[:4]
+                self._state.update_follow((leader, float(right), float(back)) if leader else None)
+            elif packet.command == "LDR" and len(packet.fields) >= 6:
+                # $LDR,seq,leader,lat,lon,heading,speed: a beacon of the formation's leader, as the F407 heard it
+                _, leader, lat, lon, heading, speed = packet.fields[:6]
+                self._state.update_leader(LeaderState(leader, float(lat), float(lon), float(heading), float(speed), monotonic()))
             elif packet.command == "RTE":
                 route = self._routes.feed(packet.fields)
                 if route is not None:

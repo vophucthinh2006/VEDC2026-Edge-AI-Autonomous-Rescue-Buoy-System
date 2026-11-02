@@ -10,11 +10,17 @@ FOLLOW     the person with the highest risk in view, nearest first (modules/foll
            after follow.max_hold_s with the same person and no press (they may not be able to:
            that person is ignored for follow.hold_ignore_s and the route goes on).
 RETURN     from PATROL or FOLLOW when the F407 says the shore station has not been heard for a
-           while ($LNK shore_ok 0): straight home, following nobody, still reporting people.
-           Home is the shore station's GPS position ($LNK), brought return.fence_margin_m inside
+           while ($LNK shore_ok 0), or from any state when the admin calls the boat home from the
+           dashboard ($LNK ret 1, docs/fleet-control.md): straight home, following nobody, still
+           reporting people. Called home, the boat stays home until the admin releases it.
+           Home is this boat's parking spot by the station, or the station's GPS position ($LNK), brought return.fence_margin_m inside
            the geofence when the station stands outside it; with no home ever heard, where the
            boat was when the current route was accepted.
 HOME_HOLD  within return.arrive_radius_m of home: stand still.
+FORMATION  the shore station put the boat in a formation ($FOL, docs/fleet-control.md): instead of a route
+           it keeps its place beside the leader, whose beacons the F407 hears ($LDR; modules/formation.py),
+           the camera sweeping and people followed as on PATROL, then back to its place. The leader
+           not heard for formation.leader_stale_s: stand still.
            When the shore link comes back, RETURN and HOME_HOLD go back to PATROL at the waypoint
            the boat was going to (the Route is kept), or to IDLE without one.
 
@@ -32,11 +38,12 @@ from collections import deque
 from dataclasses import dataclass, field, replace
 
 from modules.follow import FOLLOW as FOLLOWING, Follow
+from modules.formation import FormationGoal, FormationKeeper
 from modules.state_store import RISK_NAMES, SAFE, HumanTarget, Snapshot
 from modules.waypoints import Route
 from utils.geometry import haversine_m, offset_latlon, signed_angle_deg
 
-IDLE, PATROL, FOLLOW, RETURN, HOME_HOLD = "IDLE", "PATROL", "FOLLOW", "RETURN", "HOME_HOLD"
+IDLE, PATROL, FOLLOW, RETURN, HOME_HOLD, FORMATION = "IDLE", "PATROL", "FOLLOW", "RETURN", "HOME_HOLD", "FORMATION"
 HOLD_FORGET_S = 30.0   # the same person found again within this long goes on with the time already spent there
 
 
@@ -168,6 +175,13 @@ class Mission:
         # The person followed: since when, where (position, compass bearing), last seen followed.
         self._hold: tuple[float, tuple[float, float] | None, float] | None = None
         self._hold_last = float("-inf")
+        self._called_home = False   # the last $LNK carried RETURN from the shore station
+        # In formation the boat may go a little faster than on its own, to catch up with its place.
+        vehicle = config.get("vehicle", {}) or {}
+        keep = config.get("formation", {}) or {}
+        self.keeper = FormationKeeper(keep, float(keep.get("max_speed_mps", 1.4 * float(vehicle.get("max_speed_mps", 0.5)))))
+        self.in_formation = False
+        self.formation_goal: FormationGoal | None = None
 
     # -- route and home ---------------------------------------------------------------------
     def set_route(self, route: Route) -> None:
@@ -192,6 +206,8 @@ class Mission:
         return self.sweeping
 
     def _base(self) -> str:
+        if self.in_formation:
+            return FORMATION
         return PATROL if self.route.current is not None else IDLE
 
     def _enter(self, state: str, why: str) -> None:
@@ -202,6 +218,8 @@ class Mission:
     # -- the step -----------------------------------------------------------------------------
     def step(self, snap: Snapshot, now: float) -> Step:
         fix = snap.gps.fix >= 2
+        role = snap.link.follow
+        self.in_formation = role is not None
         reports = self.reporter.observe(snap, now)
         if snap.link.home is not None:
             self.home = snap.link.home
@@ -226,12 +244,17 @@ class Mission:
         if self.state not in (RETURN, HOME_HOLD) and self.low_battery:
             self.follow.stand_by(snap)
             self._enter(RETURN, f"battery {battery}%: going home")
-        elif self.state in (PATROL, FOLLOW) and not snap.link.shore_ok:
+        elif self.state not in (RETURN, HOME_HOLD) and snap.link.ret:
+            self.follow.stand_by(snap)
+            self._enter(RETURN, "called home from the shore station")
+        elif self.state in (PATROL, FOLLOW, FORMATION) and not snap.link.shore_ok:
             self.follow.stand_by(snap)
             heard = f"{snap.link.heard_ago_s:.0f} s ago" if snap.link.heard_ago_s >= 0 else "never"
             self._enter(RETURN, f"shore station not heard ({heard}): going home")
-        elif self.state in (RETURN, HOME_HOLD) and snap.link.shore_ok and not self.low_battery:
-            self._enter(self._base(), f"{'battery back' if charged else 'shore link back'}: {self.route.describe()}")
+        elif self.state in (RETURN, HOME_HOLD) and snap.link.shore_ok and not self.low_battery and not snap.link.ret:
+            why = "battery back" if charged else "released by the shore station" if self._called_home else "shore link back"
+            self._enter(self._base(), f"{why}: {self.route.describe()}")
+        self._called_home = snap.link.ret
         if self.state in (RETURN, HOME_HOLD):
             goal = self.home_goal()
             if self.state == RETURN and goal is not None and fix and haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *goal) <= self.arrive_m:
@@ -239,17 +262,28 @@ class Mission:
             planned = replace(snap, waypoint=goal if self.state == RETURN else None, human_target=None)
             return Step(planned, reports, supplies)
 
-        if fix and self.route.update(snap.gps.lat_deg, snap.gps.lon_deg):
-            self.log.info("waypoint reached, now %s", self.route.describe())
+        goal_speed = None
+        if role is not None:
+            # In formation: the boat's place beside the leader instead of a waypoint of the route
+            self.formation_goal = self.keeper.goal(snap, snap.leader, role[1], role[2], now) if fix else None
+            waypoint = self.formation_goal.point if self.formation_goal else None
+            goal_speed = self.formation_goal.speed_mps if self.formation_goal else None
+        else:
+            self.formation_goal = None
+            if fix and self.route.update(snap.gps.lat_deg, snap.gps.lon_deg):
+                self.log.info("waypoint reached, now %s", self.route.describe())
+            waypoint = self.route.current
         if supplies and self.state == FOLLOW:
             self._ignored.append((now + self.ignore_s, self.follow.position(snap), self.follow.world_deg))
             self.follow.stand_by(snap)
             self._enter(self._base(), f"supplies taken: that person is left alone for {self.ignore_s:.0f} s")
-        waypoint = self.route.current
-        if self.only_on_route and waypoint is None:
+        if role is not None and waypoint is None:
+            self._enter(FORMATION, f"in formation behind {role[0]}, not heard: standing still")
+            return Step(self.follow.stand_by(snap), reports, supplies)
+        if role is None and self.only_on_route and waypoint is None:
             self._enter(IDLE, self.route.describe())
             return Step(self.follow.stand_by(snap), reports, supplies)
-        planned, events = self.follow.step(replace(snap, waypoint=waypoint, human_target=self._pick(snap)), now)
+        planned, events = self.follow.step(replace(snap, waypoint=waypoint, goal_speed=goal_speed, human_target=self._pick(snap)), now)
         for event in events:
             if event.kind == "found":
                 self._risk = self._risk_new = event.risk
@@ -257,7 +291,7 @@ class Mission:
                 self._report_at, self._report_pos = now, self.follow.position(snap)
         if self.follow.phase == FOLLOWING and self._held_too_long(snap, now):
             self._ignored.append((now + self.hold_ignore_s, self._hold[1], self._hold[2]))
-            planned = replace(self.follow.stand_by(snap), waypoint=waypoint)
+            planned = replace(self.follow.stand_by(snap), waypoint=waypoint, goal_speed=goal_speed)
             self._hold = None
             self._enter(self._base(), f"{self.max_hold_s:.0f} s with that person and no confirm: left alone for "
                                       f"{self.hold_ignore_s:.0f} s, {self.route.describe()}")
@@ -336,10 +370,11 @@ class Mission:
     # -- for the dashboard, through the F407's diagnostics frame ($HBT, STM32F4/App/diag_frame.h) ---
     @property
     def code(self) -> str:
-        """One letter: I idle, P patrol, F follow, R home (shore lost), B home (battery low), H holding at home."""
+        """One letter: I idle, P patrol, F follow, R home (shore lost, or called), B home (battery low), H holding
+        at home, O in formation."""
         if self.state == RETURN:
             return "B" if self.low_battery else "R"
-        return {IDLE: "I", PATROL: "P", FOLLOW: "F", HOME_HOLD: "H"}[self.state]
+        return {IDLE: "I", PATROL: "P", FOLLOW: "F", HOME_HOLD: "H", FORMATION: "O"}[self.state]
 
     @property
     def waypoint_field(self) -> str:
@@ -361,6 +396,13 @@ class Mission:
                     else "no route: following anybody in view"]
         if self.state == PATROL:
             return [f"PATROL: {self.route.describe()}", "the camera sweeps for people"]
+        if self.state == FORMATION:
+            role, goal = snap.link.follow, self.formation_goal
+            leader = role[0] if role else "?"
+            if goal is None:
+                return [f"FORMATION behind {leader}", "leader not heard: standing still"]
+            return [f"FORMATION behind {leader}: {role[1]:+.0f} m right, {role[2]:.0f} m back",
+                    f"{goal.error_m:.1f} m off its place, {goal.speed_mps:.2f} m/s"]
         if self.state == FOLLOW:
             target = self.follow.target
             what = f"{RISK_NAMES[target.risk]} person {target.distance_m:.1f} m away" if target else "person"
@@ -370,5 +412,9 @@ class Mission:
         if self.state == RETURN:
             where = (f"{haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *goal):.0f} m to home" if goal and snap.gps.fix >= 2
                      else "home unknown: standing still" if goal is None else "home known, no GPS fix")
-            return [f"RETURN: battery {snap.system.battery_pct}%" if self.low_battery else f"RETURN: shore heard {heard}", where]
+            why = (f"RETURN: battery {snap.system.battery_pct}%" if self.low_battery else "RETURN: called home" if snap.link.ret
+                   else f"RETURN: shore heard {heard}")
+            return [why, where]
+        if snap.link.ret:
+            return ["HOME_HOLD: called home", "holding at home until the shore station releases the boat"]
         return [f"HOME_HOLD: shore heard {heard}", "holding at home until the shore link is back"]
