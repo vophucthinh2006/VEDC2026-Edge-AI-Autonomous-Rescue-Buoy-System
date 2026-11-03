@@ -1,0 +1,73 @@
+/* The weather panel on the map (js/features/weather.js), on both pages: the console's dark tokens
+   (tokens.css: --panel, --line-2) or the relatives' light ones (guest.css: --card, --line). */
+.wx-panel{
+  --wx-bg:var(--panel, var(--card, #fff)); --wx-line:var(--line-2, var(--line, #CBD5E1));
+  background:var(--wx-bg); border:1px solid var(--wx-line); border-radius:10px; padding:10px 12px; color:var(--text);
+  font-size:12.5px; line-height:1.5; box-shadow:var(--shadow); width:min(300px, calc(100vw - 32px));
+  overflow:auto; overscroll-behavior:contain; transition:box-shadow .15s, border-color .15s;
+}
+/* Frosted over the map where the browser can blur what is behind; solid elsewhere */
+@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .wx-panel{ background:color-mix(in srgb, var(--wx-bg) 84%, transparent); -webkit-backdrop-filter:blur(14px) saturate(1.4); backdrop-filter:blur(14px) saturate(1.4); }
+}
+.wx-panel.collapsed{ padding:0; border-radius:10px; }
+.wx-panel.collapsed:hover{ border-color:var(--accent); }
+.wx-t{ display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; min-height:28px; padding:0; border:0; background:none;
+  color:var(--text); font-size:13px; font-weight:700; cursor:pointer; touch-action:manipulation; }
+.wx-panel.collapsed .wx-t{ min-height:44px; padding:0 12px; }
+.wx-t span{ display:inline-flex; align-items:center; gap:6px; }
+.wx-t .ph-cloud-rain{ font-size:15px; color:var(--accent); }
+.wx-t .ph-caret-down{ font-size:13px; transition:transform .15s; }
+.wx-panel.collapsed .wx-t .ph-caret-down{ transform:rotate(-90deg); }
+.wx-panel.collapsed .wx-b{ display:none; }
+.wx-panel.collapsed{ width:auto; }
+.wx-b{ margin-top:8px; display:grid; gap:8px; }
+
+.wx-note{ color:var(--dim, var(--muted)); font-size:12px; margin:0; }
+.wx-warn{ color:var(--warn); font-size:12px; margin:0; }
+.wx-fc-head{ display:grid; gap:1px; }
+.wx-fc-head b{ font-size:13.5px; }
+.wx-bars{ display:flex; align-items:flex-end; gap:2px; height:38px; margin-top:6px; padding-bottom:1px; border-bottom:1px solid var(--wx-line); }
+.wx-bars i{ flex:1; min-width:3px; background:#3B82F6; border-radius:2px 2px 0 0; }
+.wx-axis{ display:flex; justify-content:space-between; color:var(--dim, var(--muted)); font-size:11px; }
+
+.wx-toggle{ display:grid; grid-template-columns:auto 14px 1fr; align-items:center; gap:8px; cursor:pointer;
+  padding-top:8px; border-top:1px solid var(--wx-line); }
+.wx-toggle input{ width:16px; height:16px; margin:0; accent-color:var(--accent); }
+.wx-toggle span{ display:grid; line-height:1.35; }
+.wx-toggle small{ color:var(--dim, var(--muted)); font-size:11.5px; }
+.wx-sw{ width:14px; height:14px; border-radius:3px; flex:none; }
+.wx-sw.rain{ background:linear-gradient(135deg, #22C55E, #FACC15 55%, #EF4444); }
+.wx-sw.flood{ background:#C026D3; }
+.wx-sw.gauge{ border-radius:50%; background:#38BDF8; border:1.5px solid #0F172A; }
+.wx-sw.depth{ background:linear-gradient(90deg, rgb(147,197,253), rgb(29,78,216)); }
+
+.wx-sub{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; padding-left:24px; }
+.wx-sub[hidden]{ display:none; }
+.wx-sub input[type=range]{ flex:1; min-width:110px; accent-color:var(--accent); }
+.wx-sub select, .wx-level input{ min-height:30px; padding:3px 6px; border:1px solid var(--wx-line); border-radius:6px; background:var(--wx-bg); color:var(--text); font:inherit; }
+.wx-play{ width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--wx-line);
+  border-radius:50%; background:var(--wx-bg); color:var(--text); cursor:pointer; }
+.wx-depth{ display:grid; gap:6px; }
+.wx-scale{ display:flex; flex-wrap:wrap; gap:4px 10px; }
+.wx-scale span, .wx-legend span{ display:inline-flex; align-items:center; gap:5px; }
+.wx-scale i{ width:14px; height:10px; border-radius:2px; }
+.wx-legend{ display:flex; flex-wrap:wrap; gap:4px 10px; padding-top:8px; border-top:1px solid var(--wx-line); }
+.wx-legend i{ width:10px; height:10px; border-radius:50%; border:1.5px solid #0F172A; }
+.wx-level{ display:flex; flex-wrap:wrap; gap:6px; }
+.wx-level input{ width:120px; }
+.wx-level .btn{ min-height:30px; }
+.wx-src{ font-size:11px; }
+.wx-pop .btn{ margin-top:6px; }
+
+/* A river gauge on the map: a dot, above an alarm level a bigger one with the level's number (dark text on yellow and
+   orange, white on red: 4.5:1 or more) */
+.wx-gauge{ display:flex; align-items:center; justify-content:center; width:100%; height:100%; border-radius:50%; background:var(--c);
+  border:1.5px solid #0F172A; color:#0F172A; font:800 11px/1 'Be Vietnam Pro', system-ui, sans-serif; box-sizing:border-box; }
+.wx-gauge[data-alarm="3"]{ color:#fff; }
+.wx-legend i{ width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font:800 9px/1 'Be Vietnam Pro', system-ui, sans-serif; color:#0F172A; }
+.wx-error{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.wx-retry{ flex:none; min-height:30px; padding:4px 10px; border:1px solid var(--wx-line); border-radius:6px; background:var(--wx-bg); color:var(--accent);
+  font:600 12.5px/1.2 inherit; cursor:pointer; }
+.wx-retry:hover:not(:disabled){ border-color:var(--accent); }
+.wx-retry:disabled{ opacity:.55; cursor:progress; }
