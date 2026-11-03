@@ -7,6 +7,7 @@ import { fmtDist } from './util/format.js';
 import { initTimeline, clearUnseen, log } from './features/timeline.js';
 import { initTelemetry, renderDetail } from './features/telemetry.js';
 import { initMapFx, updateTrail } from './features/mapfx.js';
+import { initWeather, onFloodMessage } from './features/weather.js';
 import { initVictims, onVictimsSnapshot, onVictimMessage, onAlertMessage } from './features/victims.js';
 import { initLights, onLightsMessage, revertLights } from './features/lights.js';
 import { initHold, onHoldMessage, revertHold, noteHold } from './features/hold.js';
@@ -28,9 +29,31 @@ const isAdmin = () => state.role === 'admin';
 const MOCK = (() => { const q = new URLSearchParams(location.search); return q.has('mock') ? (q.get('mock') || 'admin') : null; })();
 
 // kind: 'bad' (đỏ, cảnh báo người/lật), 'ok' (xanh) hoặc 'info' (màu thường); có kind thì hiện lâu hơn
+// Up to TOAST_MAX at once, newest at the bottom, so two alerts at the same moment are both read. A red one (a person
+// in danger, a buoy over) stays TOAST_BAD_MS and has a close button; the same text again only stays longer.
+const TOAST_MAX = 3, TOAST_BAD_MS = 12000;
 function toast(msg, kind = '') {
-  const t = $('toast'); t.textContent = msg; t.dataset.kind = kind; t.classList.add('show');
-  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), kind ? 6000 : 2400);
+  const box = $('toast');
+  const ms = kind === 'bad' ? TOAST_BAD_MS : kind ? 6000 : 2400;
+  const hide = t => { t.classList.remove('show'); setTimeout(() => t.remove(), 250); };
+  let t = [...box.children].find(x => x.dataset.msg === msg);
+  if (!t) {
+    t = document.createElement('div');
+    t.className = 'toast-item'; t.dataset.kind = kind; t.dataset.msg = msg;
+    t.append(Object.assign(document.createElement('span'), { textContent: msg }));
+    if (kind === 'bad') {
+      const x = document.createElement('button');
+      x.type = 'button'; x.className = 'toast-x'; x.setAttribute('aria-label', 'Đóng thông báo');
+      x.innerHTML = '<i class="ph ph-x" aria-hidden="true"></i>';
+      x.addEventListener('click', () => hide(t));
+      t.append(x);
+    }
+    box.append(t);
+    requestAnimationFrame(() => t.classList.add('show'));
+    while (box.children.length > TOAST_MAX) box.firstElementChild.remove();
+  }
+  clearTimeout(t.timer);
+  t.timer = setTimeout(() => hide(t), ms);
 }
 
 // ================= BẢN ĐỒ =================
@@ -80,7 +103,7 @@ function updateMarker(id) {
     b.marker.setLatLng([b.lat, b.lon]).setIcon(pinIcon(id, b));
     b.marker.setTooltipContent(label);
   } else {
-    b.marker = L.marker([b.lat, b.lon], { icon: pinIcon(id, b), zIndexOffset: 100 })
+    b.marker = L.marker([b.lat, b.lon], { icon: pinIcon(id, b), zIndexOffset: 100, title: `Phao ${id}` })
       .bindTooltip(label, { direction: 'top', offset: [0, -12], className: 'tip' })
       .addTo(map)
       .on('click', () => select(id));
@@ -135,6 +158,7 @@ function renderList() {
 
 function select(id) {
   state.selected = id;
+  if (mode === 'monitor') showTab('detail');   // picked on the map or in the fleet: its card
   for (const k of state.buoys.keys()) updateMarker(k);
   renderList(); renderDetail(); renderRoute(); updateStation(); renderFleet();
   const b = state.buoys.get(id);
@@ -178,7 +202,7 @@ function updateStation() {
     });
     if (stationMarker) stationMarker.setLatLng([s.lat, s.lon]).setTooltipContent(stationLabel());
     else {
-      stationMarker = L.marker([s.lat, s.lon], { icon, zIndexOffset: 1000 })
+      stationMarker = L.marker([s.lat, s.lon], { icon, zIndexOffset: 1000, title: 'Trạm bờ' })
         .bindTooltip(stationLabel(), { permanent: true, direction: 'bottom', offset: [0, 14], className: 'tip station-tip' })
         .addTo(map)
         .on('click', () => map.setView([s.lat, s.lon], Math.max(map.getZoom(), 16)));
@@ -271,7 +295,7 @@ function renderRoute() {
   if (mode !== 'mission') { renderMissionPanel(); return; }
 
   wps.forEach((w, i) => {
-    const m = L.marker([w.lat, w.lon], { icon: wpIcon(i, i === selWp), draggable: isAdmin(), zIndexOffset: 500 }).addTo(wpLayer);
+    const m = L.marker([w.lat, w.lon], { icon: wpIcon(i, i === selWp), draggable: isAdmin(), zIndexOffset: 500, title: `Điểm ${i + 1} của lộ trình` }).addTo(wpLayer);
     m.on('click', () => selectWp(i, false));
     m.on('drag', e => {
       const p = e.target.getLatLng();
@@ -465,21 +489,35 @@ function setMode(m) {
   document.body.dataset.mode = m;
   for (const b of document.querySelectorAll('#mode button')) b.setAttribute('aria-selected', String(b.dataset.m === m));
   renderRoute();
+  renderFleet();   // the search area's corners can be dragged in Fleet mode only
   if (m === 'mission' && wps.length) fitAll();
 }
 for (const b of document.querySelectorAll('#mode button')) b.addEventListener('click', () => setMode(b.dataset.m));
 
 // ---- Tab Phao / Sự kiện ----
-function showTab(which) {
-  const log = which === 'log';
-  $('buoys-view').hidden = log;
-  $('log-view').hidden = !log;
-  $('tab-buoys').setAttribute('aria-selected', String(!log));
-  $('tab-log').setAttribute('aria-selected', String(log));
-  if (log) clearUnseen();
+// The side panel under "Người cần cứu": the boat picked, the fleet, the events; one at a time, the bar of tabs
+// staying at the top while each scrolls. Left and right arrows move between the tabs (the ARIA tabs pattern).
+const TABS = [['detail', 'tab-detail', 'card'], ['buoys', 'tab-buoys', 'buoys-view'], ['log', 'tab-log', 'log-view']];
+function showTab(which, focus = false) {
+  for (const [name, tab, view] of TABS) {
+    const on = name === which;
+    $(view).hidden = !on;
+    $(tab).setAttribute('aria-selected', String(on));
+    $(tab).tabIndex = on ? 0 : -1;
+    if (on && focus) $(tab).focus();
+  }
+  $('lists').hidden = which === 'detail';
+  if (which === 'log') clearUnseen();
 }
-$('tab-buoys').addEventListener('click', () => showTab('buoys'));
-$('tab-log').addEventListener('click', () => showTab('log'));
+for (const [name, tab] of TABS) {
+  $(tab).addEventListener('click', () => showTab(name));
+  $(tab).addEventListener('keydown', e => {
+    const i = TABS.findIndex(t => t[0] === name);
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    if (step) { e.preventDefault(); showTab(TABS[(i + step + TABS.length) % TABS.length][0], true); }
+    else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); showTab(TABS[e.key === 'Home' ? 0 : TABS.length - 1][0], true); }
+  });
+}
 
 // ---- Nút công cụ bản đồ ----
 $('btn-fit').addEventListener('click', fitAll);
@@ -615,6 +653,7 @@ function connect() {
     else if (m.type === 'history') onHistoryMessage(m);
     else if (m.type === 'station') onStationMessage(m);
     else if (m.type === 'victims') onVictimsSnapshot(m);
+    else if (m.type === 'flood') onFloodMessage(m);
     else if (m.type === 'victim') onVictimMessage(m);
     else if (m.type === 'alert') { onAlertMessage(m); renderDetail(); renderList(); }
     else if (m.type === 'lights') onLightsMessage(m);
@@ -682,7 +721,14 @@ function enter(me) {
   $('role-chip').hidden = false;
   renderRoute(); renderDetail();
   connect();
+  // Weather, rain and flooding on the map (docs/weather-map.md), once signed in: the Worker's /api/weather needs the session
+  if (!weatherOn) {
+    weatherOn = true;
+    initWeather(map, { admin: isAdmin, toast, post: jsonPost,
+      station: () => (state.station?.hasPos ? { lat: state.station.lat, lon: state.station.lon } : null) });
+  }
 }
+let weatherOn = false;
 
 function loginError(msg) { const e = $('login-err'); e.textContent = msg; e.hidden = !msg; }
 
@@ -738,9 +784,28 @@ $('btn-logout').addEventListener('click', async () => {
   location.reload();
 });
 
+// ---- Light or dark (css/light.css): light reads better out in the sun at the shore station ----
+function applyTheme(light) {
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
+  $('map').classList.toggle('dark', !light);   // the dark theme darkens the base map too
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', light ? '#FFFFFF' : '#0C131B');
+  document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', light ? 'light' : 'dark');
+  const b = $('btn-theme');
+  b.setAttribute('aria-pressed', String(light));
+  b.querySelector('.ph').className = 'ph ' + (light ? 'ph-moon' : 'ph-sun');
+  const label = light ? 'Chế độ tối' : 'Chế độ sáng, dễ đọc ngoài nắng';
+  b.setAttribute('aria-label', label); b.title = label;
+  window.dispatchEvent(new Event('themechange'));   // drawings in the theme's accent colour (features/fleet.js)
+}
+$('btn-theme').addEventListener('click', () => {
+  const light = document.documentElement.dataset.theme !== 'light';
+  store.set('theme', light ? 'light' : 'dark');
+  applyTheme(light);
+});
+
 // ================= KHỞI ĐỘNG =================
 async function boot() {
-  $('map').classList.add('dark');
+  applyTheme(store.get('theme', 'dark') === 'light');
   initTimeline();
   initTelemetry({ toast, routeLine: routeProgress, routeAhead });
   initVictims(map, { toast, onClear: clearVictims, onVictimAction: victimAction });

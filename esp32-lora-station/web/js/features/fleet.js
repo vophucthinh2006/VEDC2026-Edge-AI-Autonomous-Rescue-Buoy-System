@@ -31,7 +31,64 @@ const fleet = {
 };
 let map = null, ctx = null;
 const layer = L.layerGroup();
-const areaLine = L.polygon([], { color: '#E8EEF5', weight: 2, dashArray: '6 6', fillOpacity: .06, interactive: false });
+
+// The search area being drawn: a bold outline in the accent colour over a dark halo (it stands out on the dark and the
+// light map alike), a clear fill, numbered corners that can be dragged, a dashed line from the last corner to the
+// pointer and back to the first while drawing, and the area's size in the middle.
+const areaLayer = L.layerGroup();
+const areaHalo = L.polygon([], { color: '#020617', weight: 7, opacity: .55, fill: false, interactive: false });
+const areaLine = L.polygon([], { weight: 3, fillOpacity: .16, interactive: false });
+const rubber = L.polyline([], { weight: 2, dashArray: '6 6', opacity: .9, interactive: false });
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#22D3EE';
+let pointer = null;   // where the pointer is over the map while drawing
+
+// Square metres of a polygon of {lat, lon} (flat Earth round its first corner: right for a search area)
+function areaM2(pts) {
+  if (pts.length < 3) return 0;
+  const k = Math.cos(pts[0].lat * Math.PI / 180) * 111320;
+  const xy = pts.map(p => [(p.lon - pts[0].lon) * k, (p.lat - pts[0].lat) * 110540]);
+  let s = 0;
+  for (let i = 0; i < xy.length; i++) { const [x1, y1] = xy[i], [x2, y2] = xy[(i + 1) % xy.length]; s += x1 * y2 - x2 * y1; }
+  return Math.abs(s) / 2;
+}
+const fmtArea = m2 => (m2 >= 1e6 ? `${(m2 / 1e6).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} km²`
+  : m2 >= 1e4 ? `${(m2 / 1e4).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} ha` : `${Math.round(m2).toLocaleString('vi-VN')} m²`);
+
+const cornerLayer = L.layerGroup();
+const areaLabel = L.tooltip({ permanent: true, direction: 'center', className: 'area-label', interactive: false });
+const isDrawing = () => document.body.dataset.mode === 'fleet' && state.role === 'admin';
+
+// The outline, the line to the pointer and the size: cheap, redrawn as the pointer moves or a corner is dragged
+function drawShape() {
+  const accent = cssVar('--accent');
+  const pts = fleet.area.map(a => [a.lat, a.lon]);
+  areaHalo.setLatLngs(pts.length >= 2 ? pts : []);
+  areaLine.setStyle({ color: accent, fillColor: accent }).setLatLngs(pts.length >= 2 ? pts : []);
+  // While drawing: from the last corner to the pointer, and from the pointer back to the first corner
+  if (isDrawing() && pointer && pts.length) {
+    rubber.setStyle({ color: accent }).setLatLngs([pts[pts.length - 1], pointer, ...(pts.length >= 2 ? [pts[0]] : [])]);
+    if (!areaLayer.hasLayer(rubber)) rubber.addTo(areaLayer);
+  } else rubber.remove();
+  if (pts.length >= 3) {
+    areaLabel.setLatLng(areaLine.getBounds().getCenter()).setContent(`${fmtArea(areaM2(fleet.area))} · ${pts.length} góc`);
+    if (!areaLayer.hasLayer(areaLabel)) areaLabel.addTo(areaLayer);
+  } else areaLabel.remove();
+}
+
+// Everything, the numbered corners too: when a corner is added or taken away, or the mode changes
+function drawArea() {
+  if (!areaLayer.hasLayer(areaHalo)) { areaHalo.addTo(areaLayer); areaLine.addTo(areaLayer); cornerLayer.addTo(areaLayer); }
+  cornerLayer.clearLayers();
+  const drawing = isDrawing();
+  fleet.area.forEach((a, i) => {
+    const icon = L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 12], html: `<span class="area-corner">${i + 1}</span>` });
+    const m = L.marker([a.lat, a.lon], { icon, draggable: drawing, keyboard: false, title: `Góc ${i + 1}${drawing ? ' (kéo để chỉnh)' : ''}`, zIndexOffset: 800 })
+      .addTo(cornerLayer);
+    m.on('drag', e => { const p = e.target.getLatLng(); fleet.area[i] = { lat: p.lat, lon: p.lng }; drawShape(); });
+    m.on('dragend', () => { fleet.preview = null; renderPlanForm(); drawLayer(); });
+  });
+  drawShape();
+}
 
 const TASK_TEXT = {
   idle: () => 'Chờ lệnh',
@@ -137,13 +194,18 @@ function drawLayer() {
     }
   }
   // Xem trước kế hoạch
+  // Xem trước kế hoạch: đậm, trên một quầng tối, để thấy rõ trên bản đồ sáng lẫn tối
   const p = fleet.preview;
+  const preview = (pts, color) => {
+    L.polyline(pts, { color: '#020617', weight: 7, opacity: .45, interactive: false }).addTo(layer);
+    L.polyline(pts, { color, weight: 4, opacity: .95, interactive: false }).addTo(layer);
+  };
   if (p?.mode === 'sectors') {
-    for (const r of p.routes) L.polyline(r.pts, { color: colorOf(r.id), weight: 4, opacity: .55, interactive: false }).addTo(layer);
+    for (const r of p.routes) preview(r.pts, colorOf(r.id));
   } else if (p?.mode === 'formation' && p.route?.length) {
-    L.polyline(p.route, { color: colorOf(p.leader), weight: 4, opacity: .55, interactive: false }).addTo(layer);
+    preview(p.route, colorOf(p.leader));
   }
-  areaLine.setLatLngs(fleet.area.map(a => [a.lat, a.lon]));
+  drawArea();
 }
 
 function renderPlanForm() {
@@ -233,7 +295,13 @@ export const retOf = id => fleet.ret.get(id)?.want === true;
 
 export function initFleet(m, c) {
   map = m; ctx = c;
-  layer.addTo(map); areaLine.addTo(map);
+  layer.addTo(map); areaLayer.addTo(map);
+  window.addEventListener('themechange', drawArea);
+  map.on('mousemove', e => {
+    if (document.body.dataset.mode !== 'fleet' || !fleet.area.length) return;
+    pointer = e.latlng; drawShape();
+  });
+  map.on('mouseout', () => { if (pointer) { pointer = null; drawShape(); } });
   map.on('click', e => {
     if (document.body.dataset.mode !== 'fleet' || state.role !== 'admin') return;
     fleet.area.push({ lat: e.latlng.lat, lon: e.latlng.lng });

@@ -5,7 +5,7 @@
 import { state, RISKS, LORA_GOOD_M, LORA_WEAK_M } from '../state.js';
 import { hm, fmtAgo } from '../util/format.js';
 import { distM } from '../util/geo.js';
-import { log } from './timeline.js';
+import { log, logPast } from './timeline.js';
 import { colorOf } from './fleet.js';
 
 export { RISKS };
@@ -103,7 +103,7 @@ function putAlertMarker(a) {
   if (a.type !== 'T' || !Number.isFinite(a.lat) || !Number.isFinite(a.lon)) return;
   const icon = L.divIcon({ className: '', iconSize: [28, 28], iconAnchor: [14, 14],
     html: '<div class="alert-pin"><i class="ph-fill ph-warning" aria-hidden="true"></i></div>' });
-  L.marker([a.lat, a.lon], { icon, zIndexOffset: 900 })
+  L.marker([a.lat, a.lon], { icon, zIndexOffset: 900, title: `${a.buoy} bị lật` })
     .bindTooltip(`${a.buoy} bị lật lúc ${timeText(a.at)}`, { direction: 'top', offset: [0, -14], className: 'tip' })
     .bindPopup(() => alertPopup(a), { className: 'pop' })
     .addTo(alertLayer);
@@ -171,11 +171,41 @@ export function victimsNear(p, radiusM) {
   return [...victims.values()].filter(v => distM(p, v) <= radiusM);
 }
 
-// Ảnh chụp toàn bộ lúc mở trang, hoặc sau khi admin xoá chấm: vẽ lại, không báo
+// Dòng nhật ký của một người hay một cảnh báo: [loại, chữ, lúc, id]. Cùng một hàm cho sự kiện vừa đến và cho ảnh
+// chụp lúc mở trang, nên tải lại trang không thêm dòng trùng (timeline.js so theo id).
+const foundRow = v => ['victim', `${v.buoy} phát hiện người, mức ${RISKS[v.risk].name.toLowerCase()}`, v.first_at, `v${v.vid}@${v.first_at}:found`];
+function statusRow(v, before) {
+  const id = `v${v.vid}@${v.first_at}:${v.status}@${v.status_at}`;
+  if (v.status === 'rescued') return ['rescue', `Người của ${ownerOf(v) || v.buoy} đã được cứu`, v.status_at, id];
+  if (v.status === 'released') return ['claim', `Người của ${before || v.buoy} được nhả: phao khác thấy sẽ nhận`, v.status_at, id];
+  if (v.status === 'claimed' && v.owner !== v.buoy) return ['claim', `${v.owner} nhận người${v.status_by ? ' (admin giao)' : ''}`, v.status_at, id];
+  return null;   // claimed by the first boat to see them: the "found" row says it
+}
+function alertRow(a) {
+  const id = `a${a.type}:${a.buoy}@${a.at}`;
+  if (a.type === 'T') return ['capsize', `${a.buoy} bị lật`, a.at, id];
+  if (a.type === 'C') return ['rescue', `${a.buoy}: người gặp nạn đã nhận đồ cứu hộ`, a.at, id];
+  if (a.type === 'E') return ['leader', `${a.replaces} mất liên lạc: ${a.buoy} lên dẫn đầu đội hình, nhận phần lộ trình còn lại`, a.at, id];
+  if (a.type === 'V' && RISKS[a.risk]) return ['victim', `${a.buoy} phát hiện người, mức ${RISKS[a.risk].name.toLowerCase()} (phao chưa có GPS)`, a.at, id];
+  return null;
+}
+
+// Ảnh chụp toàn bộ lúc mở trang, hoặc sau khi admin xoá chấm: vẽ lại, không báo; những gì máy chủ còn giữ vào lại
+// nhật ký (không tính là mới), kể cả trên trình duyệt chưa từng mở trang này
 export function onVictimsSnapshot(m) {
   dotLayer.clearLayers(); dots.clear(); victims.clear(); alertLayer.clearLayers();
-  for (const v of m.victims || []) putVictim(v);
-  for (const a of m.alerts || []) { putAlertMarker(a); noteCapsize(a); }
+  for (const v of m.victims || []) {
+    putVictim(v);
+    if (!RISKS[v.risk]) continue;
+    logPast(...foundRow(v));
+    const s = v.status && statusRow(v, null);
+    if (s) logPast(...s);
+  }
+  for (const a of m.alerts || []) {
+    putAlertMarker(a); noteCapsize(a);
+    const r = alertRow(a);
+    if (r) logPast(...r);
+  }
   renderVictims();
 }
 
@@ -188,17 +218,19 @@ export function onVictimMessage(m) {
   putVictim(v);
   renderVictims();
   if (m.new || !before) {
-    const risk = RISKS[v.risk].name;
-    log('victim', `${v.buoy} phát hiện người, mức ${risk.toLowerCase()}`, v.first_at);
-    toast(`${v.buoy} phát hiện người (${risk})`, 'bad');
+    log(...foundRow(v));
+    toast(`${v.buoy} phát hiện người (${RISKS[v.risk].name})`, 'bad');
     return;
   }
   // Nhận nạn nhân: một phao khác thấy cùng người (nó đi tiếp), người đã được cứu, được nhả, đổi chủ
-  if (seenBy(v).length > was.seen) log('claim', `${seenBy(v).at(-1)} cũng thấy người của ${ownerOf(v) || v.buoy}: đi tiếp, không dừng`, v.last_at);
+  if (seenBy(v).length > was.seen) {
+    const boat = seenBy(v).at(-1);
+    log('claim', `${boat} cũng thấy người của ${ownerOf(v) || v.buoy}: đi tiếp, không dừng`, v.last_at, `v${v.vid}@${v.first_at}:seen:${boat}`);
+  }
   if (v.status !== was.status || v.owner !== was.owner) {
-    if (v.status === 'rescued') { log('rescue', `Người của ${ownerOf(v) || v.buoy} đã được cứu`, v.status_at); toast('Đã cứu một người', 'ok'); }
-    else if (v.status === 'released') log('claim', `Người của ${was.owner || v.buoy} được nhả: phao khác thấy sẽ nhận`, v.status_at);
-    else if (v.status === 'claimed') log('claim', `${v.owner} nhận người${v.status_by ? ' (admin giao)' : ''}`, v.status_at);
+    const s = statusRow(v, was.owner);
+    if (s) log(...s);
+    if (v.status === 'rescued') toast('Đã cứu một người', 'ok');
   }
 }
 
@@ -206,22 +238,20 @@ export function onAlertMessage(m) {
   const a = m.alert;
   if (!a) return;
   state.eventBuoys.add(a.buoy);
+  const r = alertRow(a);
+  if (r) log(...r);
   if (a.type === 'T') {
     putAlertMarker(a);
     noteCapsize(a);
-    log('capsize', `${a.buoy} bị lật`, a.at);
     toast(`${a.buoy} bị lật`, 'bad');
   } else if (a.type === 'C') {
-    log('rescue', `${a.buoy}: người gặp nạn đã nhận đồ cứu hộ`, a.at);
     toast(`${a.buoy}: người gặp nạn đã nhận đồ cứu hộ`, 'ok');
   } else if (a.type === 'L') {
     // The shore station has not heard the buoy for 30 s (docs/fleet-control.md); the timeline logs signal lost itself
     toast(`${a.buoy} mất liên lạc ${a.silent_s ?? 30} giây`, 'bad');
   } else if (a.type === 'E') {
-    log('leader', `${a.replaces} mất liên lạc: ${a.buoy} lên dẫn đầu đội hình, nhận phần lộ trình còn lại`, a.at);
     toast(`${a.buoy} lên dẫn đầu đội hình thay ${a.replaces}`, 'bad');
   } else if (a.type === 'V' && RISKS[a.risk]) {
-    log('victim', `${a.buoy} phát hiện người, mức ${RISKS[a.risk].name.toLowerCase()} (phao chưa có GPS)`, a.at);
     toast(`${a.buoy} phát hiện người (chưa có vị trí)`, 'bad');
   }
 }
