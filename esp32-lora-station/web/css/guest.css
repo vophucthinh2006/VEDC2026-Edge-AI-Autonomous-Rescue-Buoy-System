@@ -120,6 +120,14 @@ h3{ font-size:14px; font-weight:600; margin-top:14px; color:var(--muted); }
 .g-risk::before{ content:''; display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--c); margin-right:6px; }
 .g-legend{ position:absolute; left:12px; bottom:12px; z-index:500; display:flex; flex-wrap:wrap; gap:6px 14px; max-width:calc(100% - 70px);
   background:rgba(255,255,255,.94); border:1px solid var(--line); border-radius:10px; padding:7px 12px; font-size:12.5px; color:var(--muted); box-shadow:var(--shadow); }
+@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .g-legend{ background:rgba(255,255,255,.82); -webkit-backdrop-filter:blur(12px) saturate(1.4); backdrop-filter:blur(12px) saturate(1.4); }
+}
+.leaflet-control-attribution{ font-size:10.5px; line-height:1.4; }
+@media (max-width:600px){
+  .leaflet-control-attribution{ max-width:calc(100vw - 20px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .leaflet-control-attribution:hover, .leaflet-control-attribution:focus-within{ white-space:normal; }
+}
 .g-legend span{ display:inline-flex; align-items:center; gap:6px; }
 .g-legend i{ width:12px; height:12px; border-radius:50%; flex:none; }
 .lg-buoy{ background:#16A34A; border:2px solid #fff; box-shadow:0 0 0 1px #16A34A; }
@@ -134,3 +142,39 @@ h3{ font-size:14px; font-weight:600; margin-top:14px; color:var(--muted); }
   .g-brand small{ display:none; }
   .g-stats b{ font-size:19px; }
 }
+
+/* Keyboard focus and reduced motion, as on the console (tokens.css) */
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{ animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+}
+
+/* Home card additions: share, the weather and river there, the rescue status of each person */
+.g-share-row{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+.g-share-row .g-hint{ margin:0; font-size:12.5px; }
+.g-share{ display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:4px 12px; border:1px solid var(--accent); border-radius:999px;
+  background:var(--accent-bg); color:var(--accent); font-size:13px; font-weight:600; }
+.g-share:hover:not(:disabled){ background:var(--accent); color:#fff; }
+.g-share:disabled{ cursor:default; }
+.g-wx{ margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+.g-wx h3{ margin-top:0; }
+.g-wx .g-hint{ margin:8px 0 0; font-size:12.5px; }
+.g-people span .g-pill{ align-self:flex-start; margin-top:4px; }
+
+/* People found and rescued by hour (js/guest.js drawTrend): found orange, rescued green, the count on each bar */
+.g-trend{ margin-top:10px; }
+.g-trend-legend{ display:flex; flex-wrap:wrap; gap:6px 16px; font-size:13px; color:var(--muted); }
+.g-trend-legend span{ display:inline-flex; align-items:center; gap:6px; }
+.g-trend-legend span::before{ content:''; width:12px; height:12px; border-radius:3px; }
+.g-trend-legend .f::before, .g-trend-bars .f{ background:#EA580C; }
+.g-trend-legend .s::before, .g-trend-bars .s{ background:#15803D; }
+.g-trend-chart{ display:grid; grid-template-columns:repeat(12, 1fr); gap:4px; height:120px; margin-top:10px; align-items:end;
+  border-bottom:1px solid var(--line-2); }
+.g-trend-col{ display:grid; grid-template-rows:1fr auto; height:100%; min-width:0; }
+.g-trend-col > span{ font-size:11px; color:var(--dim); text-align:center; line-height:1.6; transform:translateY(100%); white-space:nowrap; }
+.g-trend-bars{ display:flex; align-items:flex-end; justify-content:center; gap:2px; height:100%; }
+.g-trend-bars i{ position:relative; width:min(10px, 42%); border-radius:3px 3px 0 0; }
+.g-trend-bars i[data-n]::after{ content:attr(data-n); position:absolute; bottom:100%; left:50%; transform:translateX(-50%); font:700 10.5px/1.4 inherit;
+  font-style:normal; color:var(--text); }
+.g-trend{ padding-bottom:18px; }
+@media (hover:none) and (pointer:coarse){ .g-share{ min-height:44px; } }
