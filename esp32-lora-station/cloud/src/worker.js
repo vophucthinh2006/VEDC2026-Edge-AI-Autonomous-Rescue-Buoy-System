@@ -99,6 +99,18 @@ function sanitizeLights(m) {
 }
 
 // Lệnh dừng: { id: tên phao, hold: true (dừng) | false (chạy tiếp) }
+// Mực nước cho lớp độ sâu ngập (docs/weather-map.md): { code } (một trạm thủy văn), { level_m } (nhập tay, -5..30 m)
+// hoặc {} (trạm gần trạm bờ nhất)
+export function sanitizeFloodLevel(m) {
+  if (!m || typeof m !== "object") return null;
+  if (typeof m.code === "string") {
+    const code = m.code.replace(/[^\w.\-]/g, "").slice(0, 20);
+    return code ? { code } : null;
+  }
+  if (m.level_m !== undefined) return Number.isFinite(m.level_m) && m.level_m >= -5 && m.level_m <= 30 ? { level_m: +m.level_m.toFixed(2) } : null;
+  return {};
+}
+
 function sanitizeHold(m) {
   if (!m || typeof m !== "object" || typeof m.id !== "string") return null;
   const id = m.id.replace(/[^\w.\-]/g, "").slice(0, 31);
@@ -243,7 +255,7 @@ export default {
     }
 
     // ---- Bật/tắt đèn phao, dừng phao, về bờ, lệnh cả đội, xóa chấm người: admin (hoặc token ADMIN_API_TOKEN) ----
-    const COMMANDS = { "/api/lights": [sanitizeLights, "lights"], "/api/hold": [sanitizeHold, "hold"],
+    const COMMANDS = { "/api/lights": [sanitizeLights, "lights"], "/api/hold": [sanitizeHold, "hold"], "/api/flood-level": [sanitizeFloodLevel, "flood-level"],
       "/api/return": [sanitizeReturn, "return"], "/api/fleet": [sanitizeFleet, "fleet"] };
     // Admin về một người (docs/victim-claim.md): đã cứu, nhả cho phao khác, giao cho một phao
     const victimPath = path.match(/^\/api\/victims\/(\d+)$/);
@@ -274,6 +286,15 @@ export default {
     }
 
     // ---- Address search for the map: guest or admin session, answered by Nominatim through the Hub ----
+    // ---- Thời tiết, mưa, ngập cho bản đồ (docs/weather-map.md): khách hoặc admin ----
+    if (path === "/api/weather" || path === "/api/gauges") {
+      if (!session) return json({ error: "unauthenticated" }, 401);
+      if (request.method !== "GET") return json({ error: "method" }, 405);
+      if (path === "/api/gauges") return hub().fetch("https://hub/gauges");
+      const p = new URLSearchParams({ lat: url.searchParams.get("lat") || "", lon: url.searchParams.get("lon") || "" });
+      return hub().fetch("https://hub/weather?" + p);
+    }
+
     if (path === "/api/geocode") {
       if (!session) return json({ error: "unauthenticated" }, 401);
       if (request.method !== "GET") return json({ error: "method" }, 405);
