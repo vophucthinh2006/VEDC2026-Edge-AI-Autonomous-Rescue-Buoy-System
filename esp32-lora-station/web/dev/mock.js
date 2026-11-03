@@ -25,8 +25,12 @@
 
   // Người phát hiện, cảnh báo, đèn: giống bản tin máy chủ thật (đã bỏ bản phao gửi lặp, gộp phát hiện cách nhau dưới 5 m)
   let vid = 0;
-  const victim = (buoy, risk, lat, lon, conf, agoS, seen = [buoy]) => ({ vid: ++vid, buoy, lat, lon, risk, conf, first_at: now() - agoS * 1000,
-    last_at: now() - agoS * 400, owner: buoy, status: 'claimed', status_at: now() - agoS * 1000, seen_by: seen });
+  // The people there before the page opened keep their times across a reload, as the Worker's do (the timeline
+  // tells a replayed person from a new one by them)
+  let opened = now();
+  try { opened = Number(sessionStorage.getItem('mock.opened')) || opened; sessionStorage.setItem('mock.opened', String(opened)); } catch { /* fine */ }
+  const victim = (buoy, risk, lat, lon, conf, agoS, seen = [buoy], at = agoS ? opened : now()) => ({ vid: ++vid, buoy, lat, lon, risk, conf,
+    first_at: at - agoS * 1000, last_at: at - agoS * 400, owner: buoy, status: 'claimed', status_at: at - agoS * 1000, seen_by: seen });
   const people = new Map();   // vid -> người, cho các lệnh của admin (docs/victim-claim.md)
   const lights = { want: 1, have: 1, applyAt: 0 };   // PHAO-01: đèn 1 đang bật
   const holds = { 'PHAO-01': { want: false, have: false, applyAt: 0 }, 'PHAO-04': { want: true, have: true, applyAt: 0 } };
@@ -61,11 +65,45 @@
   const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase();
   const realFetch = window.fetch.bind(window);
   let lastGeocode = 0;
+  // Weather (js/features/weather.js, docs/weather-map.md): river gauges round the station, a rainy afternoon; the
+  // radar frames are RainViewer's own when the internet is there
+  const GAUGES = [
+    { code: '71600', name: 'Phú An', river: 'Sài Gòn', province: 'TP. Hồ Chí Minh', lat: 10.767, lon: 106.717, level_m: 1.42, alarm: 1 },
+    { code: '71601', name: 'Nhà Bè', river: 'Nhà Bè', province: 'TP. Hồ Chí Minh', lat: 10.697, lon: 106.748, level_m: 1.18, alarm: 0 },
+    { code: '69733', name: 'Vàm Kênh', river: 'Cửa Tiểu', province: 'Đồng Tháp', lat: 10.272, lon: 106.722, level_m: 1.66, alarm: 2 },
+    { code: '66770', name: 'Vị Thanh', river: 'Xà No', province: 'TP. Cần Thơ', lat: 9.767, lon: 105.45, level_m: 0.83, alarm: 3 },
+    { code: '71605', name: 'Biên Hòa', river: 'Đồng Nai', province: 'Đồng Nai', lat: 10.945, lon: 106.818, level_m: null, alarm: 0 },
+  ].map(g => ({ ...g, at: g.level_m === null ? null : now() - 3600e3 }));
+  let floodPick = { source: 'nearest' };
+  const floodNow = () => {
+    if (floodPick.source === 'manual') return { source: 'manual', level_m: floodPick.level_m, at: floodPick.at, by: 'mock@local' };
+    const g = GAUGES.find(x => x.code === (floodPick.code || '71600'));
+    return { source: floodPick.code ? 'gauge' : 'nearest', code: g.code, name: g.name, river: g.river, km: 6.2, level_m: g.level_m, at: g.at };
+  };
+  async function weather(u) {
+    let radar = null;
+    try {
+      const r = await realFetch('https://api.rainviewer.com/public/weather-maps.json').then(x => x.json());
+      radar = { host: r.host, frames: r.radar.past.map(f => ({ time: f.time * 1000, path: f.path })) };
+    } catch { /* offline: no radar */ }
+    const t0 = Math.floor(now() / 3600e3) * 3600e3;
+    const hours = Array.from({ length: 24 }, (_, i) => ({ t: t0 + i * 3600e3, rain_mm: [0, 0, 0.4, 2.1, 6.5, 9.8, 4.2, 1.1][i % 12] || 0,
+      prob: [20, 35, 70, 91, 97, 97, 80, 55][i % 12] || 15, wind_kmh: 8 + (i % 6) * 2 }));
+    return { forecast: { hours }, radar, flood: floodNow(), at: u.searchParams.get('lat') };
+  }
+
   window.fetch = async (url, init) => {
     const u = new URL(String(url), location.href);
+    const body = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
+    if (u.pathname === '/api/weather') return body(await weather(u));
+    if (u.pathname === '/api/gauges') return body({ stations: GAUGES, at: now() });
+    if (u.pathname === '/api/flood-level') {
+      const b = JSON.parse(init?.body || '{}');
+      floodPick = b.code ? { source: 'gauge', code: b.code } : Number.isFinite(b.level_m) ? { source: 'manual', level_m: b.level_m, at: now() } : { source: 'nearest' };
+      return body({ flood: floodNow() });
+    }
     if (u.pathname !== '/api/geocode') return realFetch(url, init);
     await new Promise(r => setTimeout(r, 450));
-    const body = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
     if (now() - lastGeocode < 1000) return body({ error: 'rate', retry_after_ms: 1000 - (now() - lastGeocode) }, 429);
     lastGeocode = now();
     const q = fold(u.searchParams.get('q') || '');

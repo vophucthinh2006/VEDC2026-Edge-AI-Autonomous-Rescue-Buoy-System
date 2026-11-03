@@ -1,0 +1,48 @@
+/* The console's light theme (html[data-theme="light"], the sun button in the top bar): high contrast for a
+   shore station out in the sun, where the dark theme washes out. The tokens first, then the few places
+   tokens.css's dark values were written out by hand. Every text pair here is 4.5:1 or more on its surface. */
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#E9EEF3;
+  --panel:#FFFFFF;
+  --panel-2:#F5F7FA;
+  --panel-3:#E7ECF2;
+  --line:#D6DEE7;
+  --line-2:#B8C4D1;
+
+  --text:#0B1220;                /* 18:1 on white */
+  --muted:#334155;               /* 10:1 */
+  --dim:#475569;                 /* 7.6:1 */
+
+  --accent:#0E7490;              /* 5.4:1 */
+  --accent-ink:#FFFFFF;
+  --ok:#047857;                  /* 5.5:1 */
+  --warn:#B45309;                /* 5.0:1 */
+  --bad:#B91C1C;                 /* 6.5:1 */
+  --bad-strong:#DC2626;
+  --station:#DC2626;
+
+  --ok-bg:rgba(4,120,87,.10);
+  --warn-bg:rgba(180,83,9,.10);
+  --bad-bg:rgba(185,28,28,.09);
+  --accent-bg:rgba(14,116,144,.10);
+
+  --shadow:0 6px 20px rgba(15,23,42,.14);
+}
+
+/* Written-out dark colours of components.css */
+[data-theme="light"] .btn.primary:hover:not(:disabled){ background:#155E75; border-color:#155E75; }
+[data-theme="light"] #victims.has-victims h2,
+[data-theme="light"] .hold-state.stopped,
+[data-theme="light"] .sp-people{ color:var(--bad); }
+[data-theme="light"] .leaflet-control-scale-line{ background:rgba(255,255,255,.88); color:var(--text); }
+[data-theme="light"] .leaflet-control-attribution{ background:rgba(255,255,255,.88) !important; color:var(--muted) !important; }
+[data-theme="light"] #empty{ background:rgba(255,255,255,.95); }
+[data-theme="light"] .map-legend{ background:rgba(255,255,255,.95); }
+@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  [data-theme="light"] .map-legend{ background:rgba(255,255,255,.84); }
+}
+[data-theme="light"] .map-legend .dot{ border-color:#0F172A; }
+[data-theme="light"] .switch:checked{ background:rgba(180,83,9,.18); }
+[data-theme="light"] .map-legend .cog{ border-top-color:#0F172A; }
+[data-theme="light"] .leaflet-tooltip.tip{ box-shadow:0 2px 8px rgba(15,23,42,.18); }

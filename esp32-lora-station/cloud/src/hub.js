@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { json } from "./util.js";
 import { Geocoder } from "./geocode.js";
+import { Weather, nearestGauge } from "./weather.js";
 import { formationOffsets, planFormation, planSectors } from "./fleetplan.js";
 
 const MAX_BUOYS = 50;
@@ -112,6 +113,8 @@ export class Hub extends DurableObject {
   formation = undefined;
   diag = null;      // id -> { d, t }: khung chẩn đoán mới nhất của phao (lý do dừng, nhiệm vụ Pi, pin)
   geocoder = null;  // address search cache and rate limits (memory only, rebuilt after eviction)
+  weather = null;   // forecast, radar frames and river gauges, cached (memory only; weather.js)
+  floodLevel = null; // the water level the flood depth layer uses: { source: "gauge"|"manual", code?, level_m, by, at }
 
   async loadBuoys() {
     if (!this.buoys) this.buoys = (await this.ctx.storage.get("buoys")) || {};
@@ -339,6 +342,21 @@ export class Hub extends DurableObject {
     return this.station;
   }
 
+  async loadFloodLevel() {
+    if (!this.floodLevel) this.floodLevel = (await this.ctx.storage.get("floodLevel")) || { source: "nearest" };
+    return this.floodLevel;
+  }
+
+  // The water level the flood depth layer uses: { source, code?, name?, river?, km?, level_m, at, by? }, or null
+  floodFor(chosen, gauges, at) {
+    const stations = gauges?.value || [];
+    if (chosen?.source === "manual") return { source: "manual", level_m: chosen.level_m, at: chosen.at, by: chosen.by };
+    const g = chosen?.source === "gauge" ? stations.find(s => s.code === chosen.code) : nearestGauge(stations, at);
+    if (!g || g.level_m === null) return null;
+    return { source: chosen?.source === "gauge" ? "gauge" : "nearest", code: g.code, name: g.name, river: g.river,
+      km: g.km, level_m: g.level_m, at: g.at, by: chosen?.by || null, stale: gauges.stale || undefined };
+  }
+
   async loadHistory(id) {
     if (!this.hist[id]) this.hist[id] = (await this.ctx.storage.get("h:" + id)) || [];
     return this.hist[id];
@@ -521,6 +539,35 @@ export class Hub extends DurableObject {
         server.send(JSON.stringify({ type: "diag", id, ...x.d, age_s: Math.round((now - x.t) / 1000) }));
       }
       return new Response(null, { status: 101, webSocket: client });
+    }
+
+    // Weather for the map at a point (docs/weather-map.md): the forecast there, the rain radar frames, and the
+    // water level of the flood depth layer (the admin's choice, else the river gauge nearest the point)
+    if (url.pathname === "/weather" && request.method === "GET") {
+      this.weather ??= new Weather();
+      const lat = Number(url.searchParams.get("lat")), lon = Number(url.searchParams.get("lon"));
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return json({ error: "bad point" }, 400);
+      const [forecast, radar, gauges, chosen] = await Promise.all([this.weather.forecast(lat, lon), this.weather.radarFrames(),
+        this.weather.gaugeList(), this.loadFloodLevel()]);
+      return json({ forecast, radar: radar && { ...radar.value, stale: radar.stale || undefined }, flood: this.floodFor(chosen, gauges, { lat, lon }) });
+    }
+    if (url.pathname === "/gauges" && request.method === "GET") {
+      this.weather ??= new Weather();
+      const g = await this.weather.gaugeList();
+      return g ? json({ stations: g.value, at: g.at, stale: g.stale || undefined }) : json({ error: "upstream" }, 502);
+    }
+    // Admin: the water level of the flood depth layer, { code } (a gauge) or { level_m } (typed in), or {} (back to the nearest gauge)
+    if (url.pathname === "/flood-level" && request.method === "PUT") {
+      const { code, level_m, by } = await request.json();
+      const now = Date.now();
+      this.floodLevel = code ? { source: "gauge", code, by: by || null, at: now }
+        : Number.isFinite(level_m) ? { source: "manual", level_m, by: by || null, at: now } : { source: "nearest", at: now };
+      await this.ctx.storage.put("floodLevel", this.floodLevel);
+      this.weather ??= new Weather();
+      const st = (await this.loadStation())?.msg;
+      const flood = this.floodFor(this.floodLevel, await this.weather.gaugeList(), st && Number.isFinite(st.lat) ? st : { lat: 16, lon: 106 });
+      this.broadcast({ type: "flood", flood });
+      return json({ flood });
     }
 
     // Address search (dashboard search box); one Geocoder here keeps Nominatim at 1 request/s overall

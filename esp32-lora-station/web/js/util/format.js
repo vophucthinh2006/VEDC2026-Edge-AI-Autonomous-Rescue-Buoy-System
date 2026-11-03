@@ -3,7 +3,8 @@
 export const NONE = '-';
 export const pad2 = n => String(n).padStart(2, '0');
 
-export const fmtDist = m => m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
+// Vietnamese numbers: a decimal comma (6,2 km), as everywhere else on the pages
+export const fmtDist = m => m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(m < 10000 ? 1 : 0).replace('.', ',') + ' km';
 
 // "vừa xong", "3 phút trước", "2 giờ trước"
 export function fmtAgo(ms) {

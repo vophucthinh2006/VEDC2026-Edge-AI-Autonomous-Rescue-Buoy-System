@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#0C131B">
 <meta name="color-scheme" content="dark">
 <title>Trạm điều hành cứu hộ</title>
+<link rel="icon" type="image/png" href="img/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap">
@@ -17,6 +18,10 @@
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/login.css">
+<link rel="stylesheet" href="css/weather.css">
+<link rel="stylesheet" href="css/light.css">
+<!-- The theme picked before (js/app.js applyTheme), set before the first paint so the page does not flash -->
+<script>try { if (localStorage.getItem('theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) { /* dark */ }</script>
 </head>
 <body data-mode="monitor">
 <div id="app">
@@ -29,6 +34,7 @@
       <span id="conn" class="conn" data-up="false" role="status" title="Kết nối tới máy chủ">
         <i class="dot" aria-hidden="true"></i><span id="conn-text">Đang kết nối</span>
       </span>
+      <button id="btn-theme" class="icon-btn" type="button" aria-pressed="false" aria-label="Chế độ sáng, dễ đọc ngoài nắng" title="Chế độ sáng, dễ đọc ngoài nắng"><i class="ph ph-sun" aria-hidden="true"></i></button>
       <div id="role-chip" hidden>
         <span id="role-name"></span>
         <button id="btn-logout" type="button" title="Đăng xuất"><i class="ph ph-sign-out" aria-hidden="true"></i><span>Đăng xuất</span></button>
@@ -53,7 +59,14 @@
           <button id="victims-more" class="link-btn" type="button" hidden></button>
         </section>
 
-        <section id="card" aria-label="Phao đang chọn">
+        <!-- One part at a time under the people to rescue: the boat picked, the whole fleet, the events -->
+        <div id="tabs" role="tablist" aria-label="Bảng phao">
+          <button id="tab-detail" role="tab" type="button" aria-selected="true" aria-controls="card" title="Phao đang chọn">Chi tiết</button>
+          <button id="tab-buoys" role="tab" type="button" aria-selected="false" aria-controls="buoys-view" tabindex="-1">Đội phao <span id="count" class="count">0</span></button>
+          <button id="tab-log" role="tab" type="button" aria-selected="false" aria-controls="log-view" tabindex="-1">Sự kiện <span id="tab-log-badge" class="count bad" hidden>0</span></button>
+        </div>
+
+        <section id="card" role="tabpanel" aria-labelledby="tab-detail">
           <div id="card-empty" class="empty-note">
             <i class="ph ph-lifebuoy" aria-hidden="true"></i>
             <p>Chưa có phao nào. Phao sẽ hiện ở đây khi trạm bờ nhận được tín hiệu.</p>
@@ -137,14 +150,17 @@
         </section>
 
         <section id="lists">
-          <div id="tabs" role="tablist">
-            <button id="tab-buoys" role="tab" type="button" aria-selected="true" aria-controls="buoys-view">Phao <span id="count" class="count">0</span></button>
-            <button id="tab-log" role="tab" type="button" aria-selected="false" aria-controls="log-view">Sự kiện <span id="tab-log-badge" class="count bad" hidden>0</span></button>
-          </div>
-          <div id="buoys-view" role="tabpanel" aria-labelledby="tab-buoys">
+          <div id="buoys-view" role="tabpanel" aria-labelledby="tab-buoys" hidden>
             <div id="list"></div>
           </div>
           <div id="log-view" role="tabpanel" aria-labelledby="tab-log" hidden>
+            <div id="tl-head">
+              <div id="tl-groups" class="seg" role="group" aria-label="Loại sự kiện">
+                <button type="button" data-g="people" aria-pressed="true">Người gặp nạn <span class="count">0</span></button>
+                <button type="button" data-g="ops" aria-pressed="false">Tàu &amp; lệnh <span class="count">0</span></button>
+              </div>
+              <button id="tl-clear" type="button" class="link-btn">Xoá nhật ký</button>
+            </div>
             <ol id="timeline"></ol>
           </div>
         </section>
@@ -174,10 +190,10 @@
           <div class="sec-head"><h2>Đội tàu</h2><span id="f-count" class="count">0</span>
             <button id="f-end" class="link-btn admin-only" type="button" hidden>Kết thúc đội hình</button></div>
           <div id="f-list"></div>
-          <div class="f-cmds admin-only">
-            <button class="btn small danger" id="f-hold-all" type="button"><i class="ph ph-hand-palm" aria-hidden="true"></i>Dừng tất cả</button>
-            <button class="btn small" id="f-resume-all" type="button"><i class="ph ph-play" aria-hidden="true"></i>Chạy tiếp tất cả</button>
-            <button class="btn small" id="f-return-all" type="button"><i class="ph ph-house-line" aria-hidden="true"></i>Về bờ tất cả</button>
+          <div class="f-cmds admin-only" role="group" aria-label="Lệnh cho cả đội">
+            <button class="btn small danger" id="f-hold-all" type="button" aria-label="Dừng tất cả phao" title="Dừng tất cả phao"><i class="ph ph-hand-palm" aria-hidden="true"></i>Dừng hết</button>
+            <button class="btn small" id="f-resume-all" type="button" aria-label="Cho tất cả phao chạy tiếp" title="Cho tất cả phao chạy tiếp"><i class="ph ph-play" aria-hidden="true"></i>Chạy tiếp</button>
+            <button class="btn small" id="f-return-all" type="button" aria-label="Gọi tất cả phao về bờ" title="Gọi tất cả phao về bờ"><i class="ph ph-house-line" aria-hidden="true"></i>Về bờ hết</button>
           </div>
         </section>
         <section id="f-plan" class="admin-only" aria-labelledby="f-plan-title">

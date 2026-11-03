@@ -88,6 +88,11 @@ chạy một mình nên vẫn beacon tự do 5 s; mô phỏng đội tàu dùng 
 
 ## Mô phỏng và so sánh
 
+Tự điều khiển trên dashboard, từ Windows: `scripts\stm32\sim_fleet.bat [1-4] [wide|central|...] [headless] [viewer]
+[noclaims] [holdNN]` bật Worker, đăng nhập thử, dọn dữ liệu cũ của các tàu rồi chạy đội tàu (mặc định 3 tàu, vùng rộng,
+giữ một người 30 s). Mở http://127.0.0.1:8787/admin, bấm **Đăng nhập admin (thử nghiệm)**, tab **Đội tàu**. Chạy thẳng
+trong WSL:
+
 ```bash
 VEDC_INGEST_TOKEN=... bash sim/tools/fleet_sim.sh --boats=3 --world=central --viewer
 ```

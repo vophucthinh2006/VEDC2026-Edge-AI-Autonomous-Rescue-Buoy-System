@@ -7,6 +7,7 @@
 <meta name="color-scheme" content="light">
 <meta name="description" content="Theo dõi trực tiếp các phao cứu hộ và người được phát hiện trong vùng lũ, cho người thân ở xa.">
 <title>Theo dõi cứu hộ lũ</title>
+<link rel="icon" type="image/png" href="/img/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap">
@@ -15,6 +16,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css">
 <link rel="stylesheet" href="/css/guest.css">
+<link rel="stylesheet" href="/css/weather.css">
 </head>
 <body>
 <header class="g-top">
@@ -49,6 +51,11 @@
         <div><b id="s-aid">-</b><span>người đã nhận đồ cứu trợ</span></div>
       </div>
       <p id="s-updated" class="g-hint"></p>
+    </section>
+    <section class="g-card" aria-labelledby="trend-title">
+      <h2 id="trend-title">Diễn biến trong ngày</h2>
+      <p class="g-hint">Số người được phát hiện và được cứu theo từng giờ, 12 giờ gần nhất.</p>
+      <div id="trend" class="g-trend"></div>
     </section>
 
     <section class="g-card" aria-labelledby="feed-title">

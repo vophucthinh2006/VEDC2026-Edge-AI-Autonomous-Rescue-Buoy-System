@@ -165,7 +165,8 @@ npm run test:auth                 # 50 kiểm thử (Worker phải đang chạy,
 **Đăng nhập admin (thử nghiệm)** (email phải có trong `ADMIN_EMAILS`). Nút này thay nút Google khi `GOOGLE_JWKS_URL`
 trỏ về máy này (`/api/config` trả `devSignIn`); nút Google với `GOOGLE_CLIENT_ID=test-client-id` luôn bị Google chặn
 (`401 invalid_client`). Worker đã deploy không bao giờ hiện nút này: nó kiểm token bằng khóa của Google.
-`scripts\stm32\sim_central.bat` chạy cả Worker, IdP giả và mô phỏng.
+`scripts\stm32\sim_central.bat` chạy cả Worker, IdP giả và mô phỏng; `scripts\stm32\sim_fleet.bat` cũng vậy cho một
+đội 1–4 tàu ([docs/fleet-control.md](../docs/fleet-control.md)).
 Đổi `.dev.vars` xong phải khởi động lại `wrangler dev`. Gửi thử một gói như ESP32:
 ```powershell
 curl -X POST http://localhost:8787/api/ingest -H "Authorization: Bearer dev-token" -d "{\"fix\":1,\"lat\":10.7626,\"lon\":106.6602,\"rssi\":-88,\"snr\":7.5,\"raw\":\"test\"}"
