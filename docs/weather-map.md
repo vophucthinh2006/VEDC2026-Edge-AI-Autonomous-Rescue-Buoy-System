@@ -36,6 +36,24 @@ Trình duyệt ──tile trực tiếp──▶ RainViewer, NASA GIBS, Terrain 
 - `web/js/features/weather.js`: ô điều khiển và các lớp. Các lớp nằm trong một pane riêng, trên bản đồ nền và dưới các
   phao, nên chế độ tối (đảo màu bản đồ nền) không làm sai màu chúng.
 
+## Bản đồ khi mạng yếu
+
+Trước đây mỗi tile bản đồ nền đi thẳng từ trình duyệt sang máy chủ OSM ở châu Âu (DEM thì sang AWS ở Mỹ); mạng yếu
+là bản đồ xám, không có chi tiết. Giờ:
+
+- `cloud/src/tiles.js`: Worker phục vụ `/tiles/osm/{z}/{x}/{y}.png` và `/tiles/dem/...`. Lần đầu lấy từ nguồn (có
+  User-Agent riêng, đúng chính sách tile của OSM), sau đó cache của Cloudflare gần người dùng trả lời. Trang web khác
+  gọi vào (`Sec-Fetch-Site: cross-site`) bị từ chối.
+- `web/sw.js`: Service Worker chỉ đụng tới `/tiles/`. Tile đã xem một lần được trả ngay từ máy, kể cả khi mất mạng;
+  tile cũ hơn 7 ngày được làm mới ngầm khi có mạng; giữ tối đa 4000 tile (~60–80 MB).
+- `web/js/util/basemap.js`: lớp nền dùng chung cho trang admin và trang người thân.
+  - Một lớp thô (zoom 13, vài tile) nằm dưới lớp chi tiết: khi chi tiết chưa tải xong bản đồ mờ chứ không xám.
+  - Tile nào Worker không trả được thì xin thẳng OSM; trượt 4 lần mà chưa được lần nào (máy chủ tĩnh lúc phát triển)
+    thì đi thẳng luôn.
+  - Có vị trí trạm bờ: tải ngầm tile zoom 11–16 trong bán kính 3 km (tối đa 500 tile), chỉ khi bản đồ đang hiện đã
+    tải xong, mỗi nơi một lần trên mỗi máy, bỏ qua khi trình duyệt bật tiết kiệm dữ liệu. Đến hiện trường thì vùng
+    quanh trạm đã có sẵn trên máy.
+
 ## Giới hạn (nói rõ với giám khảo)
 
 - **Không có nguồn công khai nào cho độ sâu ngập thật.** Lớp độ sâu chỉ là ước lượng:
