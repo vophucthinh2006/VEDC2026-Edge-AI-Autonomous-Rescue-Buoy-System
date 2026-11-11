@@ -1,0 +1,303 @@
+/* The console shell over the map (docs/admin-console-ui.md): status pill, rail + drawer, search, map tools, the
+   picked-buoy control and the dock. Glass surfaces over the map, one motion vocabulary for every transition.
+   Reduced motion: tokens.css turns every animation and transition off. */
+
+:root{
+  /* Motion: short for feedback, longer for things that travel; leaving is faster than arriving */
+  --dur-1:120ms;
+  --dur-2:200ms;
+  --dur-3:320ms;
+  --dur-4:650ms;
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --ease-in:cubic-bezier(.4,0,1,1);
+  --ease-spring:cubic-bezier(.34,1.56,.64,1);
+  --ease-needle:cubic-bezier(.25,1.35,.5,1);
+
+  --rail-w:84px;
+  --drawer-w:min(384px, calc(100vw - var(--rail-w) - 120px));
+  --gauge-h:124px;
+  --ui-gap:12px;
+  --glass:color-mix(in srgb, var(--panel) 84%, transparent);
+  --glass-line:color-mix(in srgb, var(--line-2) 80%, transparent);
+  --z-side:820;
+  --z-ctl:810;
+}
+body[data-mode="mission"], body[data-mode="fleet"]{ --gauge-h:52px; }
+/* Below the gauges. Declared on body, where the mode changes --gauge-h, so it follows it */
+body{ --top-ui:calc(var(--ui-gap) * 2 + var(--gauge-h)); }
+
+/* Glass: over the map only, so the map shows through faintly */
+#pill, #gauges .g, #rail, #drawer, #ctl, #map-tools .tool, #btn-search, #search, #search-panel{
+  background:var(--glass);
+  -webkit-backdrop-filter:blur(16px) saturate(1.35); backdrop-filter:blur(16px) saturate(1.35);
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  #pill, #gauges .g, #rail, #drawer, #ctl, #map-tools .tool, #btn-search, #search, #search-panel{ background:var(--panel); }
+}
+
+@keyframes rise{ from{ opacity:0; transform:translateY(10px) scale(.98); } }
+@keyframes drop{ from{ opacity:0; transform:translateY(-12px) scale(.97); } }
+@keyframes fade-up{ from{ opacity:0; transform:translateY(6px); } }
+@keyframes swap{ from{ opacity:0; transform:translateY(5px); filter:blur(2px); } }
+@keyframes bump{ 0%{ transform:scale(1); } 35%{ transform:scale(1.35); } 100%{ transform:scale(1); } }
+@keyframes ripple{ from{ transform:scale(1); opacity:.55; } to{ transform:scale(3.2); opacity:0; } }
+@keyframes alarm{ 0%,100%{ box-shadow:var(--shadow), 0 0 0 0 rgba(248,113,113,0); } 50%{ box-shadow:var(--shadow), 0 0 0 5px rgba(248,113,113,.22); } }
+.swap{ animation:swap var(--dur-3) var(--ease-out); }
+
+/* ---------- Top bar: the status pill and the chips ---------- */
+#pill{
+  display:flex; align-items:center; gap:10px; height:42px; min-width:min(460px, 40vw); max-width:100%; padding:0 14px 0 6px;
+  border:1px solid var(--glass-line); border-radius:var(--r-pill); box-shadow:var(--shadow);
+  font-size:14px; animation:drop var(--dur-3) var(--ease-out);
+  transition:border-color var(--dur-3), box-shadow var(--dur-3);
+}
+#pill .pill-ic{ display:grid; place-items:center; width:30px; height:30px; flex:none; border-radius:50%; background:var(--panel-3); color:var(--pill-c); transition:color var(--dur-3); }
+#pill .pill-ic .ph-fill{ font-size:16px; }
+#pill b{ white-space:nowrap; }
+.pill-sep{ width:18px; height:2px; flex:none; border-radius:1px; background:linear-gradient(90deg, var(--line-2) 50%, transparent 0) 0 0/6px 2px; }
+#pill-text{ flex:1; min-width:0; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pill-dot{ position:relative; width:12px; height:12px; flex:none; border-radius:50%; background:var(--pill-c); transition:background var(--dur-3); }
+.pill-dot::after{ content:''; position:absolute; inset:0; border-radius:50%; background:var(--pill-c); animation:ripple 1.8s var(--ease-out) infinite; }
+#pill{ --pill-c:var(--accent); }
+#pill[data-tone="ok"]{ --pill-c:var(--ok); }
+#pill[data-tone="warn"]{ --pill-c:var(--warn); }
+#pill[data-tone="bad"]{ --pill-c:var(--bad); border-color:var(--bad); animation:drop var(--dur-3) var(--ease-out), alarm 1.6s ease-in-out infinite; }
+#pill[data-tone="lost"]{ --pill-c:var(--dim); }
+#pill[data-tone="lost"] .pill-dot::after, #pill[data-tone="idle"] .pill-dot::after{ animation:none; opacity:0; }
+
+.top-right > *, #role-chip, #btn-logout{ white-space:nowrap; }
+.top-chip{ display:inline-flex; align-items:center; gap:6px; font-size:14px; color:var(--muted); }
+.top-chip .ph{ font-size:19px; }
+.top-chip b{ color:var(--text); }
+.top-chip[data-fix="false"] b{ color:var(--warn); }
+.conn .dot{ position:relative; }
+.conn[data-up="true"] .dot::after{ content:''; position:absolute; inset:0; border-radius:50%; background:var(--ok); animation:ripple 2.4s var(--ease-out) infinite; }
+
+/* ---------- Search, folded to a button under the gauges ---------- */
+#map-top{ top:var(--top-ui); left:var(--ui-gap); right:auto; transition:top var(--dur-3) var(--ease-out); }
+#search-wrap{ display:flex; align-items:flex-start; gap:8px; flex:none; width:auto; position:relative; }
+#btn-search{ flex:none; width:48px; height:48px; border-radius:14px; border-color:var(--glass-line); }
+#btn-search[aria-expanded="true"]{ color:var(--accent); border-color:var(--accent); }
+#search{ width:min(380px, calc(100vw - 180px)); height:48px; border-radius:14px; border-color:var(--glass-line);
+  transform-origin:left center; transition:opacity var(--dur-2) var(--ease-out), transform var(--dur-3) var(--ease-out), visibility 0s; }
+#search-wrap[data-open="false"] #search{ opacity:0; transform:translateX(-12px) scaleX(.94); visibility:hidden; pointer-events:none;
+  transition:opacity var(--dur-1) var(--ease-in), transform var(--dur-2) var(--ease-in), visibility 0s linear var(--dur-2); }
+#search-wrap[data-open="false"] #search-panel{ display:none; }
+#search-panel{ position:absolute; top:56px; left:56px; width:min(380px, calc(100vw - 180px)); margin:0; border-color:var(--glass-line); animation:fade-up var(--dur-3) var(--ease-out); }
+
+/* ---------- Map tools: bottom left, over Leaflet's zoom buttons ---------- */
+#map-tools{ top:auto; right:auto; left:var(--ui-gap); bottom:104px; gap:8px; }
+#map-tools .tool, #btn-search{ border:1px solid var(--glass-line); box-shadow:var(--shadow); transition:transform var(--dur-1), border-color var(--dur-2), background var(--dur-2); }
+.tool:active, .rail-btn:active, .ctl-btn:active, #mode button:active, .dock-btn:active, .hold-btn:active{ transform:scale(.95); }
+#map .leaflet-bottom.leaflet-left .leaflet-control{ margin-left:var(--ui-gap); margin-bottom:var(--ui-gap); }
+#map .leaflet-control-zoom a{ width:48px !important; height:44px !important; line-height:44px !important; background:var(--glass); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); }
+#map .leaflet-control-zoom{ border-radius:14px !important; overflow:hidden; }
+#map .leaflet-bottom.leaflet-right{ right:var(--rail-w); }
+
+/* ---------- Rail and drawer (right) ---------- */
+#side{
+  position:absolute; top:0; right:0; bottom:0; z-index:var(--z-side);
+  display:flex; flex-direction:row-reverse; align-items:stretch; pointer-events:none;
+}
+#side > *{ pointer-events:auto; }
+#rail{
+  width:var(--rail-w); display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px 0;
+  border-left:1px solid var(--glass-line); overflow-y:auto; scrollbar-width:none;
+}
+.rail-btn{
+  position:relative; width:68px; min-height:62px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+  padding:8px 2px; border:0; border-radius:14px; background:transparent; color:var(--muted); font-size:11px; font-weight:600; line-height:1.15; text-align:center;
+  transition:background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), transform var(--dur-1);
+}
+.rail-btn .ph{ font-size:24px; transition:transform var(--dur-3) var(--ease-spring); }
+.rail-btn:hover{ background:var(--panel-3); color:var(--text); }
+.rail-btn:hover .ph{ transform:translateY(-1px); }
+.rail-btn::before{ content:''; position:absolute; left:-8px; top:14px; bottom:14px; width:3px; border-radius:2px; background:var(--accent);
+  transform:scaleY(0); transition:transform var(--dur-3) var(--ease-spring); }
+.rail-btn[aria-pressed="true"]{ background:var(--accent-bg); color:var(--accent); }
+.rail-btn[aria-pressed="true"]::before{ transform:scaleY(1); }
+.rail-btn[aria-pressed="true"] .ph{ transform:scale(1.08); }
+.rail-btn .badge{ position:absolute; top:4px; right:4px; min-width:20px; height:20px; padding:0 5px; font-size:11px; box-shadow:0 0 0 2px var(--panel); }
+.rail-btn .badge.bump{ animation:bump 480ms var(--ease-spring); }
+.rail-btn[data-panel="buoys"] .badge{ background:var(--panel-3); color:var(--muted); }
+
+#drawer{
+  width:var(--drawer-w); margin:var(--top-ui) var(--ui-gap) 36px 0; display:flex; flex-direction:column; min-height:0;
+  border:1px solid var(--glass-line); border-radius:18px; box-shadow:var(--shadow); overflow:hidden;
+  transform-origin:right center;
+  transition:margin-top var(--dur-3) var(--ease-out), opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-spring), visibility 0s;
+}
+#side[data-open="false"] #drawer{
+  opacity:0; transform:translateX(24px) scale(.97); visibility:hidden; pointer-events:none;
+  transition:opacity var(--dur-2) var(--ease-in), transform var(--dur-2) var(--ease-in), visibility 0s linear var(--dur-2);
+}
+.drawer-head{ display:flex; align-items:center; gap:10px; min-height:56px; padding:8px 8px 8px 18px; border-bottom:1px solid var(--line); flex:none; }
+.drawer-head h2{ flex:1; margin:0; font-size:16px; font-weight:700; letter-spacing:-.01em; }
+#drawer-close{ width:40px; height:40px; border-radius:10px; }
+.panel{ display:none; flex-direction:column; flex:1; min-height:0; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--line-2) transparent; }
+body[data-mode="monitor"] #panel-monitor{ display:flex; }
+body[data-mode="mission"] #panel-mission{ display:flex; }
+body[data-mode="fleet"] #panel-fleet{ display:flex; }
+#panel-monitor > [data-panel]{ padding:14px 16px 18px; animation:fade-up var(--dur-3) var(--ease-out); }
+#panel-mission, #panel-fleet{ animation:fade-up var(--dur-3) var(--ease-out); }
+
+/* The rows of a panel just opened come in one after another */
+#drawer.enter :is(#victim-list, #list, #timeline, #card-body, #m-list, #f-list, #wx-slot .wx-b, #legend-slot .b) > *{ animation:rise var(--dur-3) var(--ease-out) both; }
+#drawer.enter :is(#victim-list, #list, #timeline, #card-body, #m-list, #f-list, #wx-slot .wx-b, #legend-slot .b) > :nth-child(2){ animation-delay:40ms; }
+#drawer.enter :is(#victim-list, #list, #timeline, #card-body, #m-list, #f-list, #wx-slot .wx-b, #legend-slot .b) > :nth-child(3){ animation-delay:80ms; }
+#drawer.enter :is(#victim-list, #list, #timeline, #card-body, #m-list, #f-list, #wx-slot .wx-b, #legend-slot .b) > :nth-child(4){ animation-delay:120ms; }
+#drawer.enter :is(#victim-list, #list, #timeline, #card-body, #m-list, #f-list, #wx-slot .wx-b, #legend-slot .b) > :nth-child(5){ animation-delay:160ms; }
+#drawer.enter :is(#victim-list, #list, #timeline, #card-body, #m-list, #f-list, #wx-slot .wx-b, #legend-slot .b) > :nth-child(6){ animation-delay:200ms; }
+#drawer.enter :is(#victim-list, #list, #timeline, #card-body, #m-list, #f-list, #wx-slot .wx-b, #legend-slot .b) > :nth-child(n+7){ animation-delay:240ms; }
+
+/* The old side-column sections, now drawer panels */
+#victims{ border-bottom:0; }
+#victims.has-victims{ background:none; }
+#victims .sec-head{ margin-bottom:8px; }
+#victims .sec-head:not(:has(:not([hidden]))){ display:none; }
+#card{ border-bottom:0; }
+#card .vitals{ display:none; }                       /* the gauges show signal and battery */
+#card .status-big{ min-height:44px; font-size:15px; }
+#d-health dt:has(+ :is(#h-roll, #h-pitch, #h-head)), #d-health :is(#h-roll, #h-pitch, #h-head){ display:none; }   /* in the gauges */
+#buoys-view, #log-view{ padding-top:10px !important; }
+#m-head, #f-head, #f-plan{ padding:14px 16px; }
+
+/* Information as tiles instead of a table of sentences */
+.kv.tiles{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; margin:0; }
+.kv.tiles dt{ display:none; }
+.kv.tiles dd{ position:relative; margin:0; padding:26px 12px 10px; border-radius:12px; background:var(--panel-2); border:1px solid var(--line);
+  font-size:13px; font-weight:600; line-height:1.35; color:var(--text); min-width:0; overflow-wrap:anywhere; transition:border-color var(--dur-3), background var(--dur-3); }
+.kv.tiles dd::before{ position:absolute; left:12px; top:8px; font-size:11px; font-weight:600; color:var(--muted); }
+.kv.tiles dd::after{ content:''; position:absolute; right:10px; top:10px; width:8px; height:8px; border-radius:50%; background:var(--line-2); }
+.kv.tiles dd[data-tone="ok"]::after{ background:var(--ok); }
+.kv.tiles dd[data-tone="warn"]{ border-color:color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.kv.tiles dd[data-tone="warn"]::after{ background:var(--warn); }
+.kv.tiles dd[data-tone="bad"]{ border-color:color-mix(in srgb, var(--bad) 55%, var(--line)); background:var(--bad-bg); }
+.kv.tiles dd[data-tone="bad"]::after{ background:var(--bad); }
+#h-imu::before{ content:'IMU'; } #h-zone::before{ content:'Vùng LoRa'; }
+#g-mission::before{ content:'Nhiệm vụ'; } #g-reason::before{ content:'Lệnh của Pi'; } #g-drive::before{ content:'Motor'; }
+#g-fps::before{ content:'Camera AI'; } #g-pack::before{ content:'Pin (INA226)'; } #g-recov::before{ content:'Tự phục hồi'; }
+#h-zone, #g-mission, #g-reason{ grid-column:1 / -1; }
+.kv-card h3{ font-size:12px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+
+/* The weather panel and the legend in their drawer panels: always open, no header of their own */
+.in-drawer{ position:static !important; max-height:none !important; width:auto !important; margin:0 !important; padding:0 !important;
+  background:none !important; border:0 !important; box-shadow:none !important; -webkit-backdrop-filter:none !important; backdrop-filter:none !important; }
+.in-drawer > .wx-t, .in-drawer > .t{ display:none !important; }
+.in-drawer .wx-b, .in-drawer .b{ display:block !important; }
+.map-legend.in-drawer{ font-size:14px; line-height:2.1; }
+.map-legend.in-drawer .b{ display:grid !important; grid-template-columns:repeat(2, minmax(0,1fr)); gap:2px 12px; margin:0; }
+
+/* ---------- The buoy picked: bottom middle of the map ---------- */
+#ctl{
+  position:absolute; z-index:var(--z-ctl); bottom:var(--ui-gap); left:calc((100% - var(--rail-w)) / 2); transform:translateX(-50%);
+  display:flex; align-items:stretch; height:64px; border:1px solid color-mix(in srgb, var(--accent) 55%, var(--glass-line)); border-radius:16px; box-shadow:var(--shadow); overflow:hidden;
+  animation:rise var(--dur-3) var(--ease-out); transition:left var(--dur-3) var(--ease-out);
+}
+#side[data-open="true"] ~ #ctl{ left:calc((100% - var(--rail-w) - var(--drawer-w) - var(--ui-gap)) / 2); }
+.ctl-btn{ display:grid; place-items:center; width:48px; border:0; background:transparent; color:var(--muted); transition:background var(--dur-2), color var(--dur-2), transform var(--dur-1); }
+.ctl-btn .ph{ font-size:20px; }
+.ctl-btn:hover:not(:disabled){ background:var(--panel-3); color:var(--text); }
+.ctl-btn:disabled{ opacity:.4; cursor:default; }
+.ctl-id{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; min-width:118px; padding:0 6px; }
+.ctl-id b{ font-size:16px; }
+#ctl-st{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--st-c, var(--accent)); white-space:nowrap; }
+#ctl-st .dot{ width:8px; height:8px; border-radius:50%; background:var(--st-c, var(--accent)); }
+#ctl-st[data-tone="ok"]{ --st-c:var(--ok); } #ctl-st[data-tone="warn"]{ --st-c:var(--warn); } #ctl-st[data-tone="bad"]{ --st-c:var(--bad); } #ctl-st[data-tone="lost"]{ --st-c:var(--dim); }
+.ctl-sog{ display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:84px; padding:0 14px; border-left:1px solid var(--line); border-right:1px solid var(--line); }
+.ctl-sog b{ font-size:26px; font-weight:600; line-height:1; letter-spacing:-.02em; }
+.ctl-sog small{ font-size:11px; color:var(--muted); }
+#ctl-home{ width:60px; color:var(--accent); }
+#ctl-home[aria-pressed="true"]{ background:var(--warn-bg); color:var(--warn); }
+
+#toast{ bottom:92px; left:calc((100% - var(--rail-w)) / 2); }
+#empty{ left:calc((100% - var(--rail-w)) / 2); }
+
+/* ---------- Dock: the modes, the lights, the stop button ---------- */
+#dock{
+  position:relative; z-index:calc(var(--z-map-ui) + 20);
+  display:flex; align-items:center; gap:12px; min-height:72px; padding:8px max(16px, var(--safe-r)) max(8px, var(--safe-b)) max(16px, var(--safe-l));
+  background:var(--panel); border-top:1px solid var(--line);
+}
+#dock #mode{ flex:1; justify-content:center; gap:6px; padding:0; background:none; border:0; box-shadow:none; }
+#dock #mode button{
+  min-height:52px; padding:0 18px; gap:10px; border-radius:14px; font-size:15px; color:var(--muted);
+  transition:background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), transform var(--dur-1);
+}
+#dock #mode button .ph{ font-size:22px; }
+#dock #mode button:hover{ background:var(--panel-3); color:var(--text); }
+#dock #mode button[aria-selected="true"]{ background:var(--accent-bg); color:var(--accent); }
+#mode .lbl{ display:grid; grid-template-columns:1fr; transition:grid-template-columns var(--dur-3) var(--ease-out); }
+#mode .lbl > span{ overflow:hidden; white-space:nowrap; }
+.dock-end{ display:flex; align-items:center; gap:12px; }
+.dock-btn{ display:inline-flex; align-items:center; gap:6px; min-height:52px; padding:0 14px; border:0; border-radius:14px; background:transparent; color:var(--muted); font-weight:700;
+  transition:background var(--dur-2), color var(--dur-2), transform var(--dur-1); }
+.dock-btn .ph{ font-size:22px; }
+.dock-btn:hover{ background:var(--panel-3); color:var(--text); }
+.dock-btn[data-on="true"]{ color:var(--warn); }
+.dock-btn[data-on="true"] .ph{ filter:drop-shadow(0 0 6px rgba(251,191,36,.6)); }
+
+#dock .hold{ position:relative; margin:0; }
+#dock .hold-btn{ width:auto; min-height:52px; padding:0 22px 0 18px; display:inline-flex; align-items:center; gap:10px; font-size:15px; border-radius:14px;
+  transition:background var(--dur-3), border-color var(--dur-3), box-shadow var(--dur-3), transform var(--dur-1); }
+#dock .hold-btn::before{ content:''; width:18px; height:18px; flex:none; background:currentColor;
+  clip-path:polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+#dock .hold-btn.stop{ box-shadow:0 0 0 4px rgba(220,38,38,.2); }
+#dock .hold-btn.resume::before{ clip-path:polygon(15% 0, 100% 50%, 15% 100%); }
+#dock .hold-state{ position:absolute; right:0; bottom:calc(100% + 10px); width:max-content; max-width:280px; margin:0; padding:8px 12px;
+  border-radius:10px; background:var(--panel-3); border:1px solid var(--line-2); box-shadow:var(--shadow); font-size:12.5px; animation:fade-up var(--dur-3) var(--ease-out); }
+
+/* ---------- Phone portrait / tablet portrait ---------- */
+@media (max-width:600px), (max-width:820px) and (orientation:portrait){
+  :root{ --gauge-h:96px; --ui-gap:10px; --rail-w:0px; }
+  body[data-mode="mission"], body[data-mode="fleet"]{ --gauge-h:44px; }
+  #topbar{ grid-template-columns:auto minmax(0,1fr) auto; gap:10px; min-height:54px; }
+  .brand h1{ display:none; }
+  #pill{ min-width:0; height:38px; gap:8px; }
+  .pill-sep, #st-sats{ display:none; }
+  /* Dock: icons only (each has its name as a tooltip and an accessible name), the stop button always whole */
+  #dock{ gap:6px; padding-left:max(10px, var(--safe-l)); padding-right:max(10px, var(--safe-r)); }
+  #dock #mode{ justify-content:flex-start; gap:4px; }
+  #dock #mode .lbl{ grid-template-columns:0fr; }
+  #dock #mode button{ padding:0; width:48px; justify-content:center; gap:0; }
+  .dock-end{ gap:6px; }
+  .dock-btn{ padding:0 8px; }
+  .dock-btn b{ display:none; }
+  #dock .hold-btn{ padding:0 14px 0 12px; font-size:13.5px; gap:8px; }
+  #dock .hold-state{ max-width:calc(100vw - 20px); }
+  /* Under the gauges: the picked buoy first, then search (left) and the map tools (right) */
+  #ctl, #side[data-open="true"] ~ #ctl{ top:var(--top-ui); bottom:auto; left:50%; height:50px; }
+  #map-top{ top:calc(var(--top-ui) + 60px); left:var(--ui-gap); right:auto; flex-direction:row; }
+  #search{ width:calc(100vw - 80px); }
+  #search-panel{ left:0; top:56px; width:calc(100vw - 20px); max-height:calc(100dvh - 320px); }
+  #map-tools{ left:auto; right:var(--ui-gap); top:calc(var(--top-ui) + 60px); bottom:auto; }
+  #map .leaflet-bottom{ bottom:100px; }
+  #map .leaflet-bottom.leaflet-right{ right:0; }
+  .ctl-id{ min-width:92px; }
+  .ctl-sog{ min-width:64px; padding:0 10px; } .ctl-sog b{ font-size:20px; }
+  #toast, #empty{ left:50%; }
+  #toast{ top:var(--ui-gap); bottom:auto; width:calc(100vw - 20px); }   /* over the gauges for a moment, never under the sheet */
+
+  /* The rail and the drawer become the bottom sheet */
+  #side{ top:auto; left:0; flex-direction:column; max-height:46dvh; border-radius:20px 20px 0 0; background:var(--panel);
+    border-top:1px solid var(--line); box-shadow:0 -12px 32px rgba(2,6,12,.45); padding-bottom:var(--safe-b); }
+  #sheet-handle{ display:flex; }
+  #rail{ width:auto; flex-direction:row; justify-content:space-around; gap:2px; padding:0 8px 8px; border-left:0; background:none;
+    -webkit-backdrop-filter:none; backdrop-filter:none; overflow-x:auto; flex:none; }
+  .rail-btn{ width:auto; min-width:56px; min-height:54px; font-size:10.5px; }
+  .rail-btn::before{ left:16px; right:16px; top:auto; bottom:-4px; width:auto; height:3px; transform:scaleX(0); }
+  .rail-btn[aria-pressed="true"]::before{ transform:scaleX(1); }
+  #drawer{ width:auto; margin:0; border:0; border-top:1px solid var(--line); border-radius:0; box-shadow:none; background:none;
+    -webkit-backdrop-filter:none; backdrop-filter:none; flex:1 1 auto; }
+  #side[data-open="false"] #drawer, #side.collapsed #drawer{ display:none; }
+  .drawer-head{ min-height:48px; }
+}
+@media (min-width:601px) and (max-width:1100px){
+  #dock #mode button[aria-selected="false"] .lbl{ grid-template-columns:0fr; }
+  #dock #mode button[aria-selected="false"]{ gap:0; }
+}
+
+/* ---------- Light theme ---------- */
+[data-theme="light"] #side[data-open] .badge{ box-shadow:0 0 0 2px #fff; }
+[data-theme="light"] #dock .hold-btn.stop{ box-shadow:0 0 0 4px rgba(220,38,38,.15); }
+[data-theme="light"] .rail-btn[aria-pressed="true"], [data-theme="light"] #dock #mode button[aria-selected="true"]{ color:var(--accent); }

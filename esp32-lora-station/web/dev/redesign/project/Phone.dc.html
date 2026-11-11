@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Trạm điều hành – điện thoại</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#22D3EE}a:hover{color:#67E8F9}
+.btn-reset{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #070B10; color: #E8EEF5; font-family: 'Be Vietnam Pro', system-ui, sans-serif; font-size: 14px">
+  <svg width="390" height="844" viewBox="0 0 390 844" style="position: absolute; inset: 0" aria-hidden="true">
+    <rect width="390" height="844" style="fill: #0B1218"></rect>
+    <path d="M390 160 C 300 210 260 230 210 300 C 160 370 120 380 60 440 C 20 480 0 500 -20 520" style="fill: none; stroke: #14304A; stroke-width: 54; stroke-linecap: round"></path>
+    <path d="M210 300 C 250 360 300 400 390 420" style="fill: none; stroke: #14304A; stroke-width: 20"></path>
+    <path d="M0 250 L 390 220 M 120 0 L 150 844 M 290 0 L 320 844" style="fill: none; stroke: #1A2633; stroke-width: 2.5"></path>
+    <circle cx="200" cy="350" r="110" style="fill: rgba(239,68,68,.05); stroke: #EF4444; stroke-width: 1.5; stroke-dasharray: 8 7; opacity: .8"></circle>
+    <line x1="200" y1="350" x2="150" y2="290" style="stroke: #EF4444; stroke-width: 1.5; stroke-dasharray: 2 6"></line>
+  </svg>
+  <span style="position: absolute; left: 132px; top: 262px; width: 14px; height: 14px; border-radius: 999px; background: #F87171; border: 2px solid #0C131B"></span>
+  <span style="position: absolute; left: 230px; top: 300px; width: 14px; height: 14px; border-radius: 999px; background: #FB923C; border: 2px solid #0C131B"></span>
+  <div style="position: absolute; left: 184px; top: 334px; width: 32px; height: 32px; border-radius: 10px; background: #EF4444; display: grid; place-items: center">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="2"></circle><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7"></path></svg>
+  </div>
+  <div style="position: absolute; left: 135px; top: 275px; width: 30px; height: 30px; border-radius: 999px; background: #0C131B; border: 3px solid #34D399; box-sizing: border-box; box-shadow: 0 0 0 3px #070B10, 0 0 0 6px #22D3EE"></div>
+
+  <!-- top bar -->
+  <header style="position: absolute; left: 0; right: 0; top: 0; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px; box-sizing: border-box; background: linear-gradient(#070B10, rgba(7,11,16,.6))">
+    <span style="width: 32px; height: 32px; border-radius: 9px; background: rgba(34,211,238,.14); display: grid; place-items: center; color: #22D3EE">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle></svg>
+    </span>
+    <div role="status" style="flex: 1; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 999px; background: rgba(12,19,27,.9); border: 1px solid #1C2836">
+      <b>PHAO-01</b><span style="flex: 1; color: #A3B3C5; font-size: 12px">điểm 3/8</span>
+      <span style="width: 10px; height: 10px; border-radius: 999px; background: #34D399"></span>
+    </div>
+    <span title="Trực tuyến" style="width: 10px; height: 10px; border-radius: 999px; background: #34D399; box-shadow: 0 0 0 4px rgba(52,211,153,.18)"></span>
+  </header>
+
+  <!-- gauges, scrolling sideways -->
+  <section aria-label="Thông số phao" style="position: absolute; left: 0; right: 0; top: 60px; display: flex; gap: 8px; padding: 0 12px; overflow-x: auto">
+    <div style="flex: 0 0 104px; height: 92px; box-sizing: border-box; padding: 10px; border-radius: 12px; background: rgba(12,19,27,.9); border: 1px solid #1C2836; position: relative">
+      <span style="font-size: 11px; color: #A3B3C5">Lắc</span>
+      <b style="position: absolute; left: 10px; bottom: 10px; font-size: 22px; font-weight: 400; color: #34D399">+3,7°</b>
+      <svg width="40" height="34" viewBox="0 0 84 70" style="position: absolute; right: 8px; top: 8px" aria-hidden="true"><g transform="rotate(4 42 50)"><path d="M24 44h36l-6 12H30z" style="fill: #22D3EE"></path><path d="M42 18v26M34 44l8-18 8 18" style="fill: none; stroke: #E8EEF5; stroke-width: 3"></path></g></svg>
+    </div>
+    <div style="flex: 0 0 104px; height: 92px; box-sizing: border-box; padding: 10px; border-radius: 12px; background: rgba(12,19,27,.9); border: 1px solid #1C2836; position: relative">
+      <span style="font-size: 11px; color: #A3B3C5">Chúi</span>
+      <b style="position: absolute; left: 10px; bottom: 10px; font-size: 22px; font-weight: 400; color: #34D399">+8,1°</b>
+      <svg width="44" height="34" viewBox="0 0 90 70" style="position: absolute; right: 6px; top: 8px" aria-hidden="true"><g transform="rotate(-8 44 40)"><path d="M8 38h70l-8 10H16z" style="fill: #22D3EE"></path><path d="M30 38V26h22l10 12" style="fill: #17222F; stroke: #E8EEF5; stroke-width: 3"></path></g></svg>
+    </div>
+    <div style="flex: 0 0 150px; height: 92px; box-sizing: border-box; padding: 10px; border-radius: 12px; background: rgba(12,19,27,.9); border: 1px solid #1C2836; position: relative">
+      <svg width="64" height="64" viewBox="0 0 104 104" style="position: absolute; left: 8px; top: 14px" role="img" aria-label="Mũi tàu 328°, Pi yêu cầu 334°"><circle cx="52" cy="52" r="48" style="fill: #111A24; stroke: #283849; stroke-width: 3"></circle><g transform="rotate(334 52 52)"><path d="M52 52V10" style="stroke: #22D3EE; stroke-width: 4; stroke-dasharray: 6 6"></path><path d="M52 2l9 13H43z" style="fill: #22D3EE"></path></g><g transform="rotate(328 52 52)"><path d="M52 16l9 36H43z" style="fill: #E8EEF5"></path></g></svg>
+      <div style="position: absolute; left: 80px; top: 12px; display: flex; flex-direction: column; gap: 4px">
+        <b style="font-size: 16px; font-weight: 700" title="Mũi tàu hiện tại, 328°">Tây Bắc</b>
+        <span title="Pi yêu cầu, 334°" style="display: flex; align-items: center; gap: 4px; color: #22D3EE"><span style="padding: 0 4px; border-radius: 4px; background: rgba(34,211,238,.14); font-size: 10px; font-weight: 800">Pi</span>Tây Bắc</span>
+        <span style="font-size: 11px; font-weight: 700; color: #34D399">Lệch 6° phải</span>
+      </div>
+    </div>
+    <div style="flex: 0 0 104px; height: 92px; box-sizing: border-box; padding: 10px; border-radius: 12px; background: rgba(12,19,27,.9); border: 1px solid #1C2836; position: relative">
+      <span style="font-size: 11px; color: #A3B3C5">Pin</span>
+      <b style="position: absolute; left: 10px; bottom: 10px; font-size: 22px; font-weight: 400; color: #34D399">94%</b>
+      <svg width="36" height="36" viewBox="0 0 72 72" style="position: absolute; right: 8px; top: 8px" aria-hidden="true"><circle cx="36" cy="36" r="28" style="fill: none; stroke: #283849; stroke-width: 8"></circle><circle cx="36" cy="36" r="28" transform="rotate(-90 36 36)" style="fill: none; stroke: #34D399; stroke-width: 8; stroke-dasharray: 165 200; stroke-linecap: round"></circle></svg>
+    </div>
+    <div style="flex: 0 0 104px; height: 92px; box-sizing: border-box; padding: 10px; border-radius: 12px; background: rgba(12,19,27,.9); border: 1px solid #1C2836; position: relative">
+      <span style="font-size: 11px; color: #A3B3C5">LoRa</span>
+      <b style="position: absolute; left: 10px; bottom: 10px; font-size: 22px; font-weight: 400; color: #34D399">0,8<span style="font-size: 12px"> km</span></b>
+    </div>
+  </section>
+
+  <!-- map tools -->
+  <div style="position: absolute; right: 12px; top: 168px; display: flex; flex-direction: column; gap: 8px">
+    <button class="btn-reset" type="button" aria-label="Tìm địa chỉ" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(12,19,27,.9); border: 1px solid #1C2836; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+    <button class="btn-reset" type="button" aria-label="Bám theo phao" style="width: 44px; height: 44px; border-radius: 12px; background: rgba(34,211,238,.14); border: 1px solid #22D3EE; color: #22D3EE; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path></svg></button>
+  </div>
+
+  <!-- bottom sheet (peek) -->
+  <section aria-label="Người cần cứu" style="position: absolute; left: 0; right: 0; bottom: 76px; padding: 8px 14px 14px; box-sizing: border-box; border-radius: 20px 20px 0 0; background: #0C131B; border-top: 1px solid #1C2836; display: flex; flex-direction: column; gap: 10px">
+    <span style="align-self: center; width: 40px; height: 4px; border-radius: 2px; background: #283849"></span>
+    <div style="display: flex; gap: 8px">
+      <button class="btn-reset" type="button" style="flex: 1; height: 40px; border-radius: 10px; background: rgba(34,211,238,.14); color: #22D3EE; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px">Cần cứu <span style="min-width: 22px; height: 22px; border-radius: 999px; background: #DC2626; color: #fff; font-size: 12px; display: grid; place-items: center">13</span></button>
+      <button class="btn-reset" type="button" aria-label="Sức khoẻ" style="width: 48px; height: 40px; border-radius: 10px; background: #111A24; color: #A3B3C5; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"></path></svg></button>
+      <button class="btn-reset" type="button" aria-label="Đội phao" style="width: 48px; height: 40px; border-radius: 10px; background: #111A24; color: #A3B3C5; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l2 4h14l2-4z"></path><path d="M12 3v12M12 4l6 9H12"></path></svg></button>
+      <button class="btn-reset" type="button" aria-label="Sự kiện" style="width: 48px; height: 40px; border-radius: 10px; background: #111A24; color: #A3B3C5; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></button>
+      <button class="btn-reset" type="button" aria-label="Mưa, ngập" style="width: 48px; height: 40px; border-radius: 10px; background: #111A24; color: #A3B3C5; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 15a5 5 0 0 1-.6-10A6 6 0 0 1 18 6a4.5 4.5 0 0 1-1 9z"></path><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"></path></svg></button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; background: #111A24; border-left: 4px solid #F87171">
+      <span style="width: 28px; height: 28px; border-radius: 999px; background: #F87171; color: #0B1218; display: grid; place-items: center; font-weight: 800; font-size: 12px">!!</span>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #A3B3C5"><b style="color: #E8EEF5">PHAO-01</b> · 2 ph</span><span style="height: 6px; border-radius: 3px; background: #283849; display: flex"><span style="width: 88%; border-radius: 3px; background: #F87171"></span></span></div>
+      <button class="btn-reset" type="button" aria-label="Đã cứu" style="width: 40px; height: 40px; border-radius: 10px; color: #34D399; display: grid; place-items: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; background: #111A24; border-left: 4px solid #FB923C">
+      <span style="width: 28px; height: 28px; border-radius: 999px; background: #FB923C; color: #0B1218; display: grid; place-items: center; font-weight: 800; font-size: 12px">!</span>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #A3B3C5"><b style="color: #E8EEF5">PHAO-02</b> · 9 ph</span><span style="height: 6px; border-radius: 3px; background: #283849; display: flex"><span style="width: 64%; border-radius: 3px; background: #FB923C"></span></span></div>
+      <button class="btn-reset" type="button" aria-label="Đã cứu" style="width: 40px; height: 40px; border-radius: 10px; color: #34D399; display: grid; place-items: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></button>
+    </div>
+  </section>
+
+  <!-- dock -->
+  <nav aria-label="Chế độ" style="position: absolute; left: 0; right: 0; bottom: 0; height: 76px; display: flex; align-items: center; gap: 6px; padding: 0 10px 8px; box-sizing: border-box; background: #0C131B; border-top: 1px solid #1C2836">
+    <button class="btn-reset" type="button" aria-pressed="true" aria-label="Giám sát" style="height: 48px; padding: 0 12px; border-radius: 12px; background: rgba(34,211,238,.14); color: #22D3EE; font-weight: 700; display: flex; align-items: center; gap: 6px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="6.5" cy="15.5" r="3.5"></circle><circle cx="17.5" cy="15.5" r="3.5"></circle><path d="M10 15h4M5 12l2-7h3l1 5M19 12l-2-7h-3l-1 5"></path></svg>Giám sát</button>
+    <button class="btn-reset" type="button" aria-label="Lộ trình" style="width: 48px; height: 48px; border-radius: 12px; color: #A3B3C5; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="19" r="2"></circle><circle cx="18" cy="5" r="2"></circle><path d="M8 19h7a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h7"></path></svg></button>
+    <button class="btn-reset" type="button" aria-label="Đội tàu" style="width: 48px; height: 48px; border-radius: 12px; color: #A3B3C5; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M2 14l1.5 3h7l1.5-3zM12.5 17l1.5 3h7l1.5-3"></path><path d="M7 4v10M7 5l4 6H7M18 7v10M18 8l3 5h-3"></path></svg></button>
+    <span style="flex: 1"></span>
+    <button class="btn-reset" type="button" aria-label="Dừng phao PHAO-01" style="height: 48px; padding: 0 16px; border-radius: 12px; background: #DC2626; color: #fff; font-weight: 800; display: flex; align-items: center; gap: 8px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"></path><path d="M9 12h6"></path></svg>DỪNG</button>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

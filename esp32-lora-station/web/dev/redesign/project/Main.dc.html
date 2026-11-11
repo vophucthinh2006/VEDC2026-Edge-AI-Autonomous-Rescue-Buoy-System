@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Trạm điều hành cứu hộ – bảng lái</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#22D3EE}a:hover{color:#67E8F9}
+.th-dark{--bg:#070B10;--panel:rgba(12,19,27,.88);--panel-solid:#0C131B;--panel2:#111A24;--panel3:#17222F;--line:#1C2836;--line2:#283849;--text:#E8EEF5;--muted:#A3B3C5;--dim:#7F92A7;--accent:#22D3EE;--accent-text:#22D3EE;--accent-bg:rgba(34,211,238,.14);--accent-ink:#04171C;--ok:#34D399;--warn:#FBBF24;--bad:#F87171;--stop:#DC2626;--station:#EF4444;--map-land:#0B1218;--map-land2:#0E161E;--map-water:#14304A;--map-road:#1A2633;--map-grid:#101B26;--flood:#2563EB;--shadow:0 10px 30px rgba(2,6,12,.55)}
+.th-light{--bg:#E9EEF3;--panel:rgba(255,255,255,.92);--panel-solid:#FFFFFF;--panel2:#F3F6F9;--panel3:#E6ECF2;--line:#D3DCE6;--line2:#BFCAD6;--text:#0F1B2A;--muted:#475569;--dim:#5B6B7F;--accent:#0891B2;--accent-text:#0E7490;--accent-bg:rgba(8,145,178,.12);--accent-ink:#FFFFFF;--ok:#059669;--warn:#B45309;--bad:#DC2626;--stop:#DC2626;--station:#DC2626;--map-land:#E4EAF0;--map-land2:#DCE4EC;--map-water:#A7C8E4;--map-road:#FFFFFF;--map-grid:#D8E0E8;--flood:#2563EB;--shadow:0 10px 26px rgba(15,27,42,.14)}
+.pulse{animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{transform:scale(.6);opacity:.9}100%{transform:scale(2.4);opacity:0}}
+.btn-reset{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+.rail-btn:hover,.dock-btn:hover,.tool:hover{background:var(--panel3)}
+.stale-card{opacity:.62}
+</style>
+</helmet>
+<div class="{{themeClass}}" style="width: 1440px; height: 900px; position: relative; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'Be Vietnam Pro', system-ui, sans-serif; font-size: 14px">
+
+  <!-- ================= MAP (Leaflet in the real page) ================= -->
+  <svg width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; inset: 0" aria-hidden="true">
+    <defs>
+      <filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="22"></feGaussianBlur></filter>
+      <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" style="fill: none; stroke: var(--map-grid); stroke-width: 1"></path></pattern>
+    </defs>
+    <rect width="1440" height="900" style="fill: var(--map-land)"></rect>
+    <rect width="1440" height="900" fill="url(#grid)"></rect>
+    <path d="M0 210 C 180 260 260 180 420 240 S 640 330 700 300" style="fill: none; stroke: var(--map-land2); stroke-width: 120"></path>
+    <path d="M1440 120 C 1250 180 1150 150 1040 250 C 930 350 880 300 790 390 C 700 480 620 470 540 540 C 450 620 360 640 250 730 C 160 800 80 830 0 850" style="fill: none; stroke: var(--map-water); stroke-width: 74; stroke-linecap: round"></path>
+    <path d="M790 390 C 830 470 900 520 1010 560 C 1120 600 1200 700 1260 900" style="fill: none; stroke: var(--map-water); stroke-width: 30; stroke-linecap: round"></path>
+    <path d="M540 540 C 500 470 430 430 330 420 C 230 410 140 360 60 300" style="fill: none; stroke: var(--map-water); stroke-width: 18; stroke-linecap: round"></path>
+    <path d="M1040 250 C 1080 180 1130 120 1150 0" style="fill: none; stroke: var(--map-water); stroke-width: 12"></path>
+    <path d="M0 470 L 1440 380 M 300 0 L 420 900 M 980 0 L 1120 900 M 0 690 C 500 650 900 760 1440 700 M 640 0 C 620 300 700 600 660 900" style="fill: none; stroke: var(--map-road); stroke-width: 3"></path>
+    <path d="M150 0 L 210 900 M 0 140 L 1440 60 M 820 0 L 860 900 M 1260 0 L 1300 900 M 0 580 L 1440 520" style="fill: none; stroke: var(--map-road); stroke-width: 1.5"></path>
+    <g filter="url(#blur)" style="fill: var(--flood)">
+      <ellipse cx="620" cy="470" rx="120" ry="70" opacity=".35"></ellipse>
+      <ellipse cx="900" cy="410" rx="110" ry="60" opacity=".3"></ellipse>
+      <ellipse cx="480" cy="600" rx="90" ry="60" opacity=".28"></ellipse>
+      <ellipse cx="1060" cy="580" rx="100" ry="70" opacity=".25"></ellipse>
+    </g>
+    <!-- LoRa coverage round the shore station -->
+    <circle cx="735" cy="520" r="160" style="fill: rgba(239,68,68,.05); stroke: var(--station); stroke-width: 2; stroke-dasharray: 10 8; opacity: .8"></circle>
+    <circle cx="735" cy="520" r="340" style="fill: none; stroke: var(--station); stroke-width: 1.5; stroke-dasharray: 3 9; opacity: .55"></circle>
+    <!-- link station → selected buoy -->
+    <line x1="735" y1="520" x2="{{sel.x}}" y2="{{sel.y}}" style="stroke: var(--station); stroke-width: 1.5; stroke-dasharray: 2 6"></line>
+    <!-- route of the selected buoy -->
+    <polyline points="{{routePts}}" style="fill: none; stroke: var(--accent); stroke-width: {{routeW}}; stroke-dasharray: 8 7; opacity: {{routeOp}}"></polyline>
+    <!-- fleet area (fleet mode) -->
+    <sc-if value="{{isFleet}}" hint-placeholder-val="{{ false }}">
+      <polygon points="520,290 910,270 970,530 560,570" style="fill: var(--accent-bg); stroke: var(--accent); stroke-width: 2"></polygon>
+      <path d="M617 285 L 650 566 M 715 281 L 745 562 M 812 276 L 845 551" style="stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 6; fill: none"></path>
+    </sc-if>
+  </svg>
+
+  <!-- route points (mission mode) -->
+  <sc-if value="{{isMission}}" hint-placeholder-val="{{ false }}">
+    <sc-for list="{{route}}" as="p" hint-placeholder-count="5">
+      <div style="{{p.pos}}; position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 800; font-size: 13px; box-shadow: 0 0 0 4px var(--accent-bg)">{{p.n}}</div>
+    </sc-for>
+  </sc-if>
+
+  <!-- people found -->
+  <sc-for list="{{victims}}" as="v" hint-placeholder-count="5">
+    <div style="{{v.pos}}; position: absolute; width: 0; height: 0">
+      <sc-if value="{{v.crit}}" hint-placeholder-val="{{ false }}">
+        <span class="pulse" style="position: absolute; left: -10px; top: -10px; width: 20px; height: 20px; border-radius: 999px; background: {{v.color}}"></span>
+      </sc-if>
+      <span title="{{v.label}}" style="position: absolute; left: -8px; top: -8px; width: 16px; height: 16px; border-radius: 999px; background: {{v.color}}; border: 2px solid var(--panel-solid); box-sizing: border-box"></span>
+    </div>
+  </sc-for>
+
+  <!-- shore station -->
+  <div style="position: absolute; left: 735px; top: 520px; width: 0; height: 0">
+    <div style="position: absolute; left: -20px; top: -20px; width: 40px; height: 40px; border-radius: 12px; background: var(--station); display: grid; place-items: center; box-shadow: 0 0 0 4px rgba(239,68,68,.25)" title="Trạm bờ">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="2"></circle><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"></path></svg>
+    </div>
+  </div>
+
+  <!-- buoys -->
+  <sc-for list="{{buoys}}" as="b" hint-placeholder-count="4">
+    <button class="btn-reset" type="button" onClick="{{b.pick}}" aria-label="Chọn {{b.id}}" style="{{b.pos}}; position: absolute; width: 0; height: 0">
+      <span style="position: absolute; left: -28px; top: -28px; width: 56px; height: 56px; transform: rotate({{b.hdg}}deg)">
+        <span style="position: absolute; left: 22px; top: -2px; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 12px solid {{b.color}}"></span>
+      </span>
+      <span style="position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; border-radius: 999px; background: var(--panel-solid); border: 3px solid {{b.color}}; box-sizing: border-box; display: grid; place-items: center; box-shadow: {{b.ring}}; color: {{b.color}}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l2 4h14l2-4z"></path><path d="M12 3v12M12 4l6 9H12"></path></svg>
+      </span>
+      <span style="position: absolute; left: -26px; top: 22px; width: 52px; text-align: center; font-size: 11px; font-weight: 700; color: var(--text); text-shadow: 0 1px 2px var(--bg)">{{b.short}}</span>
+    </button>
+  </sc-for>
+
+  <!-- ================= TOP BAR ================= -->
+  <header style="position: absolute; left: 0; top: 0; right: 0; height: 64px; display: flex; align-items: center; gap: 16px; padding: 0 20px; box-sizing: border-box; background: linear-gradient(var(--bg), transparent)">
+    <div style="display: flex; align-items: center; gap: 10px; width: 260px">
+      <span style="width: 36px; height: 36px; border-radius: 10px; background: var(--accent-bg); display: grid; place-items: center; color: var(--accent)">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle><path d="M5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6"></path></svg>
+      </span>
+      <b style="font-size: 18px; letter-spacing: .5px">ML IoT <span style="color: var(--muted); font-weight: 500">Cứu hộ</span></b>
+    </div>
+    <div style="flex: 1; display: flex; justify-content: center">
+      <div role="status" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 8px 0 6px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); min-width: 440px">
+        <span style="width: 28px; height: 28px; border-radius: 999px; background: var(--panel3); display: grid; place-items: center; color: {{sel.color}}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l2 4h14l2-4z"></path><path d="M12 3v12M12 4l6 9H12"></path></svg>
+        </span>
+        <b>{{sel.id}}</b>
+        <span style="color: var(--dim)">···</span>
+        <span style="flex: 1; color: var(--muted)">{{pill}}</span>
+        <span style="width: 12px; height: 12px; border-radius: 999px; background: {{sel.color}}; box-shadow: 0 0 0 4px var(--panel3)"></span>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 18px; width: 420px; justify-content: flex-end">
+      <span title="Vệ tinh GPS trạm bờ" style="display: flex; align-items: center; gap: 6px; color: var(--muted)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M13 7l4 4-6 6-4-4z"></path><path d="M9 5l2 2M17 13l2 2M4 20a6 6 0 0 1 0-6M7 20a3 3 0 0 1-3-3"></path></svg><b style="color: var(--text)">9</b>
+      </span>
+      <span title="Máy chủ: trực tuyến" style="display: flex; align-items: center; gap: 6px">
+        <span style="width: 10px; height: 10px; border-radius: 999px; background: var(--ok); box-shadow: 0 0 0 4px rgba(52,211,153,.18)"></span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--muted)"><path d="M7 18a5 5 0 0 1-.6-10A6 6 0 0 1 18 9a4.5 4.5 0 0 1-1 9z"></path></svg>
+      </span>
+      <button class="btn-reset tool" type="button" onClick="{{toggleTheme}}" aria-label="Đổi sáng/tối" title="Đổi sáng/tối" style="width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; color: var(--muted)">
+        <sc-if value="{{isDark}}" hint-placeholder-val="{{ true }}">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+        </sc-if>
+        <sc-if value="{{isLight}}" hint-placeholder-val="{{ false }}">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"></path></svg>
+        </sc-if>
+      </button>
+      <span title="Admin" style="width: 36px; height: 36px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 800">A</span>
+    </div>
+  </header>
+
+  <!-- ================= GAUGE ROW ================= -->
+  <section aria-label="Thông số phao đang chọn" style="position: absolute; left: 20px; top: 72px; right: 100px; display: flex; gap: 12px">
+    <sc-if value="{{showGauges}}" hint-placeholder-val="{{ true }}">
+      <!-- weather -->
+      <div style="flex: 1; height: 128px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); position: relative">
+        <span style="font-size: 12px; color: var(--muted)">Mưa 24 giờ</span>
+        <div style="position: absolute; left: 14px; top: 34px; font-size: 34px; font-weight: 300; line-height: 1">12<span style="font-size: 14px; color: var(--muted)"> mm</span></div>
+        <div style="position: absolute; left: 14px; top: 74px; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent-text)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2s7 8 7 13a7 7 0 0 1-14 0c0-5 7-13 7-13z"></path></svg>80%
+        </div>
+        <svg width="70" height="58" viewBox="0 0 70 58" style="position: absolute; right: 10px; top: 14px" aria-hidden="true">
+          <path d="M18 38a11 11 0 0 1 1-22 15 15 0 0 1 28 2 10 10 0 0 1 4 20z" style="fill: var(--panel3); stroke: var(--muted); stroke-width: 2"></path>
+          <path d="M24 44l-3 8M34 44l-3 8M44 44l-3 8" style="stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round"></path>
+        </svg>
+        <div title="Mưa 24 giờ tới" style="position: absolute; left: 14px; right: 14px; bottom: 10px; height: 18px; display: flex; align-items: flex-end; gap: 2px">
+          <sc-for list="{{rain}}" as="r" hint-placeholder-count="24">
+            <span style="flex: 1; height: {{r.h}}%; min-height: 2px; border-radius: 1px; background: var(--accent); opacity: {{r.o}}"></span>
+          </sc-for>
+        </div>
+      </div>
+      <!-- roll -->
+      <div class="{{staleClass}}" style="flex: 1; height: 128px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: var(--panel); border: 1px solid {{cardLine}}; box-shadow: var(--shadow); position: relative">
+        <span style="font-size: 12px; color: var(--muted)">Lắc ngang</span>
+        <div style="position: absolute; left: 14px; bottom: 14px; font-size: 34px; font-weight: 300; line-height: 1; color: {{g.rollTone}}">{{g.rollText}}</div>
+        <svg width="84" height="70" viewBox="0 0 84 70" style="position: absolute; right: 8px; top: 12px" aria-hidden="true">
+          <path d="M8 52 A 34 34 0 0 1 76 52" style="fill: none; stroke: var(--line2); stroke-width: 3"></path>
+          <path d="M26 22 A 34 34 0 0 1 58 22" style="fill: none; stroke: var(--ok); stroke-width: 3"></path>
+          <g transform="rotate({{g.roll}} 42 50)">
+            <path d="M24 44h36l-6 12H30z" style="fill: var(--accent); opacity: .9"></path>
+            <path d="M42 18v26M34 44l8-18 8 18" style="fill: none; stroke: var(--text); stroke-width: 2.2; stroke-linejoin: round"></path>
+          </g>
+          <path d="M14 58h56" style="stroke: var(--accent); stroke-width: 2; opacity: .5; stroke-dasharray: 4 4"></path>
+        </svg>
+      </div>
+      <!-- pitch -->
+      <div class="{{staleClass}}" style="flex: 1; height: 128px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: var(--panel); border: 1px solid {{cardLine}}; box-shadow: var(--shadow); position: relative">
+        <span style="font-size: 12px; color: var(--muted)">Chúi dọc</span>
+        <div style="position: absolute; left: 14px; bottom: 14px; font-size: 34px; font-weight: 300; line-height: 1; color: {{g.pitchTone}}">{{g.pitchText}}</div>
+        <svg width="90" height="70" viewBox="0 0 90 70" style="position: absolute; right: 6px; top: 12px" aria-hidden="true">
+          <path d="M82 10 A 40 40 0 0 1 82 62" style="fill: none; stroke: var(--line2); stroke-width: 3"></path>
+          <g transform="rotate({{g.pitchNeg}} 44 40)">
+            <path d="M8 38h70l-8 10H16z" style="fill: var(--accent); opacity: .9"></path>
+            <path d="M30 38V26h22l10 12" style="fill: var(--panel3); stroke: var(--text); stroke-width: 2; stroke-linejoin: round"></path>
+            <path d="M40 26V12" style="stroke: var(--text); stroke-width: 2"></path>
+          </g>
+          <path d="M4 56h76" style="stroke: var(--accent); stroke-width: 2; opacity: .5; stroke-dasharray: 4 4"></path>
+        </svg>
+      </div>
+      <!-- heading: IMU yaw now vs the heading the Pi asks for (target_yaw) -->
+      <div class="{{staleClass}}" style="flex: 1.9; height: 128px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: var(--panel); border: 1px solid {{cardLine}}; box-shadow: var(--shadow); position: relative; display: flex; gap: 12px">
+        <svg width="104" height="104" viewBox="0 0 104 104" style="flex: none" role="img" aria-label="La bàn: mũi tàu {{g.hdgText}}, Pi yêu cầu {{g.wantText}}">
+          <circle cx="52" cy="52" r="48" style="fill: var(--panel2); stroke: var(--line2); stroke-width: 2"></circle>
+          <path d="M52 6v7M52 91v7M6 52h7M91 52h7" style="stroke: var(--dim); stroke-width: 2"></path>
+          <text x="52" y="25" text-anchor="middle" style="fill: var(--bad); font-size: 12px; font-weight: 800">B</text>
+          <text x="84" y="56" text-anchor="middle" style="fill: var(--muted); font-size: 11px; font-weight: 700">Đ</text>
+          <text x="52" y="88" text-anchor="middle" style="fill: var(--muted); font-size: 11px; font-weight: 700">N</text>
+          <text x="20" y="56" text-anchor="middle" style="fill: var(--muted); font-size: 11px; font-weight: 700">T</text>
+          <sc-if value="{{g.hasWant}}" hint-placeholder-val="{{ true }}">
+            <path d="{{g.offArc}}" style="fill: none; stroke: {{g.offTone}}; stroke-width: 5; opacity: .55"></path>
+            <g transform="rotate({{g.want}} 52 52)"><path d="M52 52V10" style="stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 4 4"></path><path d="M52 4l7 11h-14z" style="fill: var(--accent)"></path></g>
+          </sc-if>
+          <g transform="rotate({{g.hdg}} 52 52)"><path d="M52 16l8 36h-16z" style="fill: var(--text)"></path><path d="M52 88l8-36h-16z" style="fill: var(--line2)"></path></g>
+          <circle cx="52" cy="52" r="4" style="fill: var(--panel-solid); stroke: var(--text); stroke-width: 2"></circle>
+        </svg>
+        <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; min-width: 0">
+          <div title="Mũi tàu hiện tại (IMU)" style="display: flex; align-items: center; gap: 8px">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l6 20-6-4-6 4z" style="fill: var(--text)"></path></svg>
+            <span style="font-size: 24px; font-weight: 600; line-height: 1; white-space: nowrap">{{g.hdgWord}}</span>
+            <span style="font-size: 13px; color: var(--muted)">{{g.hdgText}}</span>
+          </div>
+          <div title="Hướng Pi ra lệnh" style="display: flex; align-items: center; gap: 8px; color: var(--accent-text)">
+            <span style="height: 18px; padding: 0 6px; border-radius: 5px; background: var(--accent-bg); font-size: 11px; font-weight: 800; display: grid; place-items: center">Pi</span>
+            <span style="font-size: 18px; font-weight: 600; line-height: 1; white-space: nowrap">{{g.wantWord}}</span>
+            <span style="font-size: 13px; opacity: .8">{{g.wantText}}</span>
+          </div>
+          <div title="Lệch so với lệnh của Pi" style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: {{g.offTone}}">
+            <sc-if value="{{g.turnLeft}}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M9 14L4 9l5-5"></path><path d="M4 9h9a7 7 0 0 1 7 7v4"></path></svg></sc-if>
+            <sc-if value="{{g.turnRight}}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M15 14l5-5-5-5"></path><path d="M20 9h-9a7 7 0 0 0-7 7v4"></path></svg></sc-if>
+            <span>{{g.offText}}</span>
+          </div>
+        </div>
+      </div>
+      <!-- battery -->
+      <div class="{{staleClass}}" style="flex: 1; height: 128px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: var(--panel); border: 1px solid {{cardLine}}; box-shadow: var(--shadow); position: relative">
+        <span style="font-size: 12px; color: var(--muted)">Pin</span>
+        <div style="position: absolute; left: 14px; bottom: 30px; font-size: 34px; font-weight: 300; line-height: 1; color: {{g.battTone}}">{{sel.batt}}<span style="font-size: 16px">%</span></div>
+        <span title="Điện áp, dòng (INA226)" style="position: absolute; left: 14px; bottom: 12px; font-size: 12px; color: var(--muted)">{{g.packText}}</span>
+        <svg width="72" height="72" viewBox="0 0 72 72" style="position: absolute; right: 12px; top: 22px" aria-hidden="true">
+          <circle cx="36" cy="36" r="28" style="fill: none; stroke: var(--line2); stroke-width: 7"></circle>
+          <circle cx="36" cy="36" r="28" transform="rotate(-90 36 36)" style="fill: none; stroke: {{g.battTone}}; stroke-width: 7; stroke-linecap: round; stroke-dasharray: {{g.battDash}} 200"></circle>
+          <path d="M38 24l-8 13h7l-3 11 9-14h-7z" style="fill: {{g.battTone}}"></path>
+        </svg>
+      </div>
+      <!-- LoRa -->
+      <div class="{{staleClass}}" style="flex: 1; height: 128px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: var(--panel); border: 1px solid {{cardLine}}; box-shadow: var(--shadow); position: relative">
+        <span style="font-size: 12px; color: var(--muted)">LoRa</span>
+        <div style="position: absolute; left: 14px; bottom: 30px; font-size: 34px; font-weight: 300; line-height: 1; color: {{g.sigTone}}">{{g.kmText}}</div>
+        <span style="position: absolute; left: 14px; bottom: 12px; font-size: 12px; color: var(--muted)">km tới trạm</span>
+        <div style="position: absolute; right: 16px; top: 30px; display: flex; align-items: flex-end; gap: 4px; height: 42px" aria-hidden="true">
+          <sc-for list="{{g.bars}}" as="bar" hint-placeholder-count="4">
+            <span style="width: 8px; height: {{bar.h}}px; border-radius: 2px; background: {{bar.c}}"></span>
+          </sc-for>
+        </div>
+        <span title="Trạm bờ" style="position: absolute; right: 16px; bottom: 12px; width: 18px; height: 18px; border-radius: 5px; background: var(--station)"></span>
+      </div>
+    </sc-if>
+    <sc-if value="{{compactGauges}}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; align-items: center; gap: 22px; height: 48px; padding: 0 18px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow)">
+        <b style="color: {{sel.color}}">{{sel.id}}</b>
+        <span title="Pin" style="display: flex; gap: 6px; align-items: center"><span style="width: 22px; height: 11px; border: 2px solid var(--muted); border-radius: 3px; padding: 1px; box-sizing: content-box; display: flex"><span style="width: {{sel.batt}}%; background: {{g.battTone}}; border-radius: 1px"></span></span>{{sel.batt}}%</span>
+        <span title="Mũi tàu / Pi yêu cầu">↑ {{g.hdgWord}} <span style="color: var(--accent-text)">→ {{g.wantWord}}</span></span>
+        <span title="Khoảng cách tới trạm" style="color: {{g.sigTone}}">{{g.kmText}} km</span>
+        <span title="Lắc / chúi">{{g.rollText}} / {{g.pitchText}}</span>
+      </div>
+    </sc-if>
+  </section>
+
+  <!-- ================= SEARCH (collapsed to an icon) ================= -->
+  <div style="position: absolute; left: 20px; top: {{searchTop}}px; display: flex; align-items: center; gap: 8px">
+    <button class="btn-reset tool" type="button" onClick="{{toggleSearch}}" aria-label="Tìm địa chỉ" title="Tìm địa chỉ" style="width: 48px; height: 48px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); display: grid; place-items: center">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+    </button>
+    <sc-if value="{{searchOpen}}" hint-placeholder-val="{{ false }}">
+      <label style="display: flex; align-items: center; gap: 8px; height: 48px; width: 380px; padding: 0 8px 0 16px; box-sizing: border-box; border-radius: 14px; background: var(--panel); border: 1px solid var(--accent); box-shadow: var(--shadow)">
+        <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Địa chỉ</span>
+        <input type="search" placeholder="Địa chỉ, nơi bạn đang ở…" style="flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font: inherit; outline: none">
+        <span title="Vị trí của tôi" style="width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--accent)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg></span>
+      </label>
+    </sc-if>
+  </div>
+
+  <!-- ================= MAP TOOLS (left, above the dock) ================= -->
+  <div role="toolbar" aria-label="Công cụ bản đồ" style="position: absolute; left: 20px; bottom: 92px; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; flex-direction: column; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); overflow: hidden">
+      <button class="btn-reset tool" type="button" aria-label="Phóng to" style="width: 48px; height: 46px; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+      <button class="btn-reset tool" type="button" aria-label="Thu nhỏ" style="width: 48px; height: 46px; display: grid; place-items: center; border-top: 1px solid var(--line)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path></svg></button>
+    </div>
+    <button class="btn-reset tool" type="button" aria-label="Xem tất cả" title="Xem tất cả" style="width: 48px; height: 48px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg></button>
+    <button class="btn-reset tool" type="button" aria-label="Bám theo phao đang chọn" title="Bám theo phao" style="width: 48px; height: 48px; border-radius: 14px; background: var(--accent-bg); border: 1px solid var(--accent); box-shadow: var(--shadow); display: grid; place-items: center; color: var(--accent-text)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path></svg></button>
+  </div>
+  <div style="position: absolute; left: 84px; bottom: 96px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted)">
+    <span style="width: 90px; height: 6px; border: 2px solid var(--muted); border-top: 0; box-sizing: border-box"></span>500 m
+  </div>
+
+  <!-- ================= RIGHT RAIL ================= -->
+  <nav aria-label="Ngăn thông tin" style="position: absolute; right: 0; top: 64px; bottom: 72px; width: 84px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 8px; background: var(--panel); border-left: 1px solid var(--line)">
+    <button class="btn-reset rail-btn" type="button" onClick="{{openPeople}}" aria-pressed="{{rail.people.on}}" style="position: relative; width: 68px; padding: 10px 0 8px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 11px; {{rail.people.style}}">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle><path d="M5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6"></path></svg>
+      Cần cứu
+      <span style="position: absolute; right: 6px; top: 4px; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box; border-radius: 999px; background: var(--stop); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center">13</span>
+    </button>
+    <button class="btn-reset rail-btn" type="button" onClick="{{openDetail}}" aria-pressed="{{rail.detail.on}}" style="width: 68px; padding: 10px 0 8px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 11px; {{rail.detail.style}}">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"></path></svg>
+      Sức khoẻ
+    </button>
+    <button class="btn-reset rail-btn" type="button" onClick="{{openFleet}}" aria-pressed="{{rail.fleet.on}}" style="width: 68px; padding: 10px 0 8px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 11px; {{rail.fleet.style}}">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l2 4h14l2-4z"></path><path d="M12 3v12M12 4l6 9H12"></path></svg>
+      Đội phao
+    </button>
+    <button class="btn-reset rail-btn" type="button" onClick="{{openLog}}" aria-pressed="{{rail.log.on}}" style="position: relative; width: 68px; padding: 10px 0 8px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 11px; {{rail.log.style}}">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+      Sự kiện
+      <span style="position: absolute; right: 8px; top: 6px; width: 10px; height: 10px; border-radius: 999px; background: var(--warn)"></span>
+    </button>
+    <button class="btn-reset rail-btn" type="button" onClick="{{openWx}}" aria-pressed="{{rail.wx.on}}" style="width: 68px; padding: 10px 0 8px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 11px; {{rail.wx.style}}">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 15a5 5 0 0 1-.6-10A6 6 0 0 1 18 6a4.5 4.5 0 0 1-1 9z"></path><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"></path></svg>
+      Mưa, ngập
+    </button>
+    <button class="btn-reset rail-btn" type="button" onClick="{{openLegend}}" aria-pressed="{{rail.legend.on}}" style="width: 68px; padding: 10px 0 8px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 11px; {{rail.legend.style}}">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z"></path><path d="M3 13l9 5 9-5"></path></svg>
+      Chú giải
+    </button>
+  </nav>
+
+  <!-- ================= DRAWER ================= -->
+  <sc-if value="{{drawerOpen}}" hint-placeholder-val="{{ true }}">
+    <aside style="position: absolute; right: 96px; top: {{drawerTop}}px; bottom: 88px; width: 360px; box-sizing: border-box; padding: 16px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px; overflow: hidden">
+      <div style="display: flex; align-items: center; gap: 10px">
+        <b style="font-size: 16px; flex: 1">{{drawerTitle}}</b>
+        <sc-if value="{{drawerClosable}}" hint-placeholder-val="{{ true }}">
+          <button class="btn-reset tool" type="button" onClick="{{closeDrawer}}" aria-label="Đóng" style="width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--muted)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+        </sc-if>
+      </div>
+
+      <!-- people -->
+      <sc-if value="{{panel.people}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; gap: 8px">
+          <span style="flex: 1; padding: 8px; border-radius: 10px; background: rgba(248,113,113,.14); text-align: center"><b style="font-size: 20px; color: var(--bad)">3</b><br><span style="font-size: 11px; color: var(--muted)">Nguy kịch</span></span>
+          <span style="flex: 1; padding: 8px; border-radius: 10px; background: rgba(251,146,60,.14); text-align: center"><b style="font-size: 20px; color: #FB923C">6</b><br><span style="font-size: 11px; color: var(--muted)">Cao</span></span>
+          <span style="flex: 1; padding: 8px; border-radius: 10px; background: rgba(250,204,21,.12); text-align: center"><b style="font-size: 20px; color: var(--warn)">4</b><br><span style="font-size: 11px; color: var(--muted)">Trung bình</span></span>
+        </div>
+        <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; overflow: auto">
+          <sc-for list="{{victims}}" as="v" hint-placeholder-count="5">
+            <li style="display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 12px; border-radius: 12px; background: var(--panel2); border-left: 4px solid {{v.color}}">
+              <span title="{{v.label}}" style="width: 30px; height: 30px; border-radius: 999px; background: {{v.color}}; color: #0B1218; display: grid; place-items: center; font-weight: 800; font-size: 12px">{{v.mark}}</span>
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 6px">
+                <div style="display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted)">
+                  <b style="color: var(--text)">{{v.buoy}}</b>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>{{v.ago}}
+                </div>
+                <span title="Độ tin cậy {{v.conf}}%" style="height: 6px; border-radius: 3px; background: var(--line2); display: flex"><span style="width: {{v.conf}}%; border-radius: 3px; background: {{v.color}}"></span></span>
+              </div>
+              <button class="btn-reset tool" type="button" aria-label="Đã cứu" title="Đã cứu" style="width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--ok)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></button>
+              <button class="btn-reset tool" type="button" aria-label="Giao phao tới" title="Giao phao tới" style="width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--accent-text)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg></button>
+            </li>
+          </sc-for>
+        </ul>
+      </sc-if>
+
+      <!-- health of the selected buoy -->
+      <sc-if value="{{panel.detail}}" hint-placeholder-val="{{ false }}">
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+          <sc-for list="{{health}}" as="h" hint-placeholder-count="6">
+            <div title="{{h.tip}}" style="padding: 10px; border-radius: 12px; background: var(--panel2); display: flex; flex-direction: column; gap: 6px; align-items: flex-start">
+              <span style="font-size: 11px; color: var(--muted)">{{h.k}}</span>
+              <span style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: {{h.c}}"><span style="width: 10px; height: 10px; border-radius: 999px; background: {{h.c}}"></span>{{h.v}}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div title="Lệnh của Pi" style="padding: 12px; border-radius: 12px; background: var(--panel2); display: flex; align-items: center; gap: 12px">
+          <span style="width: 36px; height: 36px; border-radius: 10px; background: var(--accent-bg); color: var(--accent-text); display: grid; place-items: center; font-weight: 800; font-size: 12px">Pi</span>
+          <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><b>{{sel.reason}}</b><span style="font-size: 12px; color: var(--muted)">{{sel.mission}}</span></span>
+        </div>
+        <div style="padding: 12px; border-radius: 12px; background: var(--panel2); display: flex; flex-direction: column; gap: 8px">
+          <span style="font-size: 11px; color: var(--muted)">Lộ trình {{sel.wp}}/{{sel.wpn}}</span>
+          <div style="display: flex; gap: 4px">
+            <sc-for list="{{wpDots}}" as="d" hint-placeholder-count="8">
+              <span style="flex: 1; height: 8px; border-radius: 4px; background: {{d.c}}"></span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <sc-for list="{{lights}}" as="l" hint-placeholder-count="2">
+            <button class="btn-reset" type="button" onClick="{{l.toggle}}" aria-pressed="{{l.on}}" aria-label="Đèn {{l.n}}" style="flex: 1; height: 52px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700; {{l.style}}">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.8.8 1 1.5 1 2.5h6c0-1 .2-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg>{{l.n}}
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- fleet list -->
+      <sc-if value="{{panel.fleet}}" hint-placeholder-val="{{ false }}">
+        <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{buoys}}" as="b" hint-placeholder-count="4">
+            <li>
+              <button class="btn-reset" type="button" onClick="{{b.pick}}" style="width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; box-sizing: border-box; border-radius: 12px; background: var(--panel2); {{b.rowStyle}}">
+                <span title="{{b.label}}" style="width: 12px; height: 12px; border-radius: 999px; background: {{b.color}}"></span>
+                <b style="flex: 1; text-align: left">{{b.id}}</b>
+                <span title="Tín hiệu" style="display: flex; align-items: flex-end; gap: 2px; height: 16px">
+                  <sc-for list="{{b.bars}}" as="bar" hint-placeholder-count="4"><span style="width: 4px; height: {{bar.s}}px; border-radius: 1px; background: {{bar.c}}"></span></sc-for>
+                </span>
+                <span title="Pin" style="display: flex; align-items: center; gap: 6px; width: 64px; font-size: 12px; color: {{b.battTone}}"><span style="width: 22px; height: 11px; border: 2px solid var(--muted); border-radius: 3px; padding: 1px; box-sizing: content-box; display: flex"><span style="width: {{b.batt}}%; background: {{b.battTone}}; border-radius: 1px"></span></span>{{b.batt}}%</span>
+              </button>
+            </li>
+          </sc-for>
+        </ul>
+        <div style="display: flex; gap: 8px">
+          <button class="btn-reset" type="button" style="flex: 1; height: 48px; border-radius: 12px; background: rgba(220,38,38,.14); color: var(--bad); font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"></path></svg>Dừng hết</button>
+          <button class="btn-reset" type="button" style="flex: 1; height: 48px; border-radius: 12px; background: var(--panel2); font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"></path></svg>Về bờ hết</button>
+        </div>
+      </sc-if>
+
+      <!-- events -->
+      <sc-if value="{{panel.log}}" hint-placeholder-val="{{ false }}">
+        <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px">
+          <sc-for list="{{events}}" as="e" hint-placeholder-count="6">
+            <li style="display: flex; align-items: center; gap: 12px; padding: 8px 4px">
+              <span style="width: 32px; height: 32px; border-radius: 10px; background: var(--panel2); display: grid; place-items: center; color: {{e.c}}">
+                <sc-if value="{{e.person}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle></svg></sc-if>
+                <sc-if value="{{e.route}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M21 3L3 10l7 3 3 7z"></path></svg></sc-if>
+                <sc-if value="{{e.batt}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="7" width="16" height="10" rx="2"></rect><path d="M22 11v2M6 10v4"></path></svg></sc-if>
+                <sc-if value="{{e.lost}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0M3 3l18 18"></path></svg></sc-if>
+              </span>
+              <span style="flex: 1">{{e.t}}</span>
+              <span style="font-size: 12px; color: var(--muted)">{{e.at}}</span>
+            </li>
+          </sc-for>
+        </ol>
+      </sc-if>
+
+      <!-- weather & flooding -->
+      <sc-if value="{{panel.wx}}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{wxLayers}}" as="w" hint-placeholder-count="4">
+            <label style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: var(--panel2); cursor: pointer">
+              <span style="width: 36px; height: 36px; border-radius: 10px; background: var(--accent-bg); display: grid; place-items: center; color: var(--accent-text); font-weight: 800">{{w.ic}}</span>
+              <span style="flex: 1">{{w.name}}</span>
+              <input type="checkbox" checked="{{w.on}}" onChange="{{w.toggle}}" style="width: 22px; height: 22px; accent-color: var(--accent)">
+            </label>
+          </sc-for>
+        </div>
+        <div style="padding: 12px; border-radius: 12px; background: var(--panel2); display: flex; flex-direction: column; gap: 8px">
+          <span style="display: flex; justify-content: space-between; font-size: 12px; color: var(--muted)"><span>Mực nước sông Hậu</span><b style="color: #FB923C">BĐ 2</b></span>
+          <span style="display: flex; gap: 4px"><span style="flex: 1; height: 8px; border-radius: 4px; background: #38BDF8"></span><span style="flex: 1; height: 8px; border-radius: 4px; background: #FACC15"></span><span style="flex: 1; height: 8px; border-radius: 4px; background: #FB923C; box-shadow: 0 0 0 2px var(--text)"></span><span style="flex: 1; height: 8px; border-radius: 4px; background: var(--line2)"></span></span>
+        </div>
+      </sc-if>
+
+      <!-- legend -->
+      <sc-if value="{{panel.legend}}" hint-placeholder-val="{{ false }}">
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px">
+          <sc-for list="{{legend}}" as="l" hint-placeholder-count="8">
+            <span style="display: flex; align-items: center; gap: 10px"><span style="width: 16px; height: 16px; border-radius: {{l.r}}; background: {{l.c}}; border: {{l.b}}; box-sizing: border-box"></span>{{l.t}}</span>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- route editor (mission mode) -->
+      <sc-if value="{{isMission}}" hint-placeholder-val="{{ false }}">
+        <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; flex: 1; overflow: auto">
+          <sc-for list="{{route}}" as="p" hint-placeholder-count="5">
+            <li style="display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; background: var(--panel2)">
+              <span style="width: 28px; height: 28px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 800; font-size: 13px">{{p.n}}</span>
+              <span style="flex: 1; color: var(--muted)">{{p.leg}}</span>
+              <button class="btn-reset tool" type="button" aria-label="Xoá điểm {{p.n}}" style="width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--muted)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+            </li>
+          </sc-for>
+        </ol>
+        <div style="display: flex; gap: 8px">
+          <button class="btn-reset" type="button" aria-label="Hoàn tác" title="Hoàn tác" style="width: 52px; height: 48px; border-radius: 12px; background: var(--panel2); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 14L4 9l5-5"></path><path d="M4 9h10a6 6 0 0 1 0 12h-3"></path></svg></button>
+          <button class="btn-reset" type="button" aria-label="Xoá hết" title="Xoá hết" style="width: 52px; height: 48px; border-radius: 12px; background: var(--panel2); color: var(--bad); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button>
+          <button class="btn-reset" type="button" onClick="{{toggleLoop}}" aria-pressed="{{loop}}" aria-label="Đi vòng" title="Đi vòng" style="width: 52px; height: 48px; border-radius: 12px; display: grid; place-items: center; {{loopStyle}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M17 2l3 3-3 3"></path><path d="M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3"></path><path d="M20 13v2a4 4 0 0 1-4 4H4"></path></svg></button>
+          <button class="btn-reset" type="button" style="flex: 1; height: 48px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 8px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M21 3L3 10l7 3 3 7z"></path></svg>Gửi tới phao</button>
+        </div>
+      </sc-if>
+
+      <!-- fleet planning (fleet mode) -->
+      <sc-if value="{{isFleet}}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; gap: 6px; flex-wrap: wrap">
+          <sc-for list="{{buoys}}" as="b" hint-placeholder-count="4">
+            <span style="height: 32px; padding: 0 12px; border-radius: 999px; display: flex; align-items: center; gap: 6px; background: var(--panel2); border: 1px solid var(--line2); font-weight: 600; font-size: 13px"><span style="width: 8px; height: 8px; border-radius: 999px; background: {{b.color}}"></span>{{b.short}}</span>
+          </sc-for>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+          <button class="btn-reset" type="button" onClick="{{pickSectors}}" aria-pressed="{{fleetSectors}}" style="padding: 12px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; {{sectorStyle}}">
+            <svg width="72" height="44" viewBox="0 0 72 44" aria-hidden="true"><rect x="2" y="2" width="68" height="40" rx="4" style="fill: none; stroke: currentColor; stroke-width: 2"></rect><path d="M25 2v40M47 2v40" style="stroke: currentColor; stroke-width: 2; stroke-dasharray: 3 4"></path><path d="M8 8v28h10V8M30 8v28h10V8M52 8v28h10V8" style="fill: none; stroke: currentColor; stroke-width: 1.5; opacity: .7"></path></svg>
+            <b>Chia vùng</b>
+          </button>
+          <button class="btn-reset" type="button" onClick="{{pickFormation}}" aria-pressed="{{fleetFormation}}" style="padding: 12px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; {{formationStyle}}">
+            <svg width="72" height="44" viewBox="0 0 72 44" aria-hidden="true"><circle cx="36" cy="10" r="6" style="fill: currentColor"></circle><circle cx="20" cy="26" r="5" style="fill: none; stroke: currentColor; stroke-width: 2"></circle><circle cx="52" cy="26" r="5" style="fill: none; stroke: currentColor; stroke-width: 2"></circle><circle cx="8" cy="38" r="4" style="fill: none; stroke: currentColor; stroke-width: 2"></circle><circle cx="64" cy="38" r="4" style="fill: none; stroke: currentColor; stroke-width: 2"></circle></svg>
+            <b>Đội hình</b>
+          </button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; background: var(--panel2)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--muted)"><path d="M3 12h18M6 9l-3 3 3 3M18 9l3 3-3 3"></path></svg>
+          <span style="flex: 1; font-size: 20px; font-weight: 700">{{spacing}} <span style="font-size: 13px; color: var(--muted); font-weight: 500">m</span></span>
+          <button class="btn-reset tool" type="button" onClick="{{lessSpacing}}" aria-label="Giảm khoảng cách" style="width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--panel3)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path></svg></button>
+          <button class="btn-reset tool" type="button" onClick="{{moreSpacing}}" aria-label="Tăng khoảng cách" style="width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--panel3)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: auto">
+          <button class="btn-reset" type="button" aria-label="Xem trước" title="Xem trước" style="width: 52px; height: 48px; border-radius: 12px; background: var(--panel2); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+          <button class="btn-reset" type="button" style="flex: 1; height: 48px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 8px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M21 3L3 10l7 3 3 7z"></path></svg>Gửi cho cả đội</button>
+        </div>
+      </sc-if>
+    </aside>
+  </sc-if>
+
+  <!-- ================= CENTRE CONTROL ================= -->
+  <div style="position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; align-items: stretch; height: 64px; border-radius: 14px; background: var(--panel); border: 1px solid var(--accent); box-shadow: var(--shadow); overflow: hidden">
+    <button class="btn-reset tool" type="button" onClick="{{prev}}" aria-label="Phao trước" style="width: 48px; display: grid; place-items: center; color: var(--muted)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+    <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 12px; min-width: 110px">
+      <b style="font-size: 16px">{{sel.id}}</b>
+      <span style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: {{sel.color}}"><span style="width: 8px; height: 8px; border-radius: 999px; background: {{sel.color}}"></span>{{sel.label}}</span>
+    </div>
+    <button class="btn-reset tool" type="button" onClick="{{next}}" aria-label="Phao sau" style="width: 48px; display: grid; place-items: center; color: var(--muted)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+    <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 22px; border-left: 1px solid var(--line); border-right: 1px solid var(--line)" title="Tốc độ so với đáy">
+      <b style="font-size: 26px; line-height: 1">{{g.sogText}}</b>
+      <span style="font-size: 11px; color: var(--muted)">m/s</span>
+    </div>
+    <button class="btn-reset tool" type="button" onClick="{{togglePause}}" aria-label="{{pauseLabel}}" title="{{pauseLabel}}" style="width: 64px; display: grid; place-items: center; color: var(--text)">
+      <sc-if value="{{paused}}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></sc-if>
+      <sc-if value="{{running}}" hint-placeholder-val="{{ true }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect></svg></sc-if>
+    </button>
+    <button class="btn-reset tool" type="button" aria-label="Về bờ" title="Về bờ" style="width: 64px; display: grid; place-items: center; color: var(--accent-text); border-left: 1px solid var(--line)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"></path></svg></button>
+  </div>
+
+  <!-- ================= DOCK ================= -->
+  <nav aria-label="Chế độ" style="position: absolute; left: 0; right: 0; bottom: 0; height: 72px; display: flex; align-items: center; padding: 0 20px; gap: 8px; box-sizing: border-box; background: var(--panel-solid); border-top: 1px solid var(--line)">
+    <button class="btn-reset dock-btn" type="button" aria-label="Cài đặt" title="Cài đặt" style="width: 56px; height: 52px; border-radius: 12px; display: grid; place-items: center; color: var(--muted)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg></button>
+    <span style="width: 1px; height: 28px; background: var(--line2)"></span>
+    <div style="flex: 1; display: flex; justify-content: center; gap: 8px">
+      <sc-for list="{{modes}}" as="m" hint-placeholder-count="3">
+        <button class="btn-reset dock-btn" type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" aria-label="{{m.name}}" title="{{m.name}}" style="height: 52px; padding: 0 18px; border-radius: 12px; display: flex; align-items: center; gap: 10px; font-weight: 700; {{m.style}}">
+          <sc-if value="{{m.isMon}}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="6.5" cy="15.5" r="3.5"></circle><circle cx="17.5" cy="15.5" r="3.5"></circle><path d="M10 15h4M5 12l2-7h3l1 5M19 12l-2-7h-3l-1 5"></path></svg></sc-if>
+          <sc-if value="{{m.isMis}}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="19" r="2"></circle><circle cx="18" cy="5" r="2"></circle><path d="M8 19h7a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h7"></path></svg></sc-if>
+          <sc-if value="{{m.isFle}}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M2 14l1.5 3h7l1.5-3zM12.5 17l1.5 3h7l1.5-3"></path><path d="M7 4v10M7 5l4 6H7M18 7v10M18 8l3 5h-3"></path></svg></sc-if>
+          <sc-if value="{{m.on}}" hint-placeholder-val="{{ false }}"><span>{{m.name}}</span></sc-if>
+        </button>
+      </sc-for>
+    </div>
+    <span style="width: 1px; height: 28px; background: var(--line2)"></span>
+    <button class="btn-reset dock-btn" type="button" onClick="{{openDetail}}" aria-label="Đèn trên phao" title="Đèn trên phao" style="width: 72px; height: 52px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--warn); font-weight: 700"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.8.8 1 1.5 1 2.5h6c0-1 .2-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg>{{lightsOn}}</button>
+    <span style="width: 1px; height: 28px; background: var(--line2)"></span>
+    <button class="btn-reset" type="button" aria-label="Dừng phao {{sel.id}}" style="height: 52px; padding: 0 22px; border-radius: 12px; background: var(--stop); color: #fff; font-weight: 800; letter-spacing: .5px; display: flex; align-items: center; gap: 10px; box-shadow: 0 0 0 4px rgba(220,38,38,.22)">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"></path><path d="M9 12h6"></path></svg>DỪNG PHAO
+    </button>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { t: 0, sel: 0, panel: 'people', mode: 'monitor', theme: null, search: false, paused: {}, lights: { 0: [true, false], 1: [false, false], 2: [false, false], 3: [true, true] }, loop: true, fleetMode: 'sectors', spacing: 10, wx: { radar: true, flood: false, gauges: true, depth: true } };
+  }
+  componentDidMount() { this.timer = setInterval(() => this.setState({ t: this.state.t + 1 }), 250); }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  renderVals() {
+    const s = this.state;
+    const theme = s.theme || this.props.theme || 'dark';
+    const STATUS = {
+      patrol: { label: 'Đang tuần tra', color: 'var(--ok)' },
+      ret: { label: 'Đang về bờ', color: 'var(--accent)' },
+      lost: { label: 'Mất tín hiệu', color: 'var(--bad)' },
+      stop: { label: 'Đang dừng', color: 'var(--warn)' },
+    };
+    // Only what the boats really send (web/js/state.js readBuoy, features/health.js renderDiag):
+    // roll/pitch/yaw + target_yaw (Pi's command, -1 = none) + imu_ok/calib, speed (GPS), battery_pct, rssi/snr,
+    // diag: mission, reason, drive, arm, fps, volts/amps (INA226), i2c/imu recoveries
+    const B = [
+      { id: 'PHAO-01', st: 'patrol', batt: 94, sig: 3, sog: 1.4, roll: 3.7, pitch: 8.1, hdg: 328, want: 334, km: 0.8, wp: 3, wpn: 8, x: 640, y: 420, imu: 3, fps: 9.6, i2c: 0, imuRec: 0, volts: 12.31, amps: 3.42, drive: 0, mission: 'Tuần tra theo lộ trình', reason: 'Đi tới điểm lộ trình' },
+      { id: 'PHAO-02', st: 'ret', batt: 71, sig: 2, sog: 1.1, roll: -2.1, pitch: 4.0, hdg: 212, want: 196, km: 1.6, wp: 6, wpn: 6, x: 880, y: 350, imu: 3, fps: 8.8, i2c: 1, imuRec: 0, volts: 11.84, amps: 2.95, drive: 0, mission: 'Về trạm: mất liên lạc trạm bờ', reason: 'Đi về trạm' },
+      { id: 'PHAO-03', st: 'lost', batt: 40, sig: 0, sog: 0, roll: 12.4, pitch: -6.2, hdg: 95, want: 120, km: 7.3, wp: 2, wpn: 8, x: 1020, y: 610, imu: 1, fps: null, i2c: 2, imuRec: 1, volts: 11.2, amps: 0.4, drive: 3, mission: 'Tuần tra theo lộ trình', reason: 'Thoát khỏi vật cản' },
+      { id: 'PHAO-04', st: 'stop', batt: 18, sig: 1, sog: 0, roll: 1.2, pitch: 0.4, hdg: 15, want: null, km: 2.4, wp: 4, wpn: 8, x: 540, y: 610, imu: 2, fps: 9.1, i2c: 0, imuRec: 0, volts: 10.9, amps: 0.31, drive: 4, mission: 'Tuần tra theo lộ trình', reason: 'Pi chưa gửi lệnh' },
+    ];
+    const DRIVE = [['Chạy', 'var(--ok)'], ['Chưa arm', 'var(--bad)'], ['Pi chưa cho chạy', 'var(--muted)'], ['IMU cũ', 'var(--bad)'], ['DỪNG PHAO', 'var(--warn)']];
+    const tone = (v, a, b) => (v < a ? 'var(--ok)' : v < b ? 'var(--warn)' : 'var(--bad)');
+    const battTone = v => (v > 50 ? 'var(--ok)' : v > 20 ? 'var(--warn)' : 'var(--bad)');
+    const num = (v, d = 1) => v.toFixed(d).replace('.', ',');
+    const sgn = v => (v > 0 ? '+' : v < 0 ? '−' : '') + num(Math.abs(v)) + '°';
+    const bars = sig => [10, 18, 28, 40].map((h, i) => ({ h, s: Math.round(h * 0.4), c: i < sig + (sig > 0 ? 1 : 0) ? (sig >= 3 ? 'var(--ok)' : sig === 2 ? 'var(--ok)' : 'var(--warn)') : 'var(--line2)' }));
+
+    const buoys = B.map((b, i) => {
+      const m = STATUS[b.st];
+      return { ...b, ...m, short: b.id.replace('PHAO-', 'P'), pos: `left: ${b.x}px; top: ${b.y}px`,
+        ring: i === s.sel ? '0 0 0 4px var(--bg), 0 0 0 7px var(--accent)' : 'var(--shadow)',
+        rowStyle: i === s.sel ? 'outline: 2px solid var(--accent)' : '', battTone: battTone(b.batt), bars: bars(b.sig),
+        pick: () => this.setState({ sel: i }) };
+    });
+    const sel = buoys[s.sel];
+    const live = sel.st !== 'lost';
+    const tt = s.t * 0.35;
+    const roll = live ? sel.roll + 1.6 * Math.sin(tt) : sel.roll;
+    const pitch = live ? sel.pitch + 1.1 * Math.sin(tt * 0.7 + 1) : sel.pitch;
+    const hdg = live && sel.sog > 0 ? sel.hdg + 2 * Math.sin(tt * 0.4) : sel.hdg;
+    const COMPASS = ['Bắc', 'Đông Bắc', 'Đông', 'Đông Nam', 'Nam', 'Tây Nam', 'Tây', 'Tây Bắc'];
+    const word = deg => COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+    const hasWant = sel.want !== null;
+    const signed = hasWant ? ((sel.want - hdg + 540) % 360) - 180 : 0;   // + : the Pi wants the bow turned right
+    const off = Math.round(Math.abs(signed));
+    // Arc on the compass rim from the bow to the Pi's heading
+    const pt = a => { const r = (a - 90) * Math.PI / 180; return `${(52 + 48 * Math.cos(r)).toFixed(1)} ${(52 + 48 * Math.sin(r)).toFixed(1)}`; };
+    const offArc = hasWant && off > 0 ? `M ${pt(hdg)} A 48 48 0 0 ${signed > 0 ? 1 : 0} ${pt(sel.want)}` : '';
+    const g = {
+      roll, rollText: sgn(roll), rollTone: tone(Math.abs(roll), 10, 20),
+      pitchNeg: -pitch, pitchText: sgn(pitch), pitchTone: tone(Math.abs(pitch), 10, 20),
+      hdg, want: hasWant ? sel.want : 0, hasWant, offArc, hdgText: Math.round((hdg + 360) % 360) + '°',
+      wantText: hasWant ? Math.round(sel.want) + '°' : '',
+      // the same 8 words as web/js/util/geo.js compassWord
+      hdgWord: word(hdg), wantWord: hasWant ? word(sel.want) : 'Chưa có lệnh',
+      offText: !hasWant ? 'Pi chưa ra lệnh hướng' : off <= 2 ? 'Đúng hướng' : `Lệch ${off}° ${signed > 0 ? 'phải' : 'trái'}`,
+      offTone: hasWant ? tone(off, 10, 30) : 'var(--muted)', turnLeft: hasWant && off > 2 && signed < 0, turnRight: hasWant && off > 2 && signed > 0,
+      packText: `${num(sel.volts, 2)} V · ${num(sel.amps, 2)} A`,
+      battTone: battTone(sel.batt), battDash: Math.round(176 * sel.batt / 100),
+      sigTone: sel.sig >= 2 ? 'var(--ok)' : sel.sig === 1 ? 'var(--warn)' : 'var(--bad)', kmText: num(sel.km),
+      bars: bars(sel.sig), sogText: num(live ? Math.max(0, sel.sog + 0.08 * Math.sin(tt)) : 0),
+    };
+    const pill = { patrol: `Đang tuần tra · điểm ${sel.wp}/${sel.wpn}`, ret: 'Đang về bờ · còn 1,6 km', lost: 'Mất tín hiệu · vị trí cuối 17 ngày trước', stop: 'Đang dừng · pin yếu' }[sel.st];
+
+    const RISK = { crit: { color: '#F87171', label: 'Nguy kịch', mark: '!!' }, high: { color: '#FB923C', label: 'Cao', mark: '!' }, mid: { color: '#FACC15', label: 'Trung bình', mark: '·' } };
+    const victims = [
+      ['crit', 600, 392, 'PHAO-01', 88, '2 ph'], ['crit', 700, 365, 'PHAO-01', 76, '5 ph'], ['high', 935, 452, 'PHAO-02', 64, '9 ph'],
+      ['high', 515, 520, 'PHAO-04', 52, '14 ph'], ['mid', 985, 330, 'PHAO-02', 41, '22 ph'],
+    ].map(([r, x, y, buoy, conf, ago]) => ({ ...RISK[r], crit: r === 'crit', pos: `left: ${x}px; top: ${y}px`, buoy, conf, ago }));
+
+    const ROUTE = [[560, 470], [600, 360], [720, 315], [830, 395], [780, 480]];
+    const route = ROUTE.map(([x, y], i) => ({ n: i + 1, pos: `left: ${x}px; top: ${y}px`, leg: i === 0 ? 'Điểm đầu' : `${[0, 118, 132, 141, 98][i]} m` }));
+
+    const ok = 'var(--ok)', bad = 'var(--bad)', warn = 'var(--warn)';
+    const [driveText, driveColor] = DRIVE[sel.drive];
+    const health = [
+      { k: 'IMU', v: `${sel.imu}/3`, c: sel.imu === 3 ? ok : sel.imu ? warn : bad, tip: 'IMU hoạt động, mức hiệu chuẩn' },
+      { k: 'Motor', v: driveText, c: driveColor, tip: 'Motor (F407)' },
+      { k: 'Camera AI', v: sel.fps ? `${num(sel.fps)} fps` : '--', c: sel.fps > 5 ? ok : sel.fps ? warn : 'var(--muted)', tip: 'Khung hình/giây của bộ nhận diện trên Pi' },
+      { k: 'I2C', v: `${sel.i2c} lần`, c: sel.i2c ? warn : ok, tip: 'Số lần tự phục hồi bus I2C' },
+      { k: 'IMU', v: `${sel.imuRec} lần`, c: sel.imuRec ? warn : ok, tip: 'Số lần tự phục hồi IMU' },
+      { k: 'Lộ trình', v: `${sel.wp}/${sel.wpn}`, c: 'var(--accent-text)', tip: 'Điểm đang tới' },
+    ];
+    const wpDots = Array.from({ length: sel.wpn || 1 }, (_, i) => ({ c: i < sel.wp ? 'var(--accent)' : 'var(--line2)' }));
+    const lightState = s.lights[s.sel];
+    const lights = lightState.map((on, i) => ({ n: i + 1, on, style: on ? 'background: rgba(251,191,36,.18); color: var(--warn); outline: 2px solid var(--warn)' : 'background: var(--panel2); color: var(--muted)',
+      toggle: () => { const L = { ...s.lights }; L[s.sel] = lightState.map((v, j) => (j === i ? !v : v)); this.setState({ lights: L }); } }));
+
+    const events = [
+      { t: 'PHAO-01 thấy người', at: '2 ph', c: 'var(--bad)', person: true },
+      { t: 'Gửi lộ trình PHAO-01', at: '6 ph', c: 'var(--accent)', route: true },
+      { t: 'PHAO-04 pin 18%', at: '11 ph', c: 'var(--warn)', batt: true },
+      { t: 'PHAO-02 thấy người', at: '9 ph', c: '#FB923C', person: true },
+      { t: 'PHAO-03 mất tín hiệu', at: '17 ng', c: 'var(--bad)', lost: true },
+    ];
+    const WX = [['radar', 'Radar mưa', 'R'], ['flood', 'Ngập (vệ tinh)', 'N'], ['gauges', 'Trạm mực nước', 'T'], ['depth', 'Độ sâu ước tính', 'Đ']];
+    const wxLayers = WX.map(([k, name, ic]) => ({ name, ic, on: !!s.wx[k], toggle: () => this.setState({ wx: { ...s.wx, [k]: !s.wx[k] } }) }));
+    const legend = [
+      { t: 'An toàn', c: 'var(--ok)', r: '999px', b: '0' }, { t: 'Trung bình', c: '#FACC15', r: '999px', b: '0' },
+      { t: 'Cao', c: '#FB923C', r: '999px', b: '0' }, { t: 'Nguy kịch', c: '#F87171', r: '999px', b: '0' },
+      { t: 'Phao', c: 'var(--panel-solid)', r: '999px', b: '3px solid var(--ok)' }, { t: 'Trạm bờ', c: 'var(--station)', r: '4px', b: '0' },
+      { t: 'LoRa ≤ 2 km', c: 'transparent', r: '999px', b: '2px dashed var(--station)' }, { t: 'LoRa 2–5 km', c: 'transparent', r: '999px', b: '2px dotted var(--station)' },
+      { t: 'Lộ trình', c: 'transparent', r: '0', b: '2px dashed var(--accent)' }, { t: 'Ngập', c: 'rgba(37,99,235,.5)', r: '4px', b: '0' },
+    ];
+    const rain = [0, 0, 1, 2, 4, 6, 9, 7, 5, 3, 2, 2, 1, 1, 0, 0, 2, 5, 8, 10, 6, 3, 1, 0].map(v => ({ h: Math.round(v * 10), o: v ? 0.9 : 0.25 }));
+
+    const mode = s.mode;
+    const isMission = mode === 'mission', isFleet = mode === 'fleet', isMonitor = mode === 'monitor';
+    const panel = { people: false, detail: false, fleet: false, log: false, wx: false, legend: false };
+    if (isMonitor && s.panel) panel[s.panel] = true;
+    const TITLES = { people: 'Người cần cứu', detail: `Sức khoẻ ${sel.id}`, fleet: 'Đội phao', log: 'Sự kiện', wx: 'Mưa và ngập', legend: 'Chú giải' };
+    const railOn = 'background: var(--accent-bg); color: var(--accent-text)';
+    const rail = {};
+    for (const k of Object.keys(panel)) rail[k] = { on: isMonitor && s.panel === k, style: isMonitor && s.panel === k ? railOn : 'color: var(--muted)' };
+    const open = k => () => this.setState({ mode: 'monitor', panel: isMonitor && s.panel === k ? null : k });
+    const MODES = [['monitor', 'Giám sát'], ['mission', 'Lộ trình'], ['fleet', 'Đội tàu']];
+    const modes = MODES.map(([k, name]) => ({ name, on: mode === k, isMon: k === 'monitor', isMis: k === 'mission', isFle: k === 'fleet',
+      style: mode === k ? 'background: var(--accent-bg); color: var(--accent-text)' : 'color: var(--muted)', pick: () => this.setState({ mode: k }) }));
+    const compact = !isMonitor;
+    const chosen = 'background: var(--accent-bg); color: var(--accent-text); outline: 2px solid var(--accent)';
+    const plain = 'background: var(--panel2); color: var(--muted)';
+    const paused = !!s.paused[s.sel] || sel.st === 'stop';
+
+    return {
+      themeClass: theme === 'light' ? 'th-light' : 'th-dark', isDark: theme !== 'light', isLight: theme === 'light',
+      toggleTheme: () => this.setState({ theme: theme === 'light' ? 'dark' : 'light' }),
+      buoys, sel, g, pill, victims, route, health, wpDots, lights, events, wxLayers, legend, rain,
+      lightsOn: `${lightState.filter(Boolean).length}/2`,
+      staleClass: live ? '' : 'stale-card', cardLine: live ? 'var(--line)' : 'var(--warn)',
+      routePts: ROUTE.map(p => p.join(',')).join(' '), routeW: isMission ? 3 : 2, routeOp: isMission ? 1 : (s.sel === 0 ? 0.55 : 0),
+      isMission, isFleet, isMonitor, showGauges: !compact, compactGauges: compact,
+      searchTop: compact ? 132 : 212, searchOpen: s.search, toggleSearch: () => this.setState({ search: !s.search }),
+      panel, rail, drawerOpen: !isMonitor || !!s.panel, drawerClosable: isMonitor, drawerTop: compact ? 132 : 212,
+      drawerTitle: isMission ? `Lộ trình ${sel.id}` : isFleet ? 'Giao nhiệm vụ cả đội' : TITLES[s.panel] || '',
+      openPeople: open('people'), openDetail: open('detail'), openFleet: open('fleet'), openLog: open('log'), openWx: open('wx'), openLegend: open('legend'),
+      closeDrawer: () => this.setState({ panel: null }),
+      modes,
+      prev: () => this.setState({ sel: (s.sel + B.length - 1) % B.length }), next: () => this.setState({ sel: (s.sel + 1) % B.length }),
+      paused, running: !paused, pauseLabel: paused ? 'Cho chạy tiếp' : 'Tạm dừng',
+      togglePause: () => this.setState({ paused: { ...s.paused, [s.sel]: !s.paused[s.sel] } }),
+      loop: s.loop, loopStyle: s.loop ? chosen : plain, toggleLoop: () => this.setState({ loop: !s.loop }),
+      fleetSectors: s.fleetMode === 'sectors', fleetFormation: s.fleetMode === 'formation',
+      sectorStyle: s.fleetMode === 'sectors' ? chosen : plain, formationStyle: s.fleetMode === 'formation' ? chosen : plain,
+      pickSectors: () => this.setState({ fleetMode: 'sectors' }), pickFormation: () => this.setState({ fleetMode: 'formation' }),
+      spacing: s.spacing, lessSpacing: () => this.setState({ spacing: Math.max(2, s.spacing - 2) }), moreSpacing: () => this.setState({ spacing: Math.min(200, s.spacing + 2) }),
+    };
+  }
+}
+</script>
+</body>
+</html>

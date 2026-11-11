@@ -3,6 +3,7 @@
 import { state, emit, pushHistory, readBuoy, isReturning, buoyStatus, STATUS, signalOf, SIGNAL, batteryOf, stationStatus,
   LORA_GOOD_M, LORA_WEAK_M } from './state.js';
 import { distM } from './util/geo.js';
+import { addBaseMap, prefetchAround } from './util/basemap.js';
 import { fmtDist } from './util/format.js';
 import { initTimeline, clearUnseen, log } from './features/timeline.js';
 import { initTelemetry, renderDetail } from './features/telemetry.js';
@@ -12,7 +13,8 @@ import { initVictims, onVictimsSnapshot, onVictimMessage, onAlertMessage } from 
 import { initLights, onLightsMessage, revertLights } from './features/lights.js';
 import { initHold, onHoldMessage, revertHold, noteHold } from './features/hold.js';
 import { initSearch, renderPlace, minimizeSearch } from './features/search.js';
-import { initFleet, renderFleet, onFleetDownlink, onTaskMessage, onRetMessage, onLinkMessage, onFormationMessage } from './features/fleet.js';
+import { initFleet, renderFleet, onFleetDownlink, onTaskMessage, onRetMessage, onLinkMessage, onFormationMessage, sendReturn, retOf } from './features/fleet.js';
+import { initGauges } from './features/gauges.js';
 
 const $ = id => document.getElementById(id);
 const DEFAULT_VIEW = [10.762622, 106.660172];
@@ -58,8 +60,8 @@ function toast(msg, kind = '') {
 
 // ================= BẢN ĐỒ =================
 const map = L.map('map', { zoomControl: false }).setView(DEFAULT_VIEW, 13);
-L.control.zoom({ position: 'bottomright' }).addTo(map);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+L.control.zoom({ position: 'bottomleft' }).addTo(map);
+addBaseMap(map);
 initMapFx(map);
 
 // Bố cục đáp ứng: trên điện thoại/tablet dọc bảng điều khiển là ngăn kéo dưới bản đồ, có thể thu gọn.
@@ -158,7 +160,7 @@ function renderList() {
 
 function select(id) {
   state.selected = id;
-  if (mode === 'monitor') showTab('detail');   // picked on the map or in the fleet: its card
+  if (mode === 'monitor' && panel === 'buoys') setPanel('detail');   // picked in the fleet list: its card
   for (const k of state.buoys.keys()) updateMarker(k);
   renderList(); renderDetail(); renderRoute(); updateStation(); renderFleet();
   const b = state.buoys.get(id);
@@ -488,35 +490,83 @@ function setMode(m) {
   mode = m;
   document.body.dataset.mode = m;
   for (const b of document.querySelectorAll('#mode button')) b.setAttribute('aria-selected', String(b.dataset.m === m));
+  renderDrawer();
+  if (m !== 'monitor' && narrow.matches) setSheet(false);   // phone: the route or the fleet plan in the sheet
   renderRoute();
   renderFleet();   // the search area's corners can be dragged in Fleet mode only
   if (m === 'mission' && wps.length) fitAll();
 }
 for (const b of document.querySelectorAll('#mode button')) b.addEventListener('click', () => setMode(b.dataset.m));
 
-// ---- Tab Phao / Sự kiện ----
-// The side panel under "Người cần cứu": the boat picked, the fleet, the events; one at a time, the bar of tabs
-// staying at the top while each scrolls. Left and right arrows move between the tabs (the ARIA tabs pattern).
-const TABS = [['detail', 'tab-detail', 'card'], ['buoys', 'tab-buoys', 'buoys-view'], ['log', 'tab-log', 'log-view']];
-function showTab(which, focus = false) {
-  for (const [name, tab, view] of TABS) {
-    const on = name === which;
-    $(view).hidden = !on;
-    $(tab).setAttribute('aria-selected', String(on));
-    $(tab).tabIndex = on ? 0 : -1;
-    if (on && focus) $(tab).focus();
-  }
-  $('lists').hidden = which === 'detail';
-  if (which === 'log') clearUnseen();
+// ---- Rail and drawer (css/console.css) ----
+// The rail on the right opens one panel at a time in the drawer beside it: the people to rescue, the buoy's
+// health, the fleet, the events, the weather and the legend. Route and Fleet mode use the drawer for their own
+// panel. On a phone the rail and the drawer are the bottom sheet.
+const PANELS = { people: 'Người cần cứu', detail: 'Sức khoẻ phao', buoys: 'Đội phao', log: 'Sự kiện', wx: 'Mưa và ngập', legend: 'Chú giải' };
+let panel = store.get('panel', 'people');   // first visit: the people to rescue, the job
+if (panel && !(panel in PANELS)) panel = 'people';
+
+function renderDrawer() {
+  const monitor = mode === 'monitor';
+  const open = !monitor || !!panel;
+  $('side').dataset.open = String(open);
+  $('drawer').inert = !open;
+  for (const b of document.querySelectorAll('#rail .rail-btn')) b.setAttribute('aria-pressed', String(monitor && b.dataset.panel === panel));
+  for (const el of document.querySelectorAll('#panel-monitor > [data-panel]')) el.hidden = el.dataset.panel !== panel;
+  $('drawer-title').textContent = mode === 'mission' ? 'Lộ trình' : mode === 'fleet' ? 'Đội tàu' : PANELS[panel] || '';
+  $('drawer-close').hidden = !monitor;
 }
-for (const [name, tab] of TABS) {
-  $(tab).addEventListener('click', () => showTab(name));
-  $(tab).addEventListener('keydown', e => {
-    const i = TABS.findIndex(t => t[0] === name);
-    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
-    if (step) { e.preventDefault(); showTab(TABS[(i + step + TABS.length) % TABS.length][0], true); }
-    else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); showTab(TABS[e.key === 'Home' ? 0 : TABS.length - 1][0], true); }
+
+function setPanel(p) {
+  const was = panel;
+  panel = p || '';
+  store.set('panel', panel);
+  if (mode !== 'monitor') setMode('monitor'); else renderDrawer();
+  if (panel === 'log') clearUnseen();
+  if (panel && (panel !== was)) {   // the rows of the new panel come in one after another (css/console.css .enter)
+    const d = $('drawer');
+    d.classList.remove('enter'); void d.offsetWidth; d.classList.add('enter');
+  }
+  if (panel && narrow.matches) setSheet(false);
+}
+for (const b of document.querySelectorAll('#rail .rail-btn')) {
+  b.addEventListener('click', () => {
+    const same = mode === 'monitor' && panel === b.dataset.panel;
+    setPanel(same && !narrow.matches ? '' : b.dataset.panel);   // the open one again closes the drawer
   });
+}
+$('drawer-close').addEventListener('click', () => { setPanel(''); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || mode !== 'monitor' || !panel || e.target.closest('input, textarea, select')) return;
+  setPanel('');
+});
+
+// A Leaflet control (the weather panel, the legend) moved into its drawer panel, always open there
+function intoDrawer(selector, slot) {
+  const el = document.querySelector(selector);
+  if (!el) return;
+  $(slot).append(el);
+  el.classList.remove('collapsed');
+  el.classList.add('in-drawer');
+}
+
+// ---- Address search, folded to a button ----
+function openSearch(open) {
+  $('search-wrap').dataset.open = String(open);
+  $('btn-search').setAttribute('aria-expanded', String(open));
+  if (open) setTimeout(() => $('q').focus(), 60);
+}
+$('btn-search').addEventListener('click', () => openSearch($('search-wrap').dataset.open !== 'true'));
+$('q').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('q').value) { openSearch(false); $('btn-search').focus(); }
+});
+
+// ---- The buoy picked: the next or the previous one, call it home ----
+function stepBuoy(step) {
+  const ids = [...state.buoys.keys()].sort();
+  if (ids.length < 2) return;
+  const i = Math.max(0, ids.indexOf(state.selected));
+  select(ids[(i + step + ids.length) % ids.length]);
 }
 
 // ---- Nút công cụ bản đồ ----
@@ -613,6 +663,7 @@ function onStationMessage(m) {
   if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { s.lat = m.lat; s.lon = m.lon; s.hasPos = true; }
   state.station = s;
   updateStation();
+  if (s.hasPos && !MOCK) prefetchAround(s.lat, s.lon);
   if (s.hasPos && !firstCentered && !wps.length && !state.buoys.size) { firstCentered = true; map.setView([s.lat, s.lon], 15); }
   if (state.selected) renderDetail();
 }
@@ -726,6 +777,7 @@ function enter(me) {
     weatherOn = true;
     initWeather(map, { admin: isAdmin, toast, post: jsonPost,
       station: () => (state.station?.hasPos ? { lat: state.station.lat, lon: state.station.lon } : null) });
+    intoDrawer('.wx-panel', 'wx-slot');
   }
 }
 let weatherOn = false;
@@ -809,10 +861,12 @@ async function boot() {
   initTimeline();
   initTelemetry({ toast, routeLine: routeProgress, routeAhead });
   initVictims(map, { toast, onClear: clearVictims, onVictimAction: victimAction });
+  intoDrawer('.map-legend', 'legend-slot');
   initLights({ onSet: sendLights });
   initHold({ onSet: sendHold });
   initSearch(map, { onShowBuoy: showBuoy, onOpen: () => setSheet(true) });   // phone: give the results the whole map
   initFleet(map, { toast, onSelect: select, mock: !!MOCK });
+  initGauges({ onStep: stepBuoy, isHome: retOf, onHome: (id, ret) => sendReturn(id, ret) });
   applyFollowBtn();
   setMode('monitor');
   renderList(); renderDetail();

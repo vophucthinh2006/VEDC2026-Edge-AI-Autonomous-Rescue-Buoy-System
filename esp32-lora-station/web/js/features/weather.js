@@ -6,14 +6,14 @@
 //   - flood depth, estimated: a water level minus the ground's height (Terrarium DEM, ~30 m); the level is a
 //     gauge's or one the admin typed in. An estimate, a few metres out in the delta: said so on the map.
 // The Worker fetches and caches the forecast, the radar frames and the gauges (/api/weather, /api/gauges);
-// the tiles come straight from each service. Everything sits in a pane of its own, over the base map and
+// the radar and flood tiles come straight from each service, the DEM through the Worker (util/basemap.js). Everything sits in a pane of its own, over the base map and
 // under the boats, so the dark map's colour inversion does not touch it.
 import { fmtDist, hm } from '../util/format.js';
+import { demUrls } from '../util/basemap.js';
 
 const STORE_KEY = 'weather.layers';
 const REFRESH_MS = 10 * 60 * 1000;
 const PLAY_MS = 700;
-const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const DEM_MAX_ZOOM = 15;
 const DEM_MIN_ZOOM = 10;      // below this the depth layer would be a smear over the whole province
 const BOTTOM_CLEAR = 36;      // px kept free at the bottom of the map for the scale and the sources line
@@ -47,6 +47,9 @@ const dayText = d => `${d.getDate()}/${d.getMonth() + 1}`;
 
 function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(on)); } catch { /* not remembered */ } }
 function load() { try { on = { ...on, ...(JSON.parse(localStorage.getItem(STORE_KEY)) || {}) }; } catch { /* defaults */ } }
+
+// The forecast last fetched ({ hours: [{ t, rain_mm, prob, wind_kmh }], stale }) or null
+export const forecast = () => data?.forecast || null;
 
 // ---- data ----------------------------------------------------------------------------------
 async function fetchJson(url) {
@@ -88,6 +91,7 @@ async function refresh() {
     try { gauges = await fetchJson('/api/gauges'); } catch { /* keep the last list */ }
   }
   renderForecast();
+  window.dispatchEvent(new Event('weatherupdate'));   // the console's rain gauge (features/gauges.js)
   renderRadar();
   renderGauges();
   renderDepthInfo();
@@ -252,8 +256,10 @@ const DepthLayer = L.GridLayer.extend({
       ctx.putImageData(px, 0, 0);
       done(null, tile);
     };
-    img.onerror = () => done(null, tile);
-    img.src = L.Util.template(DEM_URL, { z: coords.z - dz, x: coords.x >> dz, y: coords.y >> dz });
+    // Through the Worker's cache first, straight from AWS if that fails
+    const urls = demUrls(coords.z - dz, coords.x >> dz, coords.y >> dz);
+    img.onerror = () => { if (urls.length) img.src = urls.shift(); else done(null, tile); };
+    img.src = urls.shift();
     return tile;
   },
 });

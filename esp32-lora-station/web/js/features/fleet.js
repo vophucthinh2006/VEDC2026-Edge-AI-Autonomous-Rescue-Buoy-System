@@ -243,7 +243,7 @@ async function post(path, body) {
   return res.json();
 }
 
-async function sendReturn(id, ret) {
+export async function sendReturn(id, ret) {
   if (ctx.mock) { window.mockServer?.setReturn?.(id, ret); return; }
   try { onRetMessage(await post('/api/return', { id, ret })); ctx.toast(ret ? `Đã gọi ${id} về bờ` : `${id} chạy tiếp`, 'info'); }
   catch (e) { ctx.toast(e.message || 'Mất kết nối'); }
