@@ -1,0 +1,18 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-11-11T05:10:00Z" },
+  "title": "Trạm điều hành – bảng lái mới",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Desktop: bảng lái (bấm thử được)", "is_interactive": true, "radius": 16 },
+    "Phone.dc.html": { "x": 1520, "y": 0, "w": 390, "h": 844, "title": "Điện thoại", "radius": 28 },
+    "Guest.dc.html": { "x": 0, "y": 1140, "w": 1440, "h": 900, "title": "Người thân – máy tính (bấm thử được)", "is_interactive": true, "radius": 16 },
+    "GuestPhone.dc.html": { "x": 1520, "y": 1140, "w": 390, "h": 844, "title": "Người thân – điện thoại", "radius": 28 }
+  },
+  "order": ["Main.dc.html", "Phone.dc.html", "Guest.dc.html", "GuestPhone.dc.html"],
+  "notes": {
+    "title-admin": { "x": 0, "y": -300, "text": "Trạm điều hành (/admin)", "kind": "title1", "maxW": 1910 },
+    "title-guest": { "x": 0, "y": 917, "text": "Trang người thân (/)", "kind": "title1", "maxW": 1910 }
+  }
+}

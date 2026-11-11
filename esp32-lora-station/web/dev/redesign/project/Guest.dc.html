@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Theo dõi cứu hộ lũ – máy tính</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0E7490}a:hover{color:#155E75}
+.btn-reset{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+.rise{animation:rise .42s cubic-bezier(.22,1,.36,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}}
+.breathe{animation:breathe 3.2s ease-in-out infinite;transform-origin:center;transform-box:fill-box}
+@keyframes breathe{0%,100%{opacity:.18;transform:scale(1)}50%{opacity:.32;transform:scale(1.08)}}
+.ripple{animation:ripple 2.2s cubic-bezier(.22,1,.36,1) infinite}
+@keyframes ripple{from{transform:scale(1);opacity:.5}to{transform:scale(3);opacity:0}}
+.grow{transform-origin:bottom;animation:grow .7s cubic-bezier(.22,1,.36,1) both}
+@keyframes grow{from{transform:scaleY(0)}}
+.row:hover{background:#F1F5F9}
+.scroll{scrollbar-width:thin;scrollbar-color:#CBD5E1 transparent}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; position: relative; overflow: hidden; background: #F4F7F9; color: #0F172A; font-family: 'Be Vietnam Pro', system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column">
+
+  <!-- top bar -->
+  <header style="height: 60px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px; background: #FFFFFF; border-bottom: 1px solid #E2E8F0">
+    <span style="width: 36px; height: 36px; border-radius: 10px; background: #E0F2F7; color: #0E7490; display: grid; place-items: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle><path d="M5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6"></path></svg>
+    </span>
+    <div style="display: flex; flex-direction: column; flex: 1">
+      <b style="font-size: 16px">Theo dõi cứu hộ lũ</b>
+      <span style="font-size: 12px; color: #64748B">Cập nhật trực tiếp từ các phao cứu hộ</span>
+    </div>
+    <span role="status" style="display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 999px; background: #DCFCE7; color: #15803D; font-size: 13px; font-weight: 700">
+      <span style="position: relative; width: 9px; height: 9px"><span style="position: absolute; inset: 0; border-radius: 999px; background: #15803D"></span><span class="ripple" style="position: absolute; inset: 0; border-radius: 999px; background: #15803D"></span></span>
+      Trực tiếp
+    </span>
+  </header>
+
+  <div style="flex: 1; min-height: 0; display: flex">
+    <!-- ================= LEFT: home first ================= -->
+    <div class="scroll" style="width: 480px; flex: none; overflow-y: auto; padding: 16px 16px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px">
+
+      <sc-if value="{{hasHome}}" hint-placeholder-val="{{ true }}">
+        <!-- hero: the place followed -->
+        <section class="rise" aria-label="Quê nhà" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px; padding: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 6px 18px rgba(15,23,42,.06); display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span style="width: 32px; height: 32px; border-radius: 999px; background: #EDE9FE; color: #7C3AED; display: grid; place-items: center; flex: none">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"></path></svg>
+            </span>
+            <div style="flex: 1; min-width: 0">
+              <span style="font-size: 12px; color: #64748B">Quê nhà bạn</span><br>
+              <b style="font-size: 17px">Hòa Châu, Hòa Vang</b>
+            </div>
+            <button class="btn-reset" type="button" onClick="{{changeHome}}" style="height: 40px; padding: 0 12px; border-radius: 10px; color: #0E7490; font-weight: 700">Đổi</button>
+            <button class="btn-reset" type="button" aria-label="Gửi cho người nhà" title="Gửi cho người nhà" style="width: 40px; height: 40px; border-radius: 10px; background: #E0F2F7; color: #0E7490; display: grid; place-items: center">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"></path></svg>
+            </button>
+          </div>
+
+          <!-- status ring -->
+          <div style="display: flex; align-items: center; gap: 16px; padding: 14px; border-radius: 14px; background: {{tone.bg}}">
+            <svg width="88" height="88" viewBox="0 0 88 88" role="img" aria-label="{{tone.label}}" style="flex: none">
+              <circle class="breathe" cx="44" cy="44" r="40" style="fill: {{tone.c}}"></circle>
+              <circle cx="44" cy="44" r="30" style="fill: #FFFFFF; stroke: {{tone.c}}; stroke-width: 4"></circle>
+              <g transform="translate(30 30)" style="color: {{tone.c}}">
+                <sc-if value="{{tone.isBad}}" hint-placeholder-val="{{ true }}"><path d="M14 2l13 24H1z" style="fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linejoin: round"></path><path d="M14 11v6M14 21v.5" style="stroke: currentColor; stroke-width: 2.6; stroke-linecap: round"></path></sc-if>
+                <sc-if value="{{tone.isOk}}" hint-placeholder-val="{{ false }}"><path d="M4 15l7 7 13-15" style="fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round"></path></sc-if>
+              </g>
+            </svg>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <b style="font-size: 20px; color: {{tone.text}}">{{tone.label}}</b>
+              <span style="color: #475569">trong 5 km quanh nhà</span>
+              <span style="display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12.5px; font-weight: 600; color: #15803D">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0"></path><circle cx="12" cy="19" r="1.2"></circle></svg>
+                Trong vùng liên lạc tốt
+              </span>
+            </div>
+          </div>
+
+          <!-- 4 numbers -->
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+            <div title="Phao cứu hộ trong 5 km" style="padding: 12px 10px; border-radius: 12px; background: #F8FAFC; border: 1px solid #E2E8F0; display: flex; flex-direction: column; gap: 6px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0E7490" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l2 4h14l2-4z"></path><path d="M12 3v12M12 4l6 9H12"></path></svg>
+              <b style="font-size: 26px; line-height: 1">{{n.buoys}}</b>
+              <span style="font-size: 12px; color: #475569">phao gần nhà</span>
+            </div>
+            <div title="Người được phát hiện trong 5 km" style="padding: 12px 10px; border-radius: 12px; background: #FFF7ED; border: 1px solid #FED7AA; display: flex; flex-direction: column; gap: 6px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C2410C" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="7" r="3.5"></circle><path d="M5 21a7 7 0 0 1 14 0"></path></svg>
+              <b style="font-size: 26px; line-height: 1; color: #C2410C">{{n.people}}</b>
+              <span style="font-size: 12px; color: #475569">được phát hiện</span>
+            </div>
+            <div title="Người đã nhận đồ cứu trợ" style="padding: 12px 10px; border-radius: 12px; background: #F0FDF4; border: 1px solid #BBF7D0; display: flex; flex-direction: column; gap: 6px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#15803D" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"></path><path d="M3 8l9 5 9-5M12 13v8"></path></svg>
+              <b style="font-size: 26px; line-height: 1; color: #15803D">{{n.aid}}</b>
+              <span style="font-size: 12px; color: #475569">nhận cứu trợ</span>
+            </div>
+            <div title="Phao gần nhất" style="padding: 12px 10px; border-radius: 12px; background: #F8FAFC; border: 1px solid #E2E8F0; display: flex; flex-direction: column; gap: 6px">
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(135 12 12)"><path d="M12 2l6 18-6-4-6 4z" style="fill: #0E7490"></path></g></svg>
+              <b style="font-size: 26px; line-height: 1">{{n.near}}<span style="font-size: 13px; color: #64748B; font-weight: 500"> km</span></b>
+              <span style="font-size: 12px; color: #475569">phía Đông Nam</span>
+            </div>
+          </div>
+
+          <!-- weather and river -->
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+            <div title="Mưa 24 giờ tới" style="padding: 12px; border-radius: 12px; border: 1px solid #E2E8F0; display: flex; flex-direction: column; gap: 8px">
+              <span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #475569">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0E7490" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 15a5 5 0 0 1-.6-10A6 6 0 0 1 18 6a4.5 4.5 0 0 1-1 9z"></path><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"></path></svg>
+                Mưa 24 giờ
+              </span>
+              <b style="font-size: 24px; line-height: 1">48<span style="font-size: 13px; color: #64748B; font-weight: 500"> mm · 97%</span></b>
+              <div style="height: 30px; display: flex; align-items: flex-end; gap: 2px">
+                <sc-for list="{{rain}}" as="r" hint-placeholder-count="24">
+                  <span class="grow" style="flex: 1; height: {{r.h}}%; min-height: 2px; border-radius: 2px; background: {{r.c}}; animation-delay: {{r.d}}ms"></span>
+                </sc-for>
+              </div>
+              <span style="font-size: 12px; color: #475569">To nhất khoảng <b>15:00</b></span>
+            </div>
+            <div title="Mực nước sông Cẩm Lệ, trạm Cẩm Lệ" style="padding: 12px; border-radius: 12px; border: 1px solid #FECACA; background: #FFFBFB; display: flex; flex-direction: column; gap: 8px">
+              <span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #475569">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B91C1C" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 14c2-2 4-2 6 0s4 2 6 0 4-2 6 0"></path></svg>
+                Sông Cẩm Lệ
+              </span>
+              <b style="font-size: 24px; line-height: 1">2,1<span style="font-size: 13px; color: #64748B; font-weight: 500"> m</span></b>
+              <div style="position: relative; height: 30px">
+                <div style="position: absolute; left: 0; right: 0; top: 14px; display: flex; gap: 3px">
+                  <span style="flex: 1; height: 8px; border-radius: 4px; background: #7DD3FC"></span>
+                  <span style="flex: 1; height: 8px; border-radius: 4px; background: #FDE047"></span>
+                  <span style="flex: 1; height: 8px; border-radius: 4px; background: #FB923C"></span>
+                  <span style="flex: 1; height: 8px; border-radius: 4px; background: #EF4444"></span>
+                </div>
+                <span style="position: absolute; top: 0; left: {{riverAt}}%; transform: translateX(-50%); transition: left .9s cubic-bezier(.34,1.56,.64,1); display: flex; flex-direction: column; align-items: center">
+                  <span style="padding: 0 5px; border-radius: 4px; background: #B91C1C; color: #fff; font-size: 10px; font-weight: 800; line-height: 13px">BĐ2</span>
+                  <span style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #B91C1C"></span>
+                </span>
+              </div>
+              <span style="font-size: 12px; color: #475569">Trạm Cẩm Lệ · 3,4 km</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- people near home -->
+        <section class="rise" aria-label="Người được phát hiện gần nhà" style="animation-delay: 80ms; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px; padding: 14px 8px 8px; box-shadow: 0 1px 2px rgba(15,23,42,.06)">
+          <h2 style="margin: 0 8px 8px; font-size: 15px">Người được phát hiện gần nhà</h2>
+          <ul style="list-style: none; margin: 0; padding: 0">
+            <sc-for list="{{people}}" as="p" hint-placeholder-count="3">
+              <li>
+                <button class="btn-reset row" type="button" onClick="{{p.pick}}" style="width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 12px; text-align: left; {{p.sel}}">
+                  <span style="width: 14px; height: 14px; border-radius: 999px; background: {{p.color}}; box-shadow: 0 0 0 4px {{p.ring}}; flex: none"></span>
+                  <span style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+                    <b>{{p.level}}</b>
+                    <span style="display: flex; gap: 12px; font-size: 12.5px; color: #475569">
+                      <span title="Cách nhà" style="display: inline-flex; align-items: center; gap: 4px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M3 11l9-7 9 7v9H3z"></path></svg>{{p.dist}}</span>
+                      <span title="Thấy lần cuối" style="display: inline-flex; align-items: center; gap: 4px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>{{p.ago}}</span>
+                    </span>
+                  </span>
+                  <span style="height: 26px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 700; background: {{p.pillBg}}; color: {{p.pillC}}">{{p.pill}}</span>
+                </button>
+              </li>
+            </sc-for>
+          </ul>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{noHome}}" hint-placeholder-val="{{ false }}">
+        <section class="rise" aria-labelledby="pick-title" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px; padding: 22px 18px 18px; box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 6px 18px rgba(15,23,42,.06); display: flex; flex-direction: column; gap: 14px; align-items: center; text-align: center">
+          <svg width="200" height="110" viewBox="0 0 200 110" aria-hidden="true">
+            <path d="M0 86c25-10 50-10 75 0s50 10 75 0 35-10 50-4v28H0z" style="fill: #BAE6FD"></path>
+            <path d="M0 96c25-8 50-8 75 0s50 8 75 0 35-8 50-3v17H0z" style="fill: #7DD3FC"></path>
+            <path d="M40 80V52l26-20 26 20v28z" style="fill: #FFFFFF; stroke: #7C3AED; stroke-width: 3; stroke-linejoin: round"></path>
+            <path d="M58 80V62h16v18" style="fill: #EDE9FE; stroke: #7C3AED; stroke-width: 3"></path>
+            <g class="breathe" style="transform-origin: 150px 70px"><circle cx="150" cy="70" r="22" style="fill: #E0F2F7"></circle></g>
+            <circle cx="150" cy="70" r="13" style="fill: none; stroke: #0E7490; stroke-width: 5"></circle>
+            <path d="M141 61l5 5M154 74l5 5M159 61l-5 5M146 74l-5 5" style="stroke: #0E7490; stroke-width: 3"></path>
+          </svg>
+          <h1 id="pick-title" style="margin: 0; font-size: 21px">Quê nhà bạn ở đâu?</h1>
+          <form onSubmit="{{setHome}}" style="width: 100%; display: flex; gap: 8px">
+            <label style="flex: 1; display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 14px; border-radius: 14px; border: 2px solid #0E7490; background: #FFFFFF">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+              <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Địa chỉ quê nhà</span>
+              <input type="search" placeholder="Xã, huyện hoặc tỉnh" style="flex: 1; min-width: 0; border: 0; outline: none; font: inherit; font-size: 16px; background: none; color: #0F172A">
+            </label>
+            <button class="btn-reset" type="button" onClick="{{setHome}}" style="height: 52px; padding: 0 20px; border-radius: 14px; background: #0E7490; color: #FFFFFF; font-weight: 800">Xem</button>
+          </form>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center">
+            <button class="btn-reset" type="button" onClick="{{setHome}}" style="height: 36px; padding: 0 14px; border-radius: 999px; background: #F1F5F9; font-size: 13px; font-weight: 600">Hòa Vang, Đà Nẵng</button>
+            <button class="btn-reset" type="button" onClick="{{setHome}}" style="height: 36px; padding: 0 14px; border-radius: 999px; background: #F1F5F9; font-size: 13px; font-weight: 600">Điện Bàn, Quảng Nam</button>
+          </div>
+        </section>
+      </sc-if>
+
+      <!-- whole area -->
+      <section class="rise" aria-label="Toàn vùng cứu hộ" style="animation-delay: 140ms; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px; padding: 14px; box-shadow: 0 1px 2px rgba(15,23,42,.06)">
+        <h2 style="margin: 0 0 10px; font-size: 15px">Toàn vùng cứu hộ</h2>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; text-align: center">
+          <div><b style="font-size: 28px; color: #0E7490">{{n.allBuoys}}</b><br><span style="font-size: 12px; color: #475569">phao liên lạc</span></div>
+          <div><b style="font-size: 28px; color: #C2410C">{{n.allPeople}}</b><br><span style="font-size: 12px; color: #475569">người phát hiện</span></div>
+          <div><b style="font-size: 28px; color: #15803D">{{n.allAid}}</b><br><span style="font-size: 12px; color: #475569">nhận cứu trợ</span></div>
+        </div>
+      </section>
+
+      <!-- trend -->
+      <section class="rise" aria-label="Diễn biến 12 giờ" style="animation-delay: 200ms; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px; padding: 14px; box-shadow: 0 1px 2px rgba(15,23,42,.06)">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px">
+          <h2 style="margin: 0; font-size: 15px; flex: 1">12 giờ qua</h2>
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #475569"><span style="width: 10px; height: 10px; border-radius: 3px; background: #F97316"></span>Phát hiện</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #475569"><span style="width: 10px; height: 10px; border-radius: 3px; background: #16A34A"></span>Được cứu</span>
+        </div>
+        <div style="height: 90px; display: flex; align-items: flex-end; gap: 6px; border-bottom: 1px solid #E2E8F0">
+          <sc-for list="{{trend}}" as="t" hint-placeholder-count="12">
+            <div title="{{t.tip}}" style="flex: 1; height: 100%; display: flex; align-items: flex-end; gap: 2px">
+              <span class="grow" style="flex: 1; height: {{t.a}}%; border-radius: 3px 3px 0 0; background: #F97316; animation-delay: {{t.d}}ms"></span>
+              <span class="grow" style="flex: 1; height: {{t.b}}%; border-radius: 3px 3px 0 0; background: #16A34A; animation-delay: {{t.d}}ms"></span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 11.5px; color: #64748B"><span>04:00</span><span>10:00</span><span>Bây giờ</span></div>
+      </section>
+
+      <!-- feed -->
+      <section class="rise" aria-label="Diễn biến mới nhất" style="animation-delay: 260ms; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px; padding: 14px; box-shadow: 0 1px 2px rgba(15,23,42,.06)">
+        <h2 style="margin: 0 0 6px; font-size: 15px">Tin mới</h2>
+        <ol style="list-style: none; margin: 0; padding: 0">
+          <sc-for list="{{feed}}" as="f" hint-placeholder-count="4">
+            <li style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #F1F5F9">
+              <span style="width: 32px; height: 32px; border-radius: 10px; background: {{f.bg}}; color: {{f.c}}; display: grid; place-items: center; flex: none">
+                <sc-if value="{{f.person}}" hint-placeholder-val="{{ false }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="7" r="3.5"></circle><path d="M5 21a7 7 0 0 1 14 0"></path></svg></sc-if>
+                <sc-if value="{{f.saved}}" hint-placeholder-val="{{ false }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></sc-if>
+                <sc-if value="{{f.boat}}" hint-placeholder-val="{{ false }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l2 4h14l2-4z"></path><path d="M12 3v12M12 4l6 9H12"></path></svg></sc-if>
+              </span>
+              <span style="flex: 1">{{f.t}}</span>
+              <span style="font-size: 12px; color: #64748B">{{f.at}}</span>
+            </li>
+          </sc-for>
+        </ol>
+      </section>
+
+      <!-- buoys -->
+      <section class="rise" aria-label="Các phao cứu hộ" style="animation-delay: 320ms; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 18px; padding: 14px; box-shadow: 0 1px 2px rgba(15,23,42,.06)">
+        <h2 style="margin: 0 0 10px; font-size: 15px">Các phao</h2>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <sc-for list="{{buoys}}" as="b" hint-placeholder-count="4">
+            <span title="{{b.say}}" style="height: 34px; padding: 0 12px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; background: {{b.bg}}; font-size: 13px"><span style="width: 9px; height: 9px; border-radius: 999px; background: {{b.c}}"></span><b>{{b.id}}</b><span style="color: #475569">{{b.say}}</span></span>
+          </sc-for>
+        </div>
+      </section>
+
+      <p style="margin: 4px 4px 0; font-size: 12px; color: #64748B">Vị trí người được phát hiện do camera trên phao ước lượng, có thể lệch vài mét.</p>
+    </div>
+
+    <!-- ================= RIGHT: the map ================= -->
+    <div style="flex: 1; position: relative; overflow: hidden; border-left: 1px solid #E2E8F0">
+      <svg width="960" height="840" viewBox="0 0 960 840" style="position: absolute; inset: 0" aria-hidden="true">
+        <rect width="960" height="840" style="fill: #E9EEF3"></rect>
+        <path d="M0 140 C 160 190 240 120 400 170" style="fill: none; stroke: #DDE5EC; stroke-width: 110"></path>
+        <path d="M960 110 C 780 170 700 140 600 230 C 500 320 460 280 390 360 C 320 440 260 450 190 520 C 110 600 60 640 0 680" style="fill: none; stroke: #A7C8E4; stroke-width: 64; stroke-linecap: round"></path>
+        <path d="M390 360 C 430 440 500 480 600 520 C 700 560 760 660 800 840" style="fill: none; stroke: #A7C8E4; stroke-width: 26; stroke-linecap: round"></path>
+        <path d="M0 420 L 960 340 M 220 0 L 300 840 M 700 0 L 760 840 M 0 640 C 380 600 640 700 960 650" style="fill: none; stroke: #FFFFFF; stroke-width: 5"></path>
+        <path d="M100 0 L 140 840 M 0 120 L 960 60 M 520 0 L 540 840" style="fill: none; stroke: #FFFFFF; stroke-width: 2.5"></path>
+        <!-- 5 km round home -->
+        <circle cx="430" cy="420" r="230" style="fill: rgba(124,58,237,.06); stroke: #7C3AED; stroke-width: 2; stroke-dasharray: 8 7"></circle>
+        <!-- station coverage -->
+        <circle cx="560" cy="460" r="150" style="fill: rgba(14,116,144,.06); stroke: #0E7490; stroke-width: 1.5; stroke-dasharray: 3 7"></circle>
+        <sc-if value="{{hasSel}}" hint-placeholder-val="{{ false }}">
+          <circle cx="{{selPt.x}}" cy="{{selPt.y}}" r="34" style="fill: none; stroke: #0F172A; stroke-width: 2; stroke-dasharray: 4 4"></circle>
+        </sc-if>
+      </svg>
+      <!-- home pin -->
+      <div title="Nhà bạn" style="position: absolute; left: 415px; top: 384px; width: 30px; height: 38px; color: #7C3AED">
+        <svg width="30" height="38" viewBox="0 0 24 30" aria-hidden="true"><path d="M12 1a10 10 0 0 0-10 10c0 7 10 18 10 18s10-11 10-18A10 10 0 0 0 12 1z" style="fill: #7C3AED; stroke: #fff; stroke-width: 2"></path><path d="M7 13l5-4 5 4v5H7z" style="fill: #fff"></path></svg>
+      </div>
+      <!-- station -->
+      <div title="Trạm bờ" style="position: absolute; left: 546px; top: 446px; width: 28px; height: 28px; border-radius: 8px; background: #0E7490; border: 2px solid #fff; box-sizing: border-box; display: grid; place-items: center">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="2"></circle><path d="M8 8a5.5 5.5 0 0 0 0 8M16 8a5.5 5.5 0 0 1 0 8"></path></svg>
+      </div>
+      <!-- buoys -->
+      <sc-for list="{{buoyPins}}" as="b" hint-placeholder-count="4">
+        <span title="{{b.id}}" style="{{b.pos}}; position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 999px; background: #FFFFFF; border: 4px solid {{b.c}}; box-sizing: border-box; box-shadow: 0 2px 6px rgba(15,23,42,.25)"></span>
+      </sc-for>
+      <!-- people -->
+      <sc-for list="{{people}}" as="p" hint-placeholder-count="3">
+        <span style="{{p.pos}}; position: absolute; width: 0; height: 0">
+          <span class="ripple" style="position: absolute; left: -8px; top: -8px; width: 16px; height: 16px; border-radius: 999px; background: {{p.color}}"></span>
+          <span style="position: absolute; left: -8px; top: -8px; width: 16px; height: 16px; border-radius: 999px; background: {{p.color}}; border: 2px solid #fff; box-sizing: border-box"></span>
+        </span>
+      </sc-for>
+      <!-- map tools -->
+      <div style="position: absolute; right: 16px; top: 16px; display: flex; flex-direction: column; gap: 8px">
+        <button class="btn-reset" type="button" aria-label="Về nhà" title="Về nhà" style="width: 44px; height: 44px; border-radius: 12px; background: #fff; box-shadow: 0 2px 8px rgba(15,23,42,.15); display: grid; place-items: center; color: #7C3AED"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9H4z"></path></svg></button>
+        <button class="btn-reset" type="button" aria-label="Thời tiết và ngập" title="Thời tiết và ngập" style="width: 44px; height: 44px; border-radius: 12px; background: #fff; box-shadow: 0 2px 8px rgba(15,23,42,.15); display: grid; place-items: center; color: #0E7490"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 15a5 5 0 0 1-.6-10A6 6 0 0 1 18 6a4.5 4.5 0 0 1-1 9z"></path><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"></path></svg></button>
+      </div>
+      <!-- legend -->
+      <div style="position: absolute; left: 16px; bottom: 16px; display: flex; gap: 6px; flex-wrap: wrap">
+        <span style="height: 30px; padding: 0 10px; border-radius: 999px; background: rgba(255,255,255,.92); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600"><span style="width: 10px; height: 10px; border-radius: 999px; background: #7C3AED"></span>Nhà bạn</span>
+        <span style="height: 30px; padding: 0 10px; border-radius: 999px; background: rgba(255,255,255,.92); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600"><span style="width: 10px; height: 10px; border-radius: 999px; background: #fff; border: 3px solid #15803D; box-sizing: border-box"></span>Phao</span>
+        <span style="height: 30px; padding: 0 10px; border-radius: 999px; background: rgba(255,255,255,.92); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600"><span style="width: 10px; height: 10px; border-radius: 999px; background: #EA580C"></span>Người cần cứu</span>
+        <span style="height: 30px; padding: 0 10px; border-radius: 999px; background: rgba(255,255,255,.92); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600"><span style="width: 10px; height: 10px; border-radius: 3px; background: #0E7490"></span>Trạm bờ</span>
+      </div>
+      <span style="position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: #475569">© OpenStreetMap</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { home: true, sel: -1, k: 0 };
+  }
+  componentDidMount() {
+    // the numbers count up once when the page opens
+    const t0 = Date.now();
+    this.timer = setInterval(() => {
+      const k = Math.min(1, (Date.now() - t0) / 700);
+      this.setState({ k });
+      if (k >= 1) clearInterval(this.timer);
+    }, 40);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  renderVals() {
+    const s = this.state;
+    const ease = 1 - Math.pow(1 - s.k, 3);
+    const up = v => Math.round(v * ease);
+    const PEOPLE = [
+      { level: 'Nguy kịch', color: '#DC2626', ring: 'rgba(220,38,38,.18)', dist: '1,1 km', ago: '3 phút', pill: 'Phao đang tới', pillBg: '#FEF3C7', pillC: '#92400E', x: 360, y: 300 },
+      { level: 'Cao', color: '#EA580C', ring: 'rgba(234,88,12,.18)', dist: '2,4 km', ago: '9 phút', pill: 'Phao đang tới', pillBg: '#FEF3C7', pillC: '#92400E', x: 560, y: 330 },
+      { level: 'Trung bình', color: '#CA8A04', ring: 'rgba(202,138,4,.2)', dist: '3,8 km', ago: '22 phút', pill: 'Đã cứu', pillBg: '#DCFCE7', pillC: '#166534', x: 300, y: 560 },
+    ];
+    const people = PEOPLE.map((p, i) => ({ ...p, pos: `left: ${p.x}px; top: ${p.y}px`,
+      sel: i === s.sel ? 'background: #F1F5F9; outline: 2px solid #0E7490' : '',
+      pick: () => this.setState({ sel: i === s.sel ? -1 : i }) }));
+    const crit = PEOPLE.some(p => p.level === 'Nguy kịch');
+    const tone = crit
+      ? { c: '#DC2626', bg: '#FEF2F2', text: '#B91C1C', label: 'Có người nguy kịch', isBad: true, isOk: false }
+      : { c: '#15803D', bg: '#F0FDF4', text: '#15803D', label: 'Phao đang tìm kiếm', isBad: false, isOk: true };
+    const RAIN = [0, 0, 1, 2, 4, 6, 9, 7, 5, 3, 2, 2, 1, 1, 0, 0, 2, 5, 8, 10, 6, 3, 1, 0];
+    const rain = RAIN.map((v, i) => ({ h: v * 10, c: v >= 8 ? '#0369A1' : '#38BDF8', d: i * 18 }));
+    const TREND = [[0, 0], [1, 0], [0, 0], [2, 1], [1, 1], [3, 1], [2, 2], [4, 2], [3, 3], [5, 2], [2, 3], [3, 2]];
+    const trend = TREND.map(([a, b], i) => ({ a: a * 20, b: b * 20, d: i * 40, tip: `${a} phát hiện, ${b} được cứu` }));
+    const feed = [
+      { t: 'PHAO-01 thấy 1 người, mức nguy kịch', at: '3 ph', c: '#B91C1C', bg: '#FEE2E2', person: true },
+      { t: '1 người đã nhận đồ cứu trợ', at: '12 ph', c: '#15803D', bg: '#DCFCE7', saved: true },
+      { t: 'PHAO-02 thấy 1 người, mức cao', at: '9 ph', c: '#C2410C', bg: '#FFEDD5', person: true },
+      { t: 'PHAO-03 bắt đầu tìm kiếm', at: '25 ph', c: '#0E7490', bg: '#E0F2F7', boat: true },
+    ];
+    const BUOYS = [
+      { id: 'PHAO-01', say: 'Đang tìm kiếm', c: '#15803D', bg: '#F0FDF4', x: 330, y: 330 },
+      { id: 'PHAO-02', say: 'Đang tìm kiếm', c: '#15803D', bg: '#F0FDF4', x: 600, y: 300 },
+      { id: 'PHAO-03', say: 'Đang quay về trạm', c: '#B45309', bg: '#FFFBEB', x: 520, y: 540 },
+      { id: 'PHAO-04', say: 'Tạm mất liên lạc', c: '#64748B', bg: '#F1F5F9', x: 760, y: 640 },
+    ];
+    const buoys = BUOYS;
+    const buoyPins = BUOYS.map(b => ({ ...b, pos: `left: ${b.x}px; top: ${b.y}px` }));
+    const sp = PEOPLE[s.sel];
+    return {
+      hasHome: s.home, noHome: !s.home,
+      changeHome: () => this.setState({ home: false, sel: -1 }),
+      setHome: e => { if (e && e.preventDefault) e.preventDefault(); this.setState({ home: true, k: 1 }); },
+      tone, people, rain, trend, feed, buoys, buoyPins,
+      n: { buoys: up(3), people: up(3), aid: up(1), near: (1.2 * ease).toFixed(1).replace('.', ','), allBuoys: up(4), allPeople: up(7), allAid: up(2) },
+      riverAt: Math.round(62 * ease),
+      hasSel: !!sp, selPt: sp ? { x: sp.x, y: sp.y } : { x: 0, y: 0 },
+    };
+  }
+}
+</script>
+</body>
+</html>
