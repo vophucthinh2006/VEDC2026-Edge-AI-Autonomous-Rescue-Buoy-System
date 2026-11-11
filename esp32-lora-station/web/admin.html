@@ -19,6 +19,8 @@
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/login.css">
 <link rel="stylesheet" href="css/weather.css">
+<link rel="stylesheet" href="css/console.css">
+<link rel="stylesheet" href="css/gauges.css">
 <link rel="stylesheet" href="css/light.css">
 <!-- The theme picked before (js/app.js applyTheme), set before the first paint so the page does not flash -->
 <script>try { if (localStorage.getItem('theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) { /* dark */ }</script>
@@ -30,7 +32,16 @@
       <img src="img/logo.png" alt="Logo ML IoT">
       <h1>Trạm điều hành cứu hộ</h1>
     </div>
+    <!-- The buoy picked, in one line: what it is doing (js/features/gauges.js) -->
+    <div id="pill" role="status" aria-live="polite" data-tone="idle" hidden>
+      <span class="pill-ic" aria-hidden="true"><i class="ph-fill ph-boat"></i></span>
+      <b id="pill-name"></b>
+      <span class="pill-sep" aria-hidden="true"></span>
+      <span id="pill-text"></span>
+      <i class="pill-dot" aria-hidden="true"></i>
+    </div>
     <div class="top-right">
+      <span id="st-sats" class="top-chip" title="Vệ tinh GPS của trạm bờ" hidden><i class="ph ph-globe-hemisphere-east" aria-hidden="true"></i><b></b></span>
       <span id="conn" class="conn" data-up="false" role="status" title="Kết nối tới máy chủ">
         <i class="dot" aria-hidden="true"></i><span id="conn-text">Đang kết nối</span>
       </span>
@@ -43,197 +54,85 @@
   </header>
 
   <div id="main">
-    <aside id="side">
-      <button id="sheet-handle" type="button" aria-expanded="true" aria-controls="panel-monitor panel-mission"><span>Thu gọn</span></button>
-
-      <!-- Monitor mode -->
-      <div class="panel" id="panel-monitor">
-        <section id="victims" aria-labelledby="victims-title">
-          <div class="sec-head">
-            <h2 id="victims-title">Người cần cứu</h2>
-            <span id="victims-count" class="count bad" hidden>0</span>
-            <button id="btn-clear-victims" class="link-btn admin-only" type="button" hidden>Xoá hết</button>
-          </div>
-          <ul id="victim-list"></ul>
-          <p id="victims-empty" class="quiet"><i class="ph ph-check-circle" aria-hidden="true"></i>Chưa phát hiện ai cần cứu</p>
-          <button id="victims-more" class="link-btn" type="button" hidden></button>
-        </section>
-
-        <!-- One part at a time under the people to rescue: the boat picked, the whole fleet, the events -->
-        <div id="tabs" role="tablist" aria-label="Bảng phao">
-          <button id="tab-detail" role="tab" type="button" aria-selected="true" aria-controls="card" title="Phao đang chọn">Chi tiết</button>
-          <button id="tab-buoys" role="tab" type="button" aria-selected="false" aria-controls="buoys-view" tabindex="-1">Đội phao <span id="count" class="count">0</span></button>
-          <button id="tab-log" role="tab" type="button" aria-selected="false" aria-controls="log-view" tabindex="-1">Sự kiện <span id="tab-log-badge" class="count bad" hidden>0</span></button>
-        </div>
-
-        <section id="card" role="tabpanel" aria-labelledby="tab-detail">
-          <div id="card-empty" class="empty-note">
-            <i class="ph ph-lifebuoy" aria-hidden="true"></i>
-            <p>Chưa có phao nào. Phao sẽ hiện ở đây khi trạm bờ nhận được tín hiệu.</p>
-          </div>
-          <div id="card-body" hidden>
-            <div class="card-head">
-              <h2 id="c-name"></h2>
-              <button id="btn-copy" class="link-btn" type="button"><i class="ph ph-copy" aria-hidden="true"></i>Sao chép toạ độ</button>
-            </div>
-            <div id="c-status" class="status-big" data-tone="idle" role="status">
-              <i id="c-status-ic" class="ph-fill ph-pause-circle" aria-hidden="true"></i><span id="c-status-text"></span>
-            </div>
-
-            <div class="vitals">
-              <div class="vital">
-                <span class="k">Tín hiệu</span>
-                <span class="v"><span id="c-sig" class="sig" data-level="lost" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b id="c-sig-text"></b></span>
-              </div>
-              <div class="vital" id="c-batt-wrap">
-                <span class="k">Pin</span>
-                <span class="v"><span class="batt" aria-hidden="true"><i id="c-batt-bar"></i></span><b id="c-batt"></b></span>
-              </div>
-            </div>
-            <p id="c-line" class="line"></p>
-            <p id="c-lowbatt" class="alert-line" role="alert" hidden></p>
-
-            <section id="d-health" class="kv-card" aria-label="Sức khoẻ phao" hidden>
-              <h3>Sức khoẻ phao</h3>
-              <dl class="kv">
-                <dt>IMU</dt><dd id="h-imu"></dd>
-                <dt>Lắc ngang</dt><dd id="h-roll"></dd>
-                <dt>Chúi dọc</dt><dd id="h-pitch"></dd>
-                <dt>Mũi tàu</dt><dd id="h-head"></dd>
-                <dt>LoRa</dt><dd id="h-zone"></dd>
-              </dl>
-            </section>
-
-            <section id="d-prog" class="kv-card" aria-label="Tiến độ lộ trình" hidden>
-              <h3>Tiến độ lộ trình</h3>
-              <p id="h-prog" class="kv-line"></p>
-            </section>
-
-            <section id="d-diag" class="kv-card" aria-label="Máy tính Pi và mạch F407" hidden>
-              <h3>Pi và F407 <small id="g-age"></small></h3>
-              <dl class="kv">
-                <dt>Nhiệm vụ</dt><dd id="g-mission"></dd>
-                <dt>Lệnh của Pi</dt><dd id="g-reason"></dd>
-                <dt>Motor</dt><dd id="g-drive"></dd>
-                <dt>Camera AI</dt><dd id="g-fps"></dd>
-                <dt>Pin</dt><dd id="g-pack"></dd>
-                <dt>Tự phục hồi</dt><dd id="g-recov"></dd>
-              </dl>
-            </section>
-
-            <section id="d-hold" class="hold" aria-label="Dừng phao" hidden>
-              <button id="d-hold-btn" class="btn hold-btn stop" type="button">DỪNG PHAO</button>
-              <p id="d-hold-state" class="hold-state"></p>
-            </section>
-
-            <section id="d-lights" class="lights" aria-label="Đèn trên phao" hidden>
-              <label class="light"><i class="ph ph-lightbulb" aria-hidden="true"></i><span>Đèn 1</span><small id="d-light1-state" class="light-state"></small><input id="d-light1" class="switch" type="checkbox" role="switch" aria-label="Đèn 1"></label>
-              <label class="light"><i class="ph ph-lightbulb" aria-hidden="true"></i><span>Đèn 2</span><small id="d-light2-state" class="light-state"></small><input id="d-light2" class="switch" type="checkbox" role="switch" aria-label="Đèn 2"></label>
-            </section>
-
-            <p id="c-route" class="route-line" hidden></p>
-            <p class="guest-only quiet small">Bạn đang xem với tư cách khách. Chỉ admin ra lệnh được.</p>
-
-            <!-- Pixhawk/MAVLink HUD: kept for the `pixhawk` boat, never shown on the dashboard for now -->
-            <section id="d-hud" class="hud" aria-label="Bảng lái HUD" hidden>
-              <div id="hud-screen"></div>
-              <div class="quick">
-                <div class="q"><span class="k">Tốc độ</span><b id="q-gs">-</b><small>m/s</small></div>
-                <div class="q"><span class="k">Cách WP</span><b id="q-wp">-</b><small id="q-wp-sub">m</small></div>
-                <div class="q"><span class="k">Hướng</span><b id="q-hdg">-</b><small>độ</small></div>
-                <div class="q"><span class="k">Ga</span><b id="q-thr">-</b><small>%</small></div>
-                <div class="q"><span class="k">Pin</span><b id="q-batt">-</b><small id="q-batt-sub">V</small></div>
-                <div class="q"><span class="k">Vệ tinh</span><b id="q-gps">-</b><small id="q-gps-sub">HDOP -</small></div>
-              </div>
-            </section>
-          </div>
-        </section>
-
-        <section id="lists">
-          <div id="buoys-view" role="tabpanel" aria-labelledby="tab-buoys" hidden>
-            <div id="list"></div>
-          </div>
-          <div id="log-view" role="tabpanel" aria-labelledby="tab-log" hidden>
-            <div id="tl-head">
-              <div id="tl-groups" class="seg" role="group" aria-label="Loại sự kiện">
-                <button type="button" data-g="people" aria-pressed="true">Người gặp nạn <span class="count">0</span></button>
-                <button type="button" data-g="ops" aria-pressed="false">Tàu &amp; lệnh <span class="count">0</span></button>
-              </div>
-              <button id="tl-clear" type="button" class="link-btn">Xoá nhật ký</button>
-            </div>
-            <ol id="timeline"></ol>
-          </div>
-        </section>
-      </div>
-
-      <!-- Route mode: waypoints only -->
-      <div class="panel" id="panel-mission">
-        <section id="m-head">
-          <div class="sec-head"><h2>Lộ trình</h2><span id="m-sum" class="sum"></span></div>
-          <p id="m-hint" class="quiet small"></p>
-        </section>
-        <ol id="m-list"></ol>
-        <div id="m-actions">
-          <div class="row">
-            <button class="btn" id="m-undo" type="button"><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>Hoàn tác</button>
-            <button class="btn danger" id="m-clear" type="button"><i class="ph ph-trash" aria-hidden="true"></i>Xoá hết</button>
-          </div>
-          <label class="check"><input id="m-loop" type="checkbox"><span>Đi vòng: hết điểm cuối thì quay lại điểm đầu</span></label>
-          <button class="btn primary big" id="m-send" type="button"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i><span>Gửi tới phao</span></button>
-          <p id="m-sendstat" class="route-line" aria-live="polite" hidden></p>
-        </div>
-      </div>
-
-      <!-- Fleet mode: many boats, one shore station (docs/fleet-control.md) -->
-      <div class="panel" id="panel-fleet">
-        <section id="f-head">
-          <div class="sec-head"><h2>Đội tàu</h2><span id="f-count" class="count">0</span>
-            <button id="f-end" class="link-btn admin-only" type="button" hidden>Kết thúc đội hình</button></div>
-          <div id="f-list"></div>
-          <div class="f-cmds admin-only" role="group" aria-label="Lệnh cho cả đội">
-            <button class="btn small danger" id="f-hold-all" type="button" aria-label="Dừng tất cả phao" title="Dừng tất cả phao"><i class="ph ph-hand-palm" aria-hidden="true"></i>Dừng hết</button>
-            <button class="btn small" id="f-resume-all" type="button" aria-label="Cho tất cả phao chạy tiếp" title="Cho tất cả phao chạy tiếp"><i class="ph ph-play" aria-hidden="true"></i>Chạy tiếp</button>
-            <button class="btn small" id="f-return-all" type="button" aria-label="Gọi tất cả phao về bờ" title="Gọi tất cả phao về bờ"><i class="ph ph-house-line" aria-hidden="true"></i>Về bờ hết</button>
-          </div>
-        </section>
-        <section id="f-plan" class="admin-only" aria-labelledby="f-plan-title">
-          <div class="sec-head"><h2 id="f-plan-title">Giao nhiệm vụ</h2><span id="f-area-sum" class="sum"></span></div>
-          <p id="f-hint" class="quiet small"></p>
-          <div class="row">
-            <button class="btn small" id="f-area-undo" type="button"><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>Bỏ góc cuối</button>
-            <button class="btn small danger" id="f-area-clear" type="button"><i class="ph ph-trash" aria-hidden="true"></i>Xoá vùng</button>
-          </div>
-          <fieldset class="f-modes">
-            <legend class="sr-only">Cách giao</legend>
-            <label class="f-mode"><input type="radio" name="f-mode" value="sectors" checked><span><b>Chia vùng</b><small>Mỗi phao một dải, quét song song</small></span></label>
-            <label class="f-mode"><input type="radio" name="f-mode" value="formation"><span><b>Đội hình</b><small>Một phao dẫn, các phao giữ chỗ quanh nó</small></span></label>
-          </fieldset>
-          <div id="f-form-opts" class="f-opts" hidden>
-            <label>Dẫn đầu<select id="f-leader"></select></label>
-            <label>Dạng<select id="f-shape"><option value="line">Hàng ngang</option><option value="v">Chữ V</option><option value="column">Hàng dọc</option></select></label>
-          </div>
-          <div class="f-opts">
-            <label>Khoảng cách (m)<input id="f-spacing" type="number" min="2" max="200" step="1" value="10"></label>
-            <label class="check"><input id="f-loop" type="checkbox"><span>Đi vòng</span></label>
-          </div>
-          <div class="row">
-            <button class="btn" id="f-preview" type="button"><i class="ph ph-eye" aria-hidden="true"></i>Xem trước</button>
-            <button class="btn primary" id="f-send" type="button"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i>Gửi cho cả đội</button>
-          </div>
-        </section>
-      </div>
-    </aside>
-
     <div id="map-wrap">
       <div id="map"></div>
 
-      <div id="map-top">
-        <div id="mode" role="tablist" aria-label="Chế độ">
-          <button type="button" data-m="monitor" role="tab"><i class="ph ph-binoculars" aria-hidden="true"></i><span>Giám sát</span></button>
-          <button type="button" data-m="mission" role="tab"><i class="ph ph-path" aria-hidden="true"></i><span>Lộ trình</span></button>
-          <button type="button" data-m="fleet" role="tab"><i class="ph ph-boat" aria-hidden="true"></i><span>Đội tàu</span></button>
+      <!-- Gauges of the buoy picked: numbers and pictures, few words (js/features/gauges.js) -->
+      <section id="gauges" aria-label="Thông số phao đang chọn" hidden>
+        <div class="g" id="g-rain" data-tone="idle" data-wet="false" style="--i:0">
+          <span class="g-k">Mưa 24 giờ</span>
+          <b class="g-v"><span id="gr-mm">--</span><small>mm</small></b>
+          <span class="g-sub" id="gr-prob" title="Khả năng mưa cao nhất"><i class="ph-fill ph-drop" aria-hidden="true"></i><span>--</span></span>
+          <svg class="g-art g-cloud" viewBox="0 0 70 58" aria-hidden="true">
+            <path class="cl" d="M18 38a11 11 0 0 1 1-22 15 15 0 0 1 28 2 10 10 0 0 1 4 20z"></path>
+            <path class="dr" d="M24 44l-3 8M34 44l-3 8M44 44l-3 8"></path>
+          </svg>
+          <div class="g-bars" id="gr-bars" aria-hidden="true"></div>
         </div>
-        <div id="search-wrap">
+        <div class="g" id="g-roll" data-tone="idle" style="--i:1">
+          <span class="g-k">Lắc ngang</span>
+          <b class="g-v" id="gl-v">--</b>
+          <svg class="g-art" viewBox="0 0 84 70" aria-hidden="true">
+            <path class="g-track" d="M8 52 A 34 34 0 0 1 76 52"></path>
+            <path class="g-safe" d="M26 22 A 34 34 0 0 1 58 22"></path>
+            <g class="needle" id="gl-boat" style="transform-origin:42px 50px">
+              <path class="hull" d="M24 44h36l-6 12H30z"></path>
+              <path class="mast" d="M42 18v26M34 44l8-18 8 18"></path>
+            </g>
+            <path class="water" d="M14 58h56"></path>
+          </svg>
+        </div>
+        <div class="g" id="g-pitch" data-tone="idle" style="--i:2">
+          <span class="g-k">Chúi dọc</span>
+          <b class="g-v" id="gp-v">--</b>
+          <svg class="g-art" viewBox="0 0 90 70" aria-hidden="true">
+            <path class="g-track" d="M82 10 A 40 40 0 0 1 82 62"></path>
+            <g class="needle" id="gp-boat" style="transform-origin:44px 40px">
+              <path class="hull" d="M8 38h70l-8 10H16z"></path>
+              <path class="cabin" d="M30 38V26h22l10 12"></path>
+              <path class="mast" d="M40 26V12"></path>
+            </g>
+            <path class="water" d="M4 56h76"></path>
+          </svg>
+        </div>
+        <div class="g g-wide" id="g-head" data-tone="idle" style="--i:3">
+          <svg class="g-compass" viewBox="0 0 104 104" role="img" id="gh-svg" aria-label="La bàn">
+            <circle class="face" cx="52" cy="52" r="48"></circle>
+            <path class="ticks" d="M52 6v7M52 91v7M6 52h7M91 52h7"></path>
+            <text class="north" x="52" y="25">B</text><text x="84" y="56">Đ</text><text x="52" y="88">N</text><text x="20" y="56">T</text>
+            <path class="off" id="gh-arc" d=""></path>
+            <g class="needle want" id="gh-want" style="transform-origin:52px 52px"><path class="want-line" d="M52 52V10"></path><path class="want-tip" d="M52 4l7 11h-14z"></path></g>
+            <g class="needle" id="gh-yaw" style="transform-origin:52px 52px"><path class="bow" d="M52 16l8 36h-16z"></path><path class="stern" d="M52 88l8-36h-16z"></path></g>
+            <circle class="hub" cx="52" cy="52" r="4"></circle>
+          </svg>
+          <div class="gh-read">
+            <div class="gh-now" title="Mũi tàu hiện tại (IMU)"><i class="ph-fill ph-navigation-arrow" aria-hidden="true"></i><b id="gh-word">--</b><small id="gh-deg"></small></div>
+            <div class="gh-pi" title="Hướng Pi ra lệnh"><span class="pi-tag">Pi</span><b id="gh-pi-word">--</b><small id="gh-pi-deg"></small></div>
+            <div class="gh-off" id="gh-off" title="Lệch so với lệnh của Pi"><i class="ph ph-arrow-bend-up-right" aria-hidden="true"></i><span></span></div>
+          </div>
+        </div>
+        <div class="g" id="g-batt" data-tone="idle" style="--i:4">
+          <span class="g-k">Pin</span>
+          <b class="g-v"><span id="gb-v">--</span><small>%</small></b>
+          <span class="g-sub" id="gb-pack" title="Điện áp, dòng (INA226)"></span>
+          <svg class="g-art g-ring" viewBox="0 0 72 72" aria-hidden="true">
+            <circle class="g-track" cx="36" cy="36" r="28"></circle>
+            <circle class="ring" id="gb-ring" cx="36" cy="36" r="28" pathLength="100"></circle>
+            <path class="bolt" d="M38 24l-8 13h7l-3 11 9-14h-7z"></path>
+          </svg>
+        </div>
+        <div class="g" id="g-link" data-tone="idle" style="--i:5">
+          <span class="g-k">LoRa</span>
+          <b class="g-v"><span id="gk-km">--</span><small>km</small></b>
+          <span class="g-sub">tới trạm bờ</span>
+          <span class="g-sig" id="gk-bars" data-level="lost" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        </div>
+      </section>
+
+      <!-- Address search, folded to a button until needed -->
+      <div id="map-top">
+        <div id="search-wrap" data-open="false">
+          <button id="btn-search" class="tool" type="button" aria-label="Tìm địa chỉ" title="Tìm địa chỉ" aria-expanded="false" aria-controls="search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></button>
           <form id="search" role="search" autocomplete="off">
             <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
             <input id="q" type="search" enterkeyhint="search" maxlength="200" placeholder="Nhập địa chỉ hoặc nơi bạn đang ở…" aria-label="Tìm địa chỉ">
@@ -248,6 +147,209 @@
         <button class="tool" id="btn-follow" type="button" aria-label="Bám theo phao đang chọn" aria-pressed="false" title="Bám theo phao đang chọn"><i class="ph ph-crosshair" aria-hidden="true"></i></button>
       </div>
 
+      <!-- Right: the rail of panels and the drawer it opens. On a phone: a bottom sheet. -->
+      <aside id="side" data-open="true">
+        <button id="sheet-handle" type="button" aria-expanded="true" aria-controls="drawer"><span>Thu gọn</span></button>
+        <nav id="rail" aria-label="Ngăn thông tin">
+          <button type="button" class="rail-btn" data-panel="people" aria-pressed="false" aria-controls="drawer">
+            <i class="ph ph-lifebuoy" aria-hidden="true"></i><span>Cần cứu</span>
+            <span id="victims-count" class="count bad badge" hidden>0</span>
+          </button>
+          <button type="button" class="rail-btn" data-panel="detail" aria-pressed="false" aria-controls="drawer">
+            <i class="ph ph-heartbeat" aria-hidden="true"></i><span>Sức khoẻ</span>
+          </button>
+          <button type="button" class="rail-btn" data-panel="buoys" aria-pressed="false" aria-controls="drawer">
+            <i class="ph ph-boat" aria-hidden="true"></i><span>Đội phao</span>
+            <span id="count" class="count badge">0</span>
+          </button>
+          <button type="button" class="rail-btn" data-panel="log" aria-pressed="false" aria-controls="drawer">
+            <i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i><span>Sự kiện</span>
+            <span id="tab-log-badge" class="count bad badge" hidden>0</span>
+          </button>
+          <button type="button" class="rail-btn" data-panel="wx" aria-pressed="false" aria-controls="drawer">
+            <i class="ph ph-cloud-rain" aria-hidden="true"></i><span>Mưa, ngập</span>
+          </button>
+          <button type="button" class="rail-btn" data-panel="legend" aria-pressed="false" aria-controls="drawer">
+            <i class="ph ph-stack" aria-hidden="true"></i><span>Chú giải</span>
+          </button>
+        </nav>
+
+        <div id="drawer" aria-labelledby="drawer-title">
+          <div class="drawer-head">
+            <h2 id="drawer-title"></h2>
+            <button id="drawer-close" class="icon-btn" type="button" aria-label="Đóng ngăn" title="Đóng ngăn"><i class="ph ph-x" aria-hidden="true"></i></button>
+          </div>
+
+          <!-- Monitor mode: one of these at a time, picked on the rail -->
+          <div class="panel" id="panel-monitor">
+            <section id="victims" data-panel="people" aria-label="Người cần cứu">
+              <div class="sec-head">
+                <button id="btn-clear-victims" class="link-btn admin-only" type="button" hidden>Xoá hết</button>
+              </div>
+              <ul id="victim-list"></ul>
+              <p id="victims-empty" class="quiet"><i class="ph ph-check-circle" aria-hidden="true"></i>Chưa phát hiện ai cần cứu</p>
+              <button id="victims-more" class="link-btn" type="button" hidden></button>
+            </section>
+
+            <section id="card" data-panel="detail" aria-label="Phao đang chọn" hidden>
+              <div id="card-empty" class="empty-note">
+                <i class="ph ph-lifebuoy" aria-hidden="true"></i>
+                <p>Chưa có phao nào. Phao sẽ hiện ở đây khi trạm bờ nhận được tín hiệu.</p>
+              </div>
+              <div id="card-body" hidden>
+                <div class="card-head">
+                  <h2 id="c-name"></h2>
+                  <button id="btn-copy" class="link-btn" type="button"><i class="ph ph-copy" aria-hidden="true"></i>Sao chép toạ độ</button>
+                </div>
+                <div id="c-status" class="status-big" data-tone="idle" role="status">
+                  <i id="c-status-ic" class="ph-fill ph-pause-circle" aria-hidden="true"></i><span id="c-status-text"></span>
+                </div>
+                <div class="vitals">
+                  <div class="vital">
+                    <span class="k">Tín hiệu</span>
+                    <span class="v"><span id="c-sig" class="sig" data-level="lost" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b id="c-sig-text"></b></span>
+                  </div>
+                  <div class="vital" id="c-batt-wrap">
+                    <span class="k">Pin</span>
+                    <span class="v"><span class="batt" aria-hidden="true"><i id="c-batt-bar"></i></span><b id="c-batt"></b></span>
+                  </div>
+                </div>
+                <p id="c-line" class="line"></p>
+                <p id="c-lowbatt" class="alert-line" role="alert" hidden></p>
+                <section id="d-lights" class="lights" aria-label="Đèn trên phao" hidden>
+                  <label class="light"><i class="ph ph-lightbulb" aria-hidden="true"></i><span>Đèn 1</span><small id="d-light1-state" class="light-state"></small><input id="d-light1" class="switch" type="checkbox" role="switch" aria-label="Đèn 1"></label>
+                  <label class="light"><i class="ph ph-lightbulb" aria-hidden="true"></i><span>Đèn 2</span><small id="d-light2-state" class="light-state"></small><input id="d-light2" class="switch" type="checkbox" role="switch" aria-label="Đèn 2"></label>
+                </section>
+                <section id="d-health" class="kv-card" aria-label="Sức khoẻ phao" hidden>
+                  <h3>IMU và vùng LoRa</h3>
+                  <dl class="kv tiles">
+                    <dt>IMU</dt><dd id="h-imu"></dd>
+                    <dt>Lắc ngang</dt><dd id="h-roll"></dd>
+                    <dt>Chúi dọc</dt><dd id="h-pitch"></dd>
+                    <dt>Mũi tàu</dt><dd id="h-head"></dd>
+                    <dt>LoRa</dt><dd id="h-zone"></dd>
+                  </dl>
+                </section>
+                <section id="d-prog" class="kv-card" aria-label="Tiến độ lộ trình" hidden>
+                  <h3>Lộ trình</h3>
+                  <p id="h-prog" class="kv-line"></p>
+                </section>
+                <section id="d-diag" class="kv-card" aria-label="Máy tính Pi và mạch F407" hidden>
+                  <h3>Pi và F407 <small id="g-age"></small></h3>
+                  <dl class="kv tiles">
+                    <dt>Nhiệm vụ</dt><dd id="g-mission"></dd>
+                    <dt>Lệnh của Pi</dt><dd id="g-reason"></dd>
+                    <dt>Motor</dt><dd id="g-drive"></dd>
+                    <dt>Camera AI</dt><dd id="g-fps"></dd>
+                    <dt>Pin</dt><dd id="g-pack"></dd>
+                    <dt>Tự phục hồi</dt><dd id="g-recov"></dd>
+                  </dl>
+                </section>
+                <p id="c-route" class="route-line" hidden></p>
+                <p class="guest-only quiet small">Bạn đang xem với tư cách khách. Chỉ admin ra lệnh được.</p>
+                <!-- Pixhawk/MAVLink HUD: kept for the `pixhawk` boat, never shown on the dashboard for now -->
+                <section id="d-hud" class="hud" aria-label="Bảng lái HUD" hidden>
+                  <div id="hud-screen"></div>
+                  <div class="quick">
+                    <div class="q"><span class="k">Tốc độ</span><b id="q-gs">-</b><small>m/s</small></div>
+                    <div class="q"><span class="k">Cách WP</span><b id="q-wp">-</b><small id="q-wp-sub">m</small></div>
+                    <div class="q"><span class="k">Hướng</span><b id="q-hdg">-</b><small>độ</small></div>
+                    <div class="q"><span class="k">Ga</span><b id="q-thr">-</b><small>%</small></div>
+                    <div class="q"><span class="k">Pin</span><b id="q-batt">-</b><small id="q-batt-sub">V</small></div>
+                    <div class="q"><span class="k">Vệ tinh</span><b id="q-gps">-</b><small id="q-gps-sub">HDOP -</small></div>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <div id="buoys-view" data-panel="buoys" hidden>
+              <div id="list"></div>
+            </div>
+
+            <div id="log-view" data-panel="log" hidden>
+              <div id="tl-head">
+                <div id="tl-groups" class="seg" role="group" aria-label="Loại sự kiện">
+                  <button type="button" data-g="people" aria-pressed="true">Người gặp nạn <span class="count">0</span></button>
+                  <button type="button" data-g="ops" aria-pressed="false">Tàu &amp; lệnh <span class="count">0</span></button>
+                </div>
+                <button id="tl-clear" type="button" class="link-btn">Xoá nhật ký</button>
+              </div>
+              <ol id="timeline"></ol>
+            </div>
+
+            <!-- The weather panel and the legend (Leaflet controls of features/weather.js and victims.js) move in here -->
+            <div id="wx-slot" data-panel="wx" hidden></div>
+            <div id="legend-slot" data-panel="legend" hidden></div>
+          </div>
+
+          <!-- Route mode: waypoints only -->
+          <div class="panel" id="panel-mission">
+            <section id="m-head">
+              <div class="sec-head"><span id="m-sum" class="sum"></span></div>
+              <p id="m-hint" class="quiet small"></p>
+            </section>
+            <ol id="m-list"></ol>
+            <div id="m-actions">
+              <div class="row">
+                <button class="btn" id="m-undo" type="button"><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>Hoàn tác</button>
+                <button class="btn danger" id="m-clear" type="button"><i class="ph ph-trash" aria-hidden="true"></i>Xoá hết</button>
+              </div>
+              <label class="check"><input id="m-loop" type="checkbox"><span>Đi vòng: hết điểm cuối thì quay lại điểm đầu</span></label>
+              <button class="btn primary big" id="m-send" type="button"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i><span>Gửi tới phao</span></button>
+              <p id="m-sendstat" class="route-line" aria-live="polite" hidden></p>
+            </div>
+          </div>
+
+          <!-- Fleet mode: many boats, one shore station (docs/fleet-control.md) -->
+          <div class="panel" id="panel-fleet">
+            <section id="f-head">
+              <div class="sec-head"><h2>Đội tàu</h2><span id="f-count" class="count">0</span>
+                <button id="f-end" class="link-btn admin-only" type="button" hidden>Kết thúc đội hình</button></div>
+              <div id="f-list"></div>
+              <div class="f-cmds admin-only" role="group" aria-label="Lệnh cho cả đội">
+                <button class="btn small danger" id="f-hold-all" type="button" aria-label="Dừng tất cả phao" title="Dừng tất cả phao"><i class="ph ph-hand-palm" aria-hidden="true"></i>Dừng hết</button>
+                <button class="btn small" id="f-resume-all" type="button" aria-label="Cho tất cả phao chạy tiếp" title="Cho tất cả phao chạy tiếp"><i class="ph ph-play" aria-hidden="true"></i>Chạy tiếp</button>
+                <button class="btn small" id="f-return-all" type="button" aria-label="Gọi tất cả phao về bờ" title="Gọi tất cả phao về bờ"><i class="ph ph-house-line" aria-hidden="true"></i>Về bờ hết</button>
+              </div>
+            </section>
+            <section id="f-plan" class="admin-only" aria-labelledby="f-plan-title">
+              <div class="sec-head"><h2 id="f-plan-title">Giao nhiệm vụ</h2><span id="f-area-sum" class="sum"></span></div>
+              <p id="f-hint" class="quiet small"></p>
+              <div class="row">
+                <button class="btn small" id="f-area-undo" type="button"><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>Bỏ góc cuối</button>
+                <button class="btn small danger" id="f-area-clear" type="button"><i class="ph ph-trash" aria-hidden="true"></i>Xoá vùng</button>
+              </div>
+              <fieldset class="f-modes">
+                <legend class="sr-only">Cách giao</legend>
+                <label class="f-mode"><input type="radio" name="f-mode" value="sectors" checked><span><b>Chia vùng</b><small>Mỗi phao một dải, quét song song</small></span></label>
+                <label class="f-mode"><input type="radio" name="f-mode" value="formation"><span><b>Đội hình</b><small>Một phao dẫn, các phao giữ chỗ quanh nó</small></span></label>
+              </fieldset>
+              <div id="f-form-opts" class="f-opts" hidden>
+                <label>Dẫn đầu<select id="f-leader"></select></label>
+                <label>Dạng<select id="f-shape"><option value="line">Hàng ngang</option><option value="v">Chữ V</option><option value="column">Hàng dọc</option></select></label>
+              </div>
+              <div class="f-opts">
+                <label>Khoảng cách (m)<input id="f-spacing" type="number" min="2" max="200" step="1" value="10"></label>
+                <label class="check"><input id="f-loop" type="checkbox"><span>Đi vòng</span></label>
+              </div>
+              <div class="row">
+                <button class="btn" id="f-preview" type="button"><i class="ph ph-eye" aria-hidden="true"></i>Xem trước</button>
+                <button class="btn primary" id="f-send" type="button"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i>Gửi cho cả đội</button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </aside>
+
+      <!-- The buoy picked: step through the fleet, its speed, call it home -->
+      <div id="ctl" role="group" aria-label="Phao đang chọn" hidden>
+        <button id="ctl-prev" class="ctl-btn" type="button" aria-label="Phao trước" title="Phao trước"><i class="ph ph-caret-left" aria-hidden="true"></i></button>
+        <div class="ctl-id"><b id="ctl-name"></b><span id="ctl-st"><i class="dot" aria-hidden="true"></i><span></span></span></div>
+        <button id="ctl-next" class="ctl-btn" type="button" aria-label="Phao sau" title="Phao sau"><i class="ph ph-caret-right" aria-hidden="true"></i></button>
+        <div class="ctl-sog" title="Tốc độ theo GPS"><b id="ctl-sog">--</b><small>m/s</small></div>
+        <button id="ctl-home" class="ctl-btn admin-only" type="button" aria-label="Gọi về bờ" title="Gọi về bờ"><i class="ph ph-house-line" aria-hidden="true"></i></button>
+      </div>
+
       <div id="empty">
         <div class="radar" aria-hidden="true"><i></i></div>
         <b>Đang chờ tín hiệu</b>
@@ -257,6 +359,21 @@
     </div>
   </div>
 
+  <!-- Bottom dock: the three modes, the lights, and the stop button always in reach -->
+  <nav id="dock" aria-label="Chế độ và lệnh">
+    <div id="mode" role="tablist" aria-label="Chế độ">
+      <button type="button" data-m="monitor" role="tab" title="Giám sát"><i class="ph ph-binoculars" aria-hidden="true"></i><span class="lbl"><span>Giám sát</span></span></button>
+      <button type="button" data-m="mission" role="tab" title="Lộ trình"><i class="ph ph-path" aria-hidden="true"></i><span class="lbl"><span>Lộ trình</span></span></button>
+      <button type="button" data-m="fleet" role="tab" title="Đội tàu"><i class="ph ph-boat" aria-hidden="true"></i><span class="lbl"><span>Đội tàu</span></span></button>
+    </div>
+    <div class="dock-end">
+      <button id="dock-lights" class="dock-btn" type="button" aria-label="Đèn trên phao" title="Đèn trên phao" hidden><i class="ph ph-lightbulb" aria-hidden="true"></i><b></b></button>
+      <section id="d-hold" class="hold" aria-label="Dừng phao" hidden>
+        <p id="d-hold-state" class="hold-state" aria-live="polite"></p>
+        <button id="d-hold-btn" class="btn hold-btn stop" type="button">DỪNG PHAO</button>
+      </section>
+    </div>
+  </nav>
   <!-- Login screen: shown without a session -->
   <div id="login" hidden>
     <div class="login-grid" aria-hidden="true"></div>

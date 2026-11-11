@@ -7,6 +7,7 @@ import { renderHud } from './hud.js';
 import { renderLights } from './lights.js';
 import { renderHold } from './hold.js';
 import { renderHealth } from './health.js';
+import { renderGauges } from './gauges.js';
 
 const $ = id => document.getElementById(id);
 const SHOW_MAV_HUD = false;   // Pixhawk HUD stays in the code for the `pixhawk` boat but is not shown
@@ -19,6 +20,7 @@ export function renderDetail() {
   const b = state.buoys.get(id);
   $('card-empty').hidden = !!b;
   $('card-body').hidden = !b;
+  renderGauges();
   if (!b) return;
 
   $('c-name').textContent = id;
