@@ -1,6 +1,7 @@
 import { json, num, secretEquals } from "./util.js";
 import { adminEmails, devSignInUrl, makeSession, originOk, readSession, sessionCookie, verifyGoogleToken } from "./auth.js";
 import { sanitizeBuoy } from "./telemetry.js";
+import { parseTilePath, serveTile } from "./tiles.js";
 
 export { Hub } from "./hub.js";
 
@@ -151,10 +152,17 @@ async function adminCaller(request, env, session) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
     const hub = () => env.HUB.get(env.HUB.idFromName("main"));
+
+    // ---- Tile bản đồ qua cache của Cloudflare (src/tiles.js): công khai, như file tĩnh ----
+    if (path.startsWith("/tiles/")) {
+      const t = parseTilePath(path);
+      if (!t) return new Response("not found", { status: 404 });
+      return serveTile(request, t, { cache: caches.default, fetch: (u, i) => fetch(u, i), waitUntil: p => ctx.waitUntil(p) });
+    }
 
     // ---- Trạm bờ (ESP32) đẩy dữ liệu lên, xác thực bằng token riêng ----
     if (path === "/api/ingest") {
