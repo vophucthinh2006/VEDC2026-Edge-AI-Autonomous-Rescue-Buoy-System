@@ -13,7 +13,7 @@ import { initVictims, onVictimsSnapshot, onVictimMessage, onAlertMessage } from 
 import { initLights, onLightsMessage, revertLights } from './features/lights.js';
 import { initHold, onHoldMessage, revertHold, noteHold } from './features/hold.js';
 import { initSearch, renderPlace, minimizeSearch } from './features/search.js';
-import { initFleet, renderFleet, onFleetDownlink, onTaskMessage, onRetMessage, onLinkMessage, onFormationMessage, sendReturn, retOf } from './features/fleet.js';
+import { initFleet, renderFleet, onFleetDownlink, onTaskMessage, onRetMessage, onLinkMessage, onFormationMessage, sendReturn, retOf, formationRole } from './features/fleet.js';
 import { initGauges } from './features/gauges.js';
 
 const $ = id => document.getElementById(id);
@@ -84,16 +84,21 @@ let firstCentered = false;
 function applyFollowBtn() { $('btn-follow').setAttribute('aria-pressed', String(follow)); }
 
 // ================= GIÁM SÁT =================
+// The boat seen from above, bow up: pointed bow, square stern, the mast as a white dot (css/components.css .pin)
+const HULL = '<svg viewBox="0 0 16 32" width="16" height="32" aria-hidden="true"><path d="M8 1C12.5 7 14.5 14 14.5 21L13.5 31H2.5L1.5 21C1.5 14 3.5 7 8 1Z"/><circle cx="8" cy="17" r="2.2"/></svg>';
 function pinIcon(id, b) {
   const active = id === state.selected;
   const tone = STATUS[buoyStatus(id, b)].tone;
-  // Mũi tên hướng mũi phao khi có yaw (giống biểu tượng phương tiện trên Mission Planner)
-  const arrow = b.hasAttitude ? `<b class="hdg" style="transform:rotate(${b.yaw}deg)"></b>` : '';
-  // Mũi tên nét đứt: hướng đi thực theo GPS. Đứng yên thì hướng GPS vô nghĩa nên không vẽ
-  const cog = b.course !== null && (b.speed === null || b.speed >= 0.2) ? `<b class="cog" style="transform:rotate(${b.course}deg)"></b>` : '';
+  const role = formationRole(id);   // a new leader recolours on the next draw: nothing is remembered per buoy
+  // The hull turns to the bow: IMU yaw, else the GPS course while moving (standing still it means nothing)
+  const hdg = b.hasAttitude ? b.yaw : b.course !== null && (b.speed === null || b.speed >= 0.2) ? b.course : null;
+  // Solid line: where the bow points now. Dashed cyan: the heading the Pi asks for (target_yaw, none = -1)
+  const want = b.hasAttitude && b.targetYaw !== null ? `<b class="ray want" style="transform:rotate(${b.targetYaw}deg)"></b>` : '';
+  const body = hdg === null ? '<i></i>'
+    : `<b class="ray now" style="transform:rotate(${hdg}deg)"></b><span class="hull" style="transform:rotate(${hdg}deg)">${HULL}</span>`;
   return L.divIcon({
-    className: '', iconSize: [22, 22], iconAnchor: [11, 11],
-    html: `<div class="pin" data-tone="${tone}"${active ? ' data-active' : ''}>${cog}${arrow}<i></i></div>`,
+    className: '', iconSize: [64, 64], iconAnchor: [32, 32],
+    html: `<div class="pin" data-tone="${tone}"${role ? ` data-role="${role}"` : ''}${active ? ' data-active' : ''}>${want}${body}</div>`,
   });
 }
 
@@ -106,7 +111,7 @@ function updateMarker(id) {
     b.marker.setTooltipContent(label);
   } else {
     b.marker = L.marker([b.lat, b.lon], { icon: pinIcon(id, b), zIndexOffset: 100, title: `Phao ${id}` })
-      .bindTooltip(label, { direction: 'top', offset: [0, -12], className: 'tip' })
+      .bindTooltip(label, { direction: 'top', offset: [0, -20], className: 'tip' })
       .addTo(map)
       .on('click', () => select(id));
   }
@@ -713,7 +718,7 @@ function connect() {
     else if (m.type === 'task') onTaskMessage(m);
     else if (m.type === 'ret') onRetMessage(m);
     else if (m.type === 'link') onLinkMessage(m, !wsLive);
-    else if (m.type === 'formation') onFormationMessage(m);
+    else if (m.type === 'formation') { onFormationMessage(m); for (const k of state.buoys.keys()) updateMarker(k); }
     else onBuoyMessage(m);
   };
 }

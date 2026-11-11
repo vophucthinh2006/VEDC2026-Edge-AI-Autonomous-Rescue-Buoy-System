@@ -274,13 +274,15 @@ function legendControl() {
     const el = (cls, color) => { const i = document.createElement('i'); i.className = cls; if (color) i.style.background = color; i.setAttribute('aria-hidden', 'true'); return i; };
     for (const r of RISKS) item(el('dot', r.color), r.name);
     item(el('lg-buoy'), 'Phao');
+    item(el('lg-leader'), 'Dẫn đầu đội hình');
+    item(el('lg-follower'), 'Theo sau trong đội hình');
     item(el('lg-station'), 'Trạm bờ');
     const km = m => (m / 1000).toLocaleString('vi-VN', { maximumFractionDigits: 1 });
     item(el('lora'), `LoRa tốt (≤ ${km(LORA_GOOD_M)} km)`);
     item(el('lora weak'), `LoRa yếu (${km(LORA_GOOD_M)}–${km(LORA_WEAK_M)} km)`);
     item(el('ph-fill ph-warning warn-ic'), 'Phao lật');
-    item(el('hdg'), 'Mũi tàu');
-    item(el('cog'), 'Hướng đi');
+    item(el('hdg'), 'Mũi tàu hiện tại');
+    item(el('cog'), 'Hướng Pi yêu cầu');
     box.append(title, body);
     return box;
   };

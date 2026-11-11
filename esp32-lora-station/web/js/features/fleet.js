@@ -292,6 +292,11 @@ export function onLinkMessage(m, snapshot) {
 }
 export function onFormationMessage(m) { fleet.formation = m.formation; renderFleet(); }
 export const retOf = id => fleet.ret.get(id)?.want === true;
+// The buoy's place in the formation running now: 'leader', 'follower' or null (no formation, or not in it)
+export const formationRole = id => {
+  const f = fleet.formation;
+  return !f ? null : id === f.leader ? 'leader' : f.members && id in f.members ? 'follower' : null;
+};
 
 export function initFleet(m, c) {
   map = m; ctx = c;

@@ -44,5 +44,5 @@
 }
 [data-theme="light"] .map-legend .dot{ border-color:#0F172A; }
 [data-theme="light"] .switch:checked{ background:rgba(180,83,9,.18); }
-[data-theme="light"] .map-legend .cog{ border-top-color:#0F172A; }
+[data-theme="light"] .map-legend .cog{ border-top-color:#0E7490; }
 [data-theme="light"] .leaflet-tooltip.tip{ box-shadow:0 2px 8px rgba(15,23,42,.18); }

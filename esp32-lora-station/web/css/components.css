@@ -332,21 +332,34 @@ body[data-mode="mission"] #empty{ display:none; }
 .toast-x:hover{ background:rgba(255,255,255,.14); }
 
 /* ---------- Map markers ---------- */
-.pin{ --pin:var(--accent); position:relative; width:22px; height:22px; }
-.pin[data-tone="ok"]{ --pin:var(--ok); } .pin[data-tone="warn"]{ --pin:var(--warn); }
-.pin[data-tone="bad"]{ --pin:var(--bad); } .pin[data-tone="lost"]{ --pin:var(--dim); }
-.pin::before{ content:''; position:absolute; inset:0; border-radius:50%; border:2px solid var(--pin); opacity:.5; animation:ping 2.4s ease-out infinite; }
+/* Boat marker (js/app.js pinIcon): the hull seen from above, turned to the bow (IMU yaw, else the GPS course),
+   a solid line ahead of the bow and the heading the Pi asks for dashed in cyan, as on the heading gauge */
+.pin{ --st:var(--accent); --pin:var(--st); position:relative; width:64px; height:64px; }
+.pin[data-tone="ok"]{ --st:var(--ok); } .pin[data-tone="warn"]{ --st:var(--warn); }
+.pin[data-tone="bad"]{ --st:var(--bad); } .pin[data-tone="lost"]{ --st:var(--dim); }
+/* In a formation the hull says the role (leader / follower); the ring round it keeps the status colour */
+.pin[data-role="leader"], .map-legend .lg-leader{ --pin:#E879F9; }
+.pin[data-role="follower"], .map-legend .lg-follower{ --pin:#60A5FA; }
+.pin::before{ content:''; position:absolute; inset:16px; border-radius:50%; border:2px solid var(--st); opacity:.5; animation:ping 2.4s ease-out infinite; }
 .pin[data-tone="lost"]::before{ animation:none; opacity:.4; border-style:dashed; }
-.pin i{ position:absolute; inset:5px; border-radius:50%; background:var(--pin); border:2px solid #F8FAFC; box-shadow:0 1px 4px rgba(0,0,0,.6); }
-.pin[data-active] i{ inset:2px; }
 @keyframes ping{ 0%{ transform:scale(.6); opacity:.7; } 100%{ transform:scale(1.5); opacity:0; } }
-/* Bow arrow (IMU yaw) and dashed course arrow (GPS) */
-.pin .hdg{ position:absolute; left:50%; top:50%; width:0; height:0; z-index:1; transform-origin:0 0; pointer-events:none; }
-.pin .hdg::before{ content:''; position:absolute; left:-5px; top:-22px; border-left:5px solid transparent; border-right:5px solid transparent; border-bottom:10px solid var(--pin); filter:drop-shadow(0 1px 1px rgba(0,0,0,.7)); }
-.pin .hdg::after{ content:''; position:absolute; left:-1.5px; top:-14px; width:3px; height:7px; background:var(--pin); }
-.pin .cog{ position:absolute; left:50%; top:50%; width:0; height:0; transform-origin:0 0; pointer-events:none; filter:drop-shadow(0 0 1.5px rgba(0,0,0,.9)); }
-.pin .cog::before{ content:''; position:absolute; left:-1px; top:-36px; height:26px; border-left:2px dashed #F8FAFC; }
-.pin .cog::after{ content:''; position:absolute; left:-4px; top:-37px; width:8px; height:8px; border-left:2px solid #F8FAFC; border-top:2px solid #F8FAFC; transform:rotate(45deg); }
+.pin .ray{ position:absolute; left:50%; top:50%; width:0; height:0; transform-origin:0 0; pointer-events:none; filter:drop-shadow(0 0 1.5px rgba(0,0,0,.8)); }
+.pin .ray::before{ content:''; position:absolute; bottom:0; }
+.pin .ray.now::before{ left:-1.5px; height:44px; border-left:3px solid var(--text); }
+.pin .ray.want::before{ left:-1px; height:58px; border-left:2px dashed #22D3EE; }
+.pin .ray.want::after{ content:''; position:absolute; left:-5px; top:-62px; border-left:5px solid transparent; border-right:5px solid transparent; border-bottom:9px solid #22D3EE; }
+.pin .hull{ position:absolute; left:50%; top:50%; width:16px; height:32px; margin:-16px 0 0 -8px; filter:drop-shadow(0 1px 3px rgba(0,0,0,.7)); }
+.pin .hull svg{ display:block; overflow:visible; }
+.pin .hull path{ fill:var(--pin); stroke:#F8FAFC; stroke-width:1.5; stroke-linejoin:round; }
+.pin .hull circle{ fill:#F8FAFC; }
+.pin[data-active] .hull{ filter:drop-shadow(0 0 0 #fff) drop-shadow(0 0 5px var(--accent)) drop-shadow(0 1px 3px rgba(0,0,0,.7)); }
+.pin[data-active] .hull svg{ transform:scale(1.18); }
+.pin[data-tone="lost"] .hull{ opacity:.65; }
+/* No heading known (no IMU, standing still): a dot, so no direction is made up */
+.pin i{ position:absolute; inset:23px; border-radius:50%; background:var(--pin); border:2px solid #F8FAFC; box-shadow:0 1px 4px rgba(0,0,0,.6); }
+.pin[data-active] i{ inset:20px; }
+[data-theme="light"] .pin .ray.want::before{ border-left-color:#0E7490; }
+[data-theme="light"] .pin .ray.want::after{ border-bottom-color:#0E7490; }
 
 .station-pin{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:var(--station); border:2px solid #fff; border-radius:var(--r); box-shadow:0 0 0 3px rgba(239,68,68,.35), 0 2px 8px rgba(0,0,0,.6); color:#fff; }
 .station-pin .ph-fill{ font-size:17px; }
@@ -373,10 +386,11 @@ body[data-mode="mission"] #empty{ display:none; }
 .map-legend .b div{ display:flex; align-items:center; gap:8px; }
 .map-legend .dot{ width:11px; height:11px; border-radius:50%; border:1.5px solid #F8FAFC; flex:none; }
 .map-legend .lg-buoy{ width:11px; height:11px; border-radius:50%; background:var(--ok); border:2px solid #F8FAFC; flex:none; }
+.map-legend .lg-leader, .map-legend .lg-follower{ width:11px; height:11px; border-radius:50%; background:var(--pin); border:2px solid #F8FAFC; flex:none; }
 .map-legend .lg-station{ width:11px; height:11px; border-radius:3px; background:var(--station); border:1.5px solid #fff; flex:none; }
 .map-legend .warn-ic{ color:var(--bad); font-size:13px; width:11px; }
-.map-legend .hdg,.map-legend .cog{ width:11px; height:0; border-top:2px solid var(--ok); flex:none; }
-.map-legend .cog{ border-top:2px dashed #F8FAFC; }
+.map-legend .hdg,.map-legend .cog{ width:14px; height:0; border-top:3px solid var(--text); flex:none; }
+.map-legend .cog{ border-top:2px dashed #22D3EE; }
 .map-legend .lora{ width:11px; height:11px; border-radius:50%; border:1.5px solid var(--station); background:rgba(239,68,68,.12); flex:none; }
 .map-legend .lora.weak{ border-style:dashed; background:none; }
 .leaflet-popup.pop .leaflet-popup-content-wrapper,.leaflet-popup.pop .leaflet-popup-tip{ background:var(--panel); color:var(--text); border:1px solid var(--line-2); }
