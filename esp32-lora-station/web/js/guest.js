@@ -4,6 +4,7 @@
 // The data is the Hub's WebSocket stream, the same as the console's, read with the same rules (state.js).
 import { state, readBuoy, buoyStatus, stationStatus, RISKS, LORA_GOOD_M, LORA_WEAK_M } from './state.js';
 import { distM, bearingDeg, compassWord } from './util/geo.js';
+import { addBaseMap, prefetchAround } from './util/basemap.js';
 import { fmtDist, fmtAgo, hm } from './util/format.js';
 import { initWeather, onFloodMessage } from './features/weather.js';
 
@@ -23,6 +24,11 @@ const SAY = {
   lost:      { text: 'Tạm mất liên lạc', tone: 'lost' },
 };
 const ACTIVE = new Set(['patrol', 'returning', 'stopped', 'idle']);   // heard lately and upright
+// The same, short, for the buoy chips
+const SHORT = { patrol: 'Đang tìm kiếm', returning: 'Về trạm', stopped: 'Tạm dừng', idle: 'Chờ điều động', capsized: 'Gặp sự cố', lost: 'Mất liên lạc' };
+// ?mock: dev/mock.js stands in for the Worker (never deployed, .assetsignore)
+const MOCK = new URLSearchParams(location.search).has('mock');
+let mockOn = false;   // dev/mock.js loaded: no guest session to open
 
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
@@ -40,7 +46,7 @@ const icon = name => { const i = el('i', 'ph ' + name); i.setAttribute('aria-hid
 // ================= MAP =================
 const map = L.map('map', { zoomControl: false }).setView(DEFAULT_VIEW, 6);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+addBaseMap(map);
 // The map's box is laid out by the grid after Leaflet first measures it: measure again whenever it changes,
 // and fit the home area only once the box has a size (fitted at 0 x 0 it zooms all the way in)
 let fitDue = null;
@@ -122,6 +128,7 @@ function onStation(m) {
   if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) { s.lat = m.lat; s.lon = m.lon; s.hasPos = true; }
   state.station = s;
   render();
+  if (s.hasPos) prefetchAround(s.lat, s.lon);
 }
 
 function onAlert(a) {
@@ -146,16 +153,42 @@ function onMessage(m) {
 }
 
 // ================= RENDER =================
+// The page is drawn as numbers and pictures (docs/guest-page-ui.md). The home card is built once in index.html and
+// only its values change, so nothing flickers or replays its entrance every time a beacon comes in.
 let renderDue = false;
 function render() {
   if (renderDue) return;
   renderDue = true;
-  requestAnimationFrame(() => { renderDue = false; drawMap(); drawArea(); drawOverall(); drawFeed(); drawBuoys(); });
+  const run = () => { if (!renderDue) return; renderDue = false; drawMap(); drawArea(); drawOverall(); drawFeed(); drawBuoys(); };
+  requestAnimationFrame(run);
+  setTimeout(run, 250);   // a tab in the background gets no animation frames: still drawn, ready when looked at
 }
 
 const buoysWithPos = () => [...state.buoys.entries()].filter(([, b]) => b.hasPos);
 const near = p => q => Number.isFinite(q.lat) && Number.isFinite(q.lon) && distM(p, q) <= AREA_M;
 const ordered = list => list.sort((a, b) => b.risk - a.risk || b.last_at - a.last_at);
+const calm = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function setText(node, t) { if (node && node.textContent !== t) node.textContent = t; }
+
+// A count that changed rolls up to its new value (at once when motion is reduced or the page is hidden)
+function countTo(node, n) {
+  const to = Number(n) || 0;
+  if (node.dataset.v === String(to)) return;
+  const from = Number(node.dataset.v ?? 0) || 0;
+  node.dataset.v = String(to);
+  if (calm.matches || document.hidden || from === to) { node.textContent = String(to); return; }
+  const t0 = performance.now(), dur = 650;
+  const step = t => {
+    if (node.dataset.v !== String(to)) return;   // a newer value took over
+    const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    node.textContent = String(Math.round(from + (to - from) * e));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  // A browser that holds animation frames back (a tab in the background) still ends on the right number
+  setTimeout(() => { if (node.dataset.v === String(to)) node.textContent = String(to); }, dur + 80);
+}
 
 function buoyIcon(id, b) {
   const say = SAY[buoyStatus(id, b)];
@@ -165,9 +198,9 @@ function buoyIcon(id, b) {
 
 // Where a person's rescue stands, in plain words (docs/victim-claim.md): who is with them, done, or waiting
 function rescueStatus(v) {
-  if (v.status === 'rescued') return { text: `Đã được cứu${Number.isFinite(v.status_at) ? ' lúc ' + hm(new Date(v.status_at)) : ''}`, tone: 'ok' };
-  if (v.status === 'released') return { text: 'Đang chờ phao khác tới', tone: 'warn' };
-  if (v.status === 'claimed' && v.owner) return { text: `Phao ${v.owner} đang hỗ trợ`, tone: 'ok' };
+  if (v.status === 'rescued') return { text: `Đã được cứu${Number.isFinite(v.status_at) ? ' lúc ' + hm(new Date(v.status_at)) : ''}`, short: 'Đã được cứu', tone: 'ok' };
+  if (v.status === 'released') return { text: 'Đang chờ phao khác tới', short: 'Chờ phao', tone: 'warn' };
+  if (v.status === 'claimed' && v.owner) return { text: `Phao ${v.owner} đang hỗ trợ`, short: 'Phao đang tới', tone: 'ok' };
   return null;
 }
 
@@ -226,6 +259,8 @@ function drawMap() {
 
 function drawPlace() {
   placeLayer.clearLayers();
+  $('map-home').hidden = !place;
+  document.querySelector('.lg-home-row').hidden = !place;
   if (!place) return;
   L.circle([place.lat, place.lon], { radius: AREA_M, color: '#7C3AED', weight: 2, opacity: .85, dashArray: '6 6', fillColor: '#7C3AED', fillOpacity: .05, interactive: false }).addTo(placeLayer);
   L.marker([place.lat, place.lon], { zIndexOffset: 1500, keyboard: false, icon: L.divIcon({ className: '', iconSize: [30, 38], iconAnchor: [15, 36],
@@ -233,91 +268,178 @@ function drawPlace() {
     .bindTooltip(place.name.split(',')[0], { direction: 'top', offset: [0, -34], className: 'g-tip' }).addTo(placeLayer);
 }
 
-// The answer to "how is it at home": one sentence first, then the facts behind it
+// How it is at home, in one coloured word: someone in danger, someone to rescue, buoys searching, nobody yet
+const AREA_TONE = {
+  bad:  { ic: 'ph-warning' },
+  warn: { ic: 'ph-user-focus' },
+  ok:   { ic: 'ph-lifebuoy' },
+  idle: { ic: 'ph-clock' },
+};
+const LORA_ZONE = {
+  good: { text: 'Trong vùng liên lạc tốt', ic: 'ph-wifi-high' },
+  edge: { text: 'Rìa vùng liên lạc: tin có thể chậm', ic: 'ph-wifi-medium' },
+  out:  { text: 'Ngoài vùng liên lạc của trạm bờ', ic: 'ph-wifi-slash' },
+};
+let picking = false;      // "Đổi": the search shows again in place of the home card
+const seenPeople = new Set();
+
 function drawArea() {
   const box = $('area');
-  if (!place) { box.hidden = true; return; }
+  $('pick').hidden = !!place && !picking;
+  $('pick-cancel').hidden = !place;
+  box.hidden = !place || picking;
+  $('people-card').hidden = true;
+  if (!place) return;
   const p = { lat: place.lat, lon: place.lon };
   const buoys = buoysWithPos().filter(([, b]) => distM(p, b) <= AREA_M);
   const active = buoys.filter(([id, b]) => ACTIVE.has(buoyStatus(id, b)));
+  const searching = active.filter(([id, b]) => buoyStatus(id, b) === 'patrol').length;
   const people = ordered([...victims.values()].filter(near(p)));
-  const aid = alerts.filter(a => a.type === 'C').filter(near(p));
+  const open = people.filter(v => v.status !== 'rescued');
+  const claimsKnown = [...victims.values()].some(v => v.status);
+  const helped = Math.max(people.filter(v => v.status === 'rescued').length,
+    claimsKnown ? 0 : alerts.filter(a => a.type === 'C').filter(near(p)).length);
   const nearest = buoysWithPos().map(([id, b]) => ({ id, b, d: distM(p, b) })).sort((x, y) => x.d - y.d)[0];
 
-  const head = el('div', 'g-area-head');
-  const name = el('div');
-  name.append(el('small', '', 'Nơi bạn đang theo dõi'), el('h2', '', place.name.split(',').slice(0, 2).join(',')));
-  const change = el('button', 'g-link', 'Đổi');
-  change.type = 'button';
-  change.addEventListener('click', () => { $('place-q').focus(); $('place-q').select(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
-  const share = el('button', 'g-share');
-  share.type = 'button';
-  share.append(icon('ph-share-network'), document.createTextNode('Gửi cho người nhà'));
-  share.addEventListener('click', () => sharePlace(share));
-  head.append(name, change);
+  setText($('a-name'), place.name.split(',').slice(0, 2).join(','));
 
-  const searching = active.filter(([id, b]) => buoyStatus(id, b) === 'patrol').length;
-  let summary;
-  if (!active.length) summary = nearest
-    ? `Chưa có phao cứu hộ nào trong vòng ${AREA_M / 1000} km. Phao gần nhất cách ${fmtDist(nearest.d)}.`
-    : 'Chưa có phao cứu hộ nào báo về.';
-  else summary = `Có ${active.length} phao cứu hộ trong vòng ${AREA_M / 1000} km` + (searching ? `, ${searching} phao đang tìm kiếm.` : '.');
-  if (people.length) summary += ` Đã phát hiện ${people.length} người cần cứu ở khu vực này.`;
-  if (aid.length) summary += ` ${aid.length} người đã nhận đồ cứu trợ.`;
-  const lead = el('p', 'g-lead', summary);
-  lead.dataset.tone = people.some(v => v.risk >= 2) ? 'bad' : active.length ? 'ok' : 'idle';
+  // The ring: the most urgent thing first
+  let tone, text;
+  const need = open.filter(v => v.risk >= 1);   // "An toàn": found, not in danger
+  if (need.some(v => v.risk >= 3)) { tone = 'bad'; text = 'Có người nguy kịch'; }
+  else if (need.length) { tone = 'warn'; text = need.length > 1 ? `${need.length} người cần cứu` : 'Có người cần cứu'; }
+  else if (active.length) { tone = 'ok'; text = searching ? 'Phao đang tìm kiếm' : 'Có phao gần nhà'; }
+  else { tone = 'idle'; text = nearest ? 'Chưa có phao gần nhà' : 'Chưa có phao báo về'; }
+  const st = $('a-status');
+  if (st.dataset.tone !== tone) st.dataset.tone = tone;
+  $('a-status-ic').className = 'ph-fill ' + AREA_TONE[tone].ic;
+  setText($('a-status-text'), text);
 
-  const facts = el('ul', 'g-facts');
-  if (nearest) {
-    const say = SAY[buoyStatus(nearest.id, nearest.b)];
-    const li = el('li');
-    li.append(icon('ph-lifebuoy'), el('span', '', `Phao gần nhất: ${nearest.id}, cách ${fmtDist(nearest.d)} về phía ${compassWord(bearingDeg(p, nearest.b))}. `));
-    const pill = el('span', 'g-pill', say.text); pill.dataset.tone = say.tone;
-    li.append(pill);
-    facts.append(li);
-  }
   const s = state.station;
-  if (s && s.hasPos) {
+  const lora = $('a-lora');
+  lora.hidden = !(s && s.hasPos);
+  if (!lora.hidden) {
     const d = distM(p, s);
-    const li = el('li');
-    li.append(icon('ph-broadcast'), el('span', '', d <= LORA_GOOD_M ? 'Nằm trong vùng liên lạc tốt của trạm bờ.'
-      : d <= LORA_WEAK_M ? 'Ở rìa vùng liên lạc của trạm bờ: tin báo về có thể chậm.' : 'Ngoài vùng liên lạc của trạm bờ hiện tại.'));
-    facts.append(li);
+    const zone = d <= LORA_GOOD_M ? 'good' : d <= LORA_WEAK_M ? 'edge' : 'out';
+    lora.dataset.zone = zone;
+    lora.firstElementChild.className = 'ph ' + LORA_ZONE[zone].ic;
+    setText(lora.lastElementChild, LORA_ZONE[zone].text);
   }
-  box.replaceChildren(head, lead, facts);
-  box.append(homeWeather(p));
-  const shareRow = el('div', 'g-share-row');
-  shareRow.append(share, el('span', 'g-hint', 'Để cả nhà cùng theo dõi nơi này'));
 
-  if (people.length) {
-    const list = el('ul', 'g-people');
-    for (const v of people.slice(0, 6)) {
-      const li = el('li'); const b = el('button'); b.type = 'button';
-      const dot = el('i', 'g-dot'); dot.style.background = RISKS[v.risk].color;
-      const text = el('span'); text.append(el('b', '', 'Mức ' + RISKS[v.risk].name.toLowerCase()),
-        el('small', '', `cách nhà ${fmtDist(distM(p, v))}, thấy lần cuối ${fmtAgo(v.last_at)}`));
-      const st = rescueStatus(v);
-      if (st) { const pill = el('span', 'g-pill', st.text); pill.dataset.tone = st.tone; text.append(pill); }
-      b.append(dot, text);
-      b.addEventListener('click', () => map.flyTo([v.lat, v.lon], 17, { duration: .6 }));
-      li.append(b); list.append(li);
-    }
-    box.append(el('h3', '', 'Người được phát hiện gần nhà'), list);
+  countTo($('a-buoys'), active.length);
+  countTo($('a-people'), people.length);
+  countTo($('a-aid'), helped);
+  const tile = $('a-near-tile');
+  if (nearest) {
+    const [num, unit] = fmtDist(nearest.d).split(' ');
+    const deg = bearingDeg(p, nearest.b);
+    setText($('a-near'), num);
+    setText($('a-near-unit'), ' ' + unit);
+    setText($('a-near-dir'), `phía ${compassWord(deg)}`);
+    $('a-near-arrow').style.transform = `rotate(${Math.round(deg + 45)}deg)`;   // Phosphor's arrow points north-west
+    tile.title = `Phao gần nhất: ${nearest.id}, ${SAY[buoyStatus(nearest.id, nearest.b)].text.toLowerCase()}`;
+  } else {
+    setText($('a-near'), '--'); setText($('a-near-unit'), ''); setText($('a-near-dir'), 'chưa có phao');
   }
-  box.append(shareRow);
-  box.hidden = false;
+
+  drawHomeWeather(p);
+  drawPeople(p, people);
+}
+
+// The weather at home: rain to come and the river at the nearest gauge, as two small pictures
+function drawHomeWeather(p) {
+  const rain = $('w-rain'), river = $('w-river');
+  rain.dataset.empty = String(!homeWx);
+  river.dataset.empty = String(!homeWx);
+  $('w-more').hidden = true;
+  if (!homeWx) return;
+
+  const hours = (homeWx.forecast?.hours || []).slice(0, 24);
+  const bars = $('w-rain-bars');
+  if (bars.children.length !== 24) bars.replaceChildren(...Array.from({ length: 24 }, () => el('i')));
+  if (!hours.length) {
+    setText($('w-rain-mm'), '--'); setText($('w-rain-sub'), ''); setText($('w-rain-peak'), 'Chưa có dự báo');
+    for (const b of bars.children) b.style.transform = 'scaleY(.06)';
+  } else {
+    const total = hours.reduce((sum, h) => sum + (h.rain_mm || 0), 0), prob = Math.max(...hours.map(h => h.prob ?? 0));
+    const peak = hours.reduce((a, h) => ((h.rain_mm || 0) > (a.rain_mm || 0) ? h : a), hours[0]);
+    const top = Math.max(2, peak.rain_mm || 0);
+    setText($('w-rain-mm'), total < 0.1 ? '0' : total.toLocaleString('vi-VN', { maximumFractionDigits: total < 10 ? 1 : 0 }));
+    setText($('w-rain-sub'), ` mm · ${prob}%`);
+    setText($('w-rain-peak'), total < 0.1 ? 'Không mưa' : peak.rain_mm >= 2 ? `To nhất khoảng ${hm(new Date(peak.t))}` : 'Mưa nhỏ');
+    rain.dataset.heavy = String(total >= 50 || peak.rain_mm >= 10);
+    rain.title = `Mưa 24 giờ tới: ${total.toLocaleString('vi-VN', { maximumFractionDigits: 1 })} mm, khả năng mưa ${prob}%`;
+    [...bars.children].forEach((b, i) => {
+      const mm = hours[i]?.rain_mm || 0;
+      b.style.transform = `scaleY(${Math.max(0.06, mm / top).toFixed(3)})`;
+      b.dataset.big = String(mm >= 8);
+    });
+  }
+
+  const withLevel = homeWx.gauges.filter(g => g.level_m !== null && Number.isFinite(g.lat));
+  const nearby = withLevel.map(g => ({ g, km: distM(p, g) / 1000 })).sort((a, b) => a.km - b.km);
+  if (!nearby.length) {
+    setText($('w-river-name'), 'Mực nước sông'); setText($('w-river-m'), '--'); setText($('w-river-at'), 'Chưa có trạm đo gần');
+    river.dataset.alarm = '0';
+    $('w-river-mark').style.left = '12.5%';
+    setText($('w-river-mark').firstElementChild, '');
+    return;
+  }
+  const { g, km } = nearby[0];
+  setText($('w-river-name'), `Sông ${g.river || g.name}`);
+  setText($('w-river-m'), g.level_m.toLocaleString('vi-VN'));
+  setText($('w-river-at'), `Trạm ${g.name} · ${fmtDist(km * 1000)}`);
+  river.dataset.alarm = String(g.alarm);
+  river.title = `Sông ${g.river || g.name} ở trạm ${g.name}: ${g.level_m.toLocaleString('vi-VN')} m, ${ALARM_TEXT[g.alarm]}` + (g.at ? `, đo lúc ${hm(new Date(g.at))}` : '');
+  $('w-river-mark').style.left = `${g.alarm * 25 + 12.5}%`;   // the band it is in: the thresholds themselves are not published
+  setText($('w-river-mark').firstElementChild, g.alarm ? `BĐ${g.alarm}` : 'Dưới BĐ');
+  const alarmed = nearby.filter(x => x.km <= GAUGE_NEAR_KM && x.g.alarm > 0 && x.g !== g);
+  if (alarmed.length) {
+    $('w-more').hidden = false;
+    const t = `${alarmed.length} trạm khác trong ${GAUGE_NEAR_KM} km vượt báo động`;
+    setText($('w-more').lastElementChild, t);
+    $('w-more').title = alarmed.slice(0, 5).map(x => `${x.g.name} (BĐ${x.g.alarm})`).join(', ');
+  }
+}
+
+// People found near home: danger dot, level, how far from home, how long ago, where the rescue stands
+function drawPeople(p, people) {
+  const card = $('people-card');
+  card.hidden = !people.length;
+  if (!people.length) return;
+  const first = !seenPeople.size;
+  $('near-list').replaceChildren(...people.slice(0, 6).map(v => {
+    const li = el('li');
+    if (!first && !seenPeople.has(v.vid)) li.className = 'new';
+    seenPeople.add(v.vid);
+    const b = el('button'); b.type = 'button';
+    const dot = el('i', 'g-dot'); dot.style.setProperty('--c', RISKS[v.risk].color);
+    const text = el('span', 'g-pmain');
+    const meta = el('span', 'g-meta');
+    const dist = el('span'); dist.title = 'Cách nhà'; dist.append(icon('ph-house-line'), document.createTextNode(fmtDist(distM(p, v))));
+    const ago = el('span'); ago.title = `Thấy lần cuối ${fmtAgo(v.last_at)}`; ago.append(icon('ph-clock'), document.createTextNode(fmtAgo(v.last_at).replace(' trước', '')));
+    meta.append(dist, ago);
+    text.append(el('b', '', RISKS[v.risk].name), meta);
+    b.append(dot, text);
+    const st = rescueStatus(v);
+    if (st) { const pill = el('span', 'g-pill', st.short); pill.dataset.tone = st.tone; pill.title = st.text; b.append(pill); }
+    b.setAttribute('aria-label', `Mức ${RISKS[v.risk].name.toLowerCase()}, cách nhà ${fmtDist(distM(p, v))}, thấy lần cuối ${fmtAgo(v.last_at)}${st ? ', ' + st.text.toLowerCase() : ''}. Xem trên bản đồ`);
+    b.addEventListener('click', () => map.flyTo([v.lat, v.lon], 17, { duration: .6 }));
+    li.append(b);
+    return li;
+  }));
 }
 
 function drawOverall() {
   const all = [...state.buoys.entries()];
   const active = all.filter(([id, b]) => ACTIVE.has(buoyStatus(id, b)));
-  $('s-buoys').textContent = all.length ? `${active.length}/${all.length}` : '0';
-  $('s-people').textContent = String(victims.size + alerts.filter(a => a.type === 'V').length);
+  setText($('s-buoys'), all.length ? `${active.length}/${all.length}` : '0');
+  countTo($('s-people'), victims.size + alerts.filter(a => a.type === 'V').length);
   const rescued = [...victims.values()].filter(v => v.status === 'rescued').length;
-  $('s-aid').textContent = String(Math.max(rescued, alerts.filter(a => a.type === 'C').length));
+  countTo($('s-aid'), Math.max(rescued, alerts.filter(a => a.type === 'C').length));
   drawTrend();
   const last = Math.max(0, ...all.map(([, b]) => b.lastSeen || 0));
-  $('s-updated').textContent = last ? `Tin mới nhất từ phao: ${fmtAgo(last)}.` : '';
+  setText($('s-updated'), last ? `Tin mới nhất từ phao: ${fmtAgo(last)}` : '');
 }
 
 function feedItems() {
@@ -325,31 +447,36 @@ function feedItems() {
   const claimsKnown = [...victims.values()].some(v => v.status);
   for (const v of victims.values()) {
     items.push({ at: v.first_at, tone: 'bad', ic: 'ph-user-focus', pos: v,
-      text: `${v.buoy} phát hiện một người cần cứu, mức ${RISKS[v.risk].name.toLowerCase()}` });
+      text: `${v.buoy} thấy một người, mức ${RISKS[v.risk].name.toLowerCase()}` });
     if (v.status === 'rescued') items.push({ at: v.status_at, tone: 'ok', ic: 'ph-hand-heart', pos: v,
-      text: `Người do ${v.buoy} phát hiện đã được cứu${v.owner && v.owner !== v.buoy ? ` (phao ${v.owner})` : ''}` });
+      text: `Người do ${v.buoy} thấy đã được cứu${v.owner && v.owner !== v.buoy ? ` (phao ${v.owner})` : ''}` });
   }
   for (const a of alerts) {
     const pos = Number.isFinite(a.lat) && Number.isFinite(a.lon) ? a : null;
     // The confirm button: said by the person's "rescued" line above when the Worker keeps who looks after whom
     if (a.type === 'C') { if (!claimsKnown) items.push({ at: a.at, tone: 'ok', ic: 'ph-hand-heart', pos, text: `Một người đã nhận đồ cứu trợ từ ${a.buoy}` }); }
     else if (a.type === 'T') items.push({ at: a.at, tone: 'bad', ic: 'ph-warning', pos, text: `${a.buoy} gặp sự cố (bị lật)` });
-    else items.push({ at: a.at, tone: 'bad', ic: 'ph-user-focus', pos: null, text: `${a.buoy} phát hiện một người, chưa xác định được vị trí` });
+    else items.push({ at: a.at, tone: 'bad', ic: 'ph-user-focus', pos: null, text: `${a.buoy} thấy một người, chưa rõ vị trí` });
   }
   for (const c of changes) items.push({ at: c.at, tone: SAY[c.status].tone, ic: 'ph-lifebuoy', pos: state.buoys.get(c.buoy),
     text: `${c.buoy}: ${SAY[c.status].text.toLowerCase()}` });
   return items.filter(i => Number.isFinite(i.at)).sort((a, b) => b.at - a.at).slice(0, FEED_MAX);
 }
 
+const seenFeed = new Set();
 function drawFeed() {
   const items = feedItems();
   $('feed-empty').hidden = items.length > 0;
+  const first = !seenFeed.size;
   $('feed').replaceChildren(...items.map(i => {
+    const key = `${i.at}|${i.text}`;
     const li = el('li'); li.dataset.tone = i.tone;
-    const time = el('time', '', hm(new Date(i.at)));
-    time.title = fmtAgo(i.at);
-    const body = el('span', '', i.text);
-    li.append(icon(i.ic), body, time);
+    if (!first && !seenFeed.has(key)) li.classList.add('new');   // slides in at the top
+    seenFeed.add(key);
+    const ic = el('span', 'f-ic'); ic.append(icon(i.ic));
+    const time = el('time', '', fmtAgo(i.at).replace(' trước', ''));
+    time.title = hm(new Date(i.at));
+    li.append(ic, el('span', 'f-t', i.text), time);
     if (i.pos && Number.isFinite(i.pos.lat)) {
       li.classList.add('go');
       li.tabIndex = 0;
@@ -368,52 +495,15 @@ function drawBuoys() {
   $('buoys-empty').hidden = rows.length > 0;
   $('buoys').replaceChildren(...rows.map(({ id, b, d }) => {
     const say = SAY[buoyStatus(id, b)];
-    const li = el('li'); const btn = el('button'); btn.type = 'button';
-    const name = el('span', 'g-bname'); name.append(el('b', '', id), el('small', '', 'cập nhật ' + fmtAgo(b.lastSeen) + (Number.isFinite(d) ? ` · cách nhà ${fmtDist(d)}` : '')));
-    const pill = el('span', 'g-pill', say.text); pill.dataset.tone = say.tone;
-    btn.append(name, pill);
+    const li = el('li'); const btn = el('button'); btn.type = 'button'; btn.className = 'g-chip';
+    btn.dataset.tone = say.tone;
+    btn.title = `${say.text} · cập nhật ${fmtAgo(b.lastSeen)}${Number.isFinite(d) ? ` · cách nhà ${fmtDist(d)}` : ''}`;
+    btn.append(el('i', 'g-cdot'), el('b', '', id), el('span', '', SHORT[buoyStatus(id, b)]));
     if (b.hasPos) btn.addEventListener('click', () => map.flyTo([b.lat, b.lon], 16, { duration: .6 }));
+    else btn.disabled = true;
     li.append(btn);
     return li;
   }));
-}
-
-// The weather at home in plain words: rain to come, the river at the nearest gauge, gauges in alarm round it
-function homeWeather(p) {
-  const box = el('div', 'g-wx');
-  box.append(el('h3', '', 'Thời tiết và mực nước ở đây'));
-  if (!homeWx) { box.append(el('p', 'g-hint', 'Đang lấy dự báo và mực nước sông…')); return box; }
-  const list = el('ul', 'g-facts');
-  const hours = homeWx.forecast?.hours || [];
-  if (hours.length) {
-    const total = hours.reduce((s, h) => s + (h.rain_mm || 0), 0), prob = Math.max(...hours.map(h => h.prob ?? 0));
-    const peak = hours.reduce((a, h) => ((h.rain_mm || 0) > (a.rain_mm || 0) ? h : a), hours[0]);
-    const li = el('li');
-    li.append(icon('ph-cloud-rain'), el('span', '', total < 0.1 ? 'Không có mưa trong 24 giờ tới.'
-      : `Mưa 24 giờ tới khoảng ${total.toLocaleString('vi-VN', { maximumFractionDigits: 1 })} mm, khả năng ${prob}%` +
-        (peak.rain_mm >= 2 ? `; mưa to nhất khoảng ${hm(new Date(peak.t))}.` : '.')));
-    list.append(li);
-  }
-  const withLevel = homeWx.gauges.filter(g => g.level_m !== null && Number.isFinite(g.lat));
-  const near = withLevel.map(g => ({ g, km: distM(p, g) / 1000 })).sort((a, b) => a.km - b.km);
-  if (near.length) {
-    const { g, km } = near[0];
-    const li = el('li');
-    li.append(icon('ph-waves'), el('span', '', `Sông ${g.river || g.name} ở trạm ${g.name} (cách ${fmtDist(km * 1000)}): ` +
-      `${g.level_m.toLocaleString('vi-VN')} m, ${ALARM_TEXT[g.alarm]}` + (g.at ? `, đo lúc ${hm(new Date(g.at))}.` : '.')));
-    if (g.alarm) { const pill = el('span', 'g-pill', `Báo động ${g.alarm}`); pill.dataset.tone = g.alarm >= 2 ? 'bad' : 'warn'; li.append(pill); }
-    list.append(li);
-    const alarmed = near.filter(x => x.km <= GAUGE_NEAR_KM && x.g.alarm > 0 && x.g !== g);
-    if (alarmed.length) {
-      const li2 = el('li');
-      li2.append(icon('ph-warning'), el('span', '', `${alarmed.length} trạm khác trong ${GAUGE_NEAR_KM} km đang vượt báo động: ` +
-        alarmed.slice(0, 3).map(x => `${x.g.name} (BĐ${x.g.alarm})`).join(', ') + '.'));
-      list.append(li2);
-    }
-  }
-  if (!list.children.length) { box.append(el('p', 'g-hint', 'Chưa lấy được dự báo và mực nước sông cho nơi này.')); return box; }
-  box.append(list, el('p', 'g-hint', 'Nguồn: Open-Meteo (dự báo), KTTV qua vndms.gov.vn (mực nước). Bật lớp "Thời tiết & ngập" trên bản đồ để xem radar mưa và vùng ngập.'));
-  return box;
 }
 
 // "Gửi cho người nhà": a link that opens this page on the same place (the phone's share sheet, else copied)
@@ -421,9 +511,8 @@ async function sharePlace(btn) {
   const url = `${location.origin}/?` + new URLSearchParams({ p: `${place.lat.toFixed(5)},${place.lon.toFixed(5)}`, n: place.name });
   const title = `Tình hình cứu hộ ở ${place.name.split(',')[0]}`;
   const done = text => {
-    const old = btn.lastChild.textContent;
-    btn.lastChild.textContent = text; btn.disabled = true;
-    setTimeout(() => { btn.lastChild.textContent = old; btn.disabled = false; }, 2500);
+    btn.dataset.tip = text; btn.classList.add('done');
+    setTimeout(() => { btn.classList.remove('done'); delete btn.dataset.tip; }, 2500);
   };
   try {
     if (navigator.share) { await navigator.share({ title, text: title, url }); return; }
@@ -437,6 +526,7 @@ async function sharePlace(btn) {
 
 // People found and rescued, hour by hour, the last TREND_HOURS hours (HTML bars, a sentence for screen readers)
 const TREND_HOURS = 12;
+let trendSig = '';
 function drawTrend() {
   const box = $('trend');
   const now = new Date(), end = new Date(now); end.setMinutes(0, 0, 0);
@@ -448,6 +538,9 @@ function drawTrend() {
   for (const a of alerts) if (a.type === 'V') add(found, a.at);
   const claimsKnown = [...victims.values()].some(v => v.status);
   if (!claimsKnown) for (const a of alerts) if (a.type === 'C') add(saved, a.at);   // older Worker: the confirm presses
+  const sig = `${start}|${found}|${saved}`;
+  if (sig === trendSig) return;   // redrawn only when it changed: the bars grow once, not every 15 s
+  trendSig = sig;
   const peak = Math.max(1, ...found, ...saved), totalF = found.reduce((a, b) => a + b, 0), totalS = saved.reduce((a, b) => a + b, 0);
   const chart = el('div', 'g-trend-chart');
   chart.setAttribute('role', 'img');
@@ -456,6 +549,7 @@ function drawTrend() {
     const h = new Date(start + i * 3600e3).getHours();
     const col = el('div', 'g-trend-col');
     col.title = `${h}h–${h + 1}h: ${found[i]} phát hiện, ${saved[i]} được cứu`;
+    col.style.setProperty('--d', `${i * 35}ms`);
     const bars = el('div', 'g-trend-bars');
     for (const [n, cls] of [[found[i], 'f'], [saved[i], 's']]) {
       const bar = el('i', cls);
@@ -463,17 +557,18 @@ function drawTrend() {
       if (n) bar.dataset.n = n;
       bars.append(bar);
     }
-    col.append(bars, el('span', '', i % 3 === 2 || i === TREND_HOURS - 1 ? `${h}h` : ''));
+    col.append(bars, el('span', '', i % 3 === 2 || i === TREND_HOURS - 1 ? (i === TREND_HOURS - 1 ? 'Giờ này' : `${h}h`) : ''));
     chart.append(col);
   }
   const legend = el('div', 'g-trend-legend');
-  legend.append(el('span', 'f', `Được phát hiện: ${totalF}`), el('span', 's', `Được cứu: ${totalS}`));
+  legend.append(el('span', 'f', `Phát hiện ${totalF}`), el('span', 's', `Được cứu ${totalS}`));
   box.replaceChildren(legend, chart);
 }
 
 // ================= HOME PLACE =================
 function setPlace(p) {
   place = p;
+  picking = false;
   store.set(PLACE_KEY, p);
   $('place-choices').hidden = true;
   $('place-msg').hidden = true;
@@ -487,6 +582,15 @@ function setPlace(p) {
 }
 
 function say(text) { const m = $('place-msg'); m.textContent = text; m.hidden = false; }
+
+// "Đổi": the search comes back in place of the home card; "Giữ nơi cũ" puts the card back
+$('a-change').addEventListener('click', () => {
+  picking = true; render();
+  requestAnimationFrame(() => { $('pick').scrollIntoView({ behavior: calm.matches ? 'auto' : 'smooth', block: 'start' }); $('place-q').focus(); });
+});
+$('pick-cancel').addEventListener('click', () => { picking = false; $('place-choices').hidden = true; $('place-msg').hidden = true; render(); });
+$('a-share').addEventListener('click', e => sharePlace(e.currentTarget));
+$('map-home').addEventListener('click', () => { if (place) fitArea(place); });
 
 $('place-form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -529,7 +633,7 @@ async function session() {
 }
 
 async function connect() {
-  if (!(await session())) { setLive(false); setTimeout(connect, 3000); return; }
+  if (!mockOn && !(await session())) { setLive(false); setTimeout(connect, 3000); return; }
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
   ws.onopen = () => { setLive(true); loadHomeWeather(); };   // the weather at home needs the session just made
   ws.onclose = () => { setLive(false); setTimeout(connect, 2000); };
@@ -539,5 +643,11 @@ async function connect() {
 
 if (place) { drawPlace(); fitArea(place); centered = true; }
 render();
-connect();
+if (MOCK) {
+  const s = document.createElement('script');
+  s.src = '/dev/mock.js';
+  s.onload = () => { mockOn = true; connect(); };
+  s.onerror = connect;   // deployed there is no mock (.assetsignore): the real stream then
+  document.head.append(s);
+} else connect();
 setInterval(render, 15000);   // "x phút trước" and "tạm mất liên lạc" move on with the clock

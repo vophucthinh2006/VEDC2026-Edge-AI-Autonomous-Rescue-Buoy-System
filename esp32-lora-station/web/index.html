@@ -21,7 +21,7 @@
 <body>
 <header class="g-top">
   <a class="g-brand" href="/">
-    <img src="/img/logo.png" alt="" width="34" height="34">
+    <img src="/img/logo.png" alt="" width="36" height="36">
     <span><b>Theo dõi cứu hộ lũ</b><small>Cập nhật trực tiếp từ các phao cứu hộ</small></span>
   </a>
   <span id="g-live" class="g-live" data-up="false" role="status"><i aria-hidden="true"></i><span>Đang kết nối</span></span>
@@ -29,7 +29,17 @@
 
 <main class="g-main">
   <div class="g-scroll">
-    <section class="g-card g-place" aria-labelledby="place-title">
+    <!-- No home yet (or changing it): where is home? -->
+    <section id="pick" class="g-card g-pick" aria-labelledby="place-title" style="--i:0">
+      <svg class="g-pick-art" viewBox="0 0 200 110" aria-hidden="true">
+        <path class="w1" d="M0 86c25-10 50-10 75 0s50 10 75 0 35-10 50-4v28H0z"></path>
+        <path class="w2" d="M0 96c25-8 50-8 75 0s50 8 75 0 35-8 50-3v17H0z"></path>
+        <path class="house" d="M40 80V52l26-20 26 20v28z"></path>
+        <path class="door" d="M58 80V62h16v18"></path>
+        <circle class="glow" cx="150" cy="70" r="22"></circle>
+        <circle class="buoy" cx="150" cy="70" r="13"></circle>
+        <path class="buoy-x" d="M141 61l5 5M154 74l5 5M159 61l-5 5M146 74l-5 5"></path>
+      </svg>
       <h1 id="place-title">Quê nhà bạn ở đâu?</h1>
       <p class="g-hint">Nhập xã, huyện hoặc tỉnh để xem tình hình cứu hộ ở đó.</p>
       <form id="place-form" class="g-search" role="search" autocomplete="off">
@@ -38,34 +48,81 @@
         <button type="submit">Xem</button>
       </form>
       <ul id="place-choices" class="g-choices" hidden></ul>
-      <p id="place-msg" class="g-msg" hidden></p>
+      <p id="place-msg" class="g-msg" role="status" hidden></p>
+      <button id="pick-cancel" class="g-link" type="button" hidden>Giữ nơi cũ</button>
     </section>
 
-    <section id="area" class="g-card g-area" aria-live="polite" hidden></section>
+    <!-- Home: how is it there, as numbers and pictures (js/guest.js drawArea) -->
+    <section id="area" class="g-card g-hero" aria-label="Quê nhà" hidden style="--i:0">
+      <div class="h-head">
+        <span class="h-pin" aria-hidden="true"><i class="ph-fill ph-map-pin"></i></span>
+        <div class="h-name"><small>Quê nhà bạn</small><h2 id="a-name"></h2></div>
+        <button id="a-change" class="g-link" type="button">Đổi</button>
+        <button id="a-share" class="g-iconbtn" type="button" aria-label="Gửi cho người nhà" title="Gửi cho người nhà"><i class="ph ph-share-network" aria-hidden="true"></i></button>
+      </div>
 
-    <section class="g-card" aria-labelledby="overall-title">
+      <div id="a-status" class="h-status" data-tone="idle" role="status" aria-live="polite">
+        <span class="h-ring" aria-hidden="true"><i class="glow"></i><i class="ring"></i><i id="a-status-ic" class="ph-fill ph-clock"></i></span>
+        <div class="h-say">
+          <b id="a-status-text">Đang xem tình hình…</b>
+          <span>trong 5 km quanh nhà</span>
+          <span id="a-lora" class="h-lora" data-zone="" hidden><i class="ph ph-wifi-high" aria-hidden="true"></i><span></span></span>
+        </div>
+      </div>
+
+      <div class="h-tiles">
+        <div class="h-tile" title="Phao cứu hộ đang hoạt động trong 5 km"><i class="ph ph-lifebuoy" aria-hidden="true"></i><b id="a-buoys">0</b><span>phao gần nhà</span></div>
+        <div class="h-tile t-people" title="Người được phát hiện trong 5 km"><i class="ph ph-user-focus" aria-hidden="true"></i><b id="a-people">0</b><span>được phát hiện</span></div>
+        <div class="h-tile t-aid" title="Người đã được cứu hoặc nhận đồ cứu trợ trong 5 km"><i class="ph ph-hand-heart" aria-hidden="true"></i><b id="a-aid">0</b><span>đã được giúp</span></div>
+        <div class="h-tile" id="a-near-tile" title="Phao gần nhà nhất"><i id="a-near-arrow" class="ph-fill ph-navigation-arrow h-arrow" aria-hidden="true"></i><b><span id="a-near">--</span><small id="a-near-unit"></small></b><span id="a-near-dir">phao gần nhất</span></div>
+      </div>
+
+      <div class="h-wx">
+        <div id="w-rain" class="h-wtile" data-empty="true" title="Mưa 24 giờ tới">
+          <span class="k"><i class="ph ph-cloud-rain" aria-hidden="true"></i>Mưa 24 giờ</span>
+          <b><span id="w-rain-mm">--</span><small id="w-rain-sub"></small></b>
+          <div id="w-rain-bars" class="h-bars" aria-hidden="true"></div>
+          <span id="w-rain-peak" class="s"></span>
+        </div>
+        <div id="w-river" class="h-wtile" data-empty="true" data-alarm="0">
+          <span class="k"><i class="ph ph-waves" aria-hidden="true"></i><span id="w-river-name">Mực nước sông</span></span>
+          <b><span id="w-river-m">--</span><small> m</small></b>
+          <div class="h-scale" aria-hidden="true"><i></i><i></i><i></i><i></i><span id="w-river-mark"><em></em></span></div>
+          <span id="w-river-at" class="s"></span>
+        </div>
+      </div>
+      <p id="w-more" class="h-more" hidden><i class="ph-fill ph-warning" aria-hidden="true"></i><span></span></p>
+      <p class="g-hint h-src">Dự báo: Open-Meteo · Mực nước: KTTV (vndms.gov.vn)</p>
+    </section>
+
+    <section id="people-card" class="g-card" aria-labelledby="people-title" hidden style="--i:1">
+      <h2 id="people-title">Người được phát hiện gần nhà</h2>
+      <ul id="near-list" class="g-people"></ul>
+    </section>
+
+    <section class="g-card" aria-labelledby="overall-title" style="--i:2">
       <h2 id="overall-title">Toàn vùng cứu hộ</h2>
       <div class="g-stats">
-        <div><b id="s-buoys">-</b><span>phao đang liên lạc</span></div>
-        <div><b id="s-people">-</b><span>người được phát hiện</span></div>
-        <div><b id="s-aid">-</b><span>người đã nhận đồ cứu trợ</span></div>
+        <div class="c-buoy"><b id="s-buoys">-</b><span>phao liên lạc</span></div>
+        <div class="c-people"><b id="s-people">-</b><span>người phát hiện</span></div>
+        <div class="c-aid"><b id="s-aid">-</b><span>được giúp</span></div>
       </div>
       <p id="s-updated" class="g-hint"></p>
     </section>
-    <section class="g-card" aria-labelledby="trend-title">
-      <h2 id="trend-title">Diễn biến trong ngày</h2>
-      <p class="g-hint">Số người được phát hiện và được cứu theo từng giờ, 12 giờ gần nhất.</p>
+
+    <section class="g-card" aria-labelledby="trend-title" style="--i:3">
+      <h2 id="trend-title">12 giờ qua</h2>
       <div id="trend" class="g-trend"></div>
     </section>
 
-    <section class="g-card" aria-labelledby="feed-title">
-      <h2 id="feed-title">Diễn biến mới nhất</h2>
+    <section class="g-card" aria-labelledby="feed-title" style="--i:4">
+      <h2 id="feed-title">Tin mới</h2>
       <ol id="feed" class="g-feed"></ol>
-      <p id="feed-empty" class="g-hint">Chưa có diễn biến nào. Trang tự cập nhật khi phao báo về.</p>
+      <p id="feed-empty" class="g-hint">Chưa có tin nào. Trang tự cập nhật khi phao báo về.</p>
     </section>
 
-    <section class="g-card" aria-labelledby="buoys-title">
-      <h2 id="buoys-title">Các phao cứu hộ</h2>
+    <section class="g-card" aria-labelledby="buoys-title" style="--i:5">
+      <h2 id="buoys-title">Các phao</h2>
       <ul id="buoys" class="g-buoys"></ul>
       <p id="buoys-empty" class="g-hint">Chưa có phao nào báo về.</p>
     </section>
@@ -78,11 +135,12 @@
 
   <div class="g-mapwrap">
     <div id="map" aria-label="Bản đồ phao cứu hộ và người được phát hiện"></div>
+    <button id="map-home" class="g-maptool" type="button" aria-label="Về quê nhà trên bản đồ" title="Về quê nhà" hidden><i class="ph ph-house-line" aria-hidden="true"></i></button>
     <div class="g-legend" aria-hidden="true">
+      <span class="lg-home-row" hidden><i class="lg-home"></i>Nhà bạn</span>
       <span><i class="lg-buoy"></i>Phao</span>
       <span><i class="lg-person"></i>Người cần cứu</span>
       <span><i class="lg-station"></i>Trạm bờ</span>
-      <span><i class="lg-cover"></i>Vùng liên lạc</span>
     </div>
   </div>
 </main>
