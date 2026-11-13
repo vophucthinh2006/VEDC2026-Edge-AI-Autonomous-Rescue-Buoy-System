@@ -1,0 +1,19 @@
+# Raspberry Pi 5 overlay for testing one buoy with its STM32F407.
+# UART0 on GPIO14/15 transports $NAV (motor/steering), $CAM (camera servo),
+# camera detections, IMU/GPS, and all safety feedback. Pi 5's /dev/serial0 is
+# its dedicated debug UART, so this uses UART0 directly.
+serial:
+  # USB-UART STM32F407, confirmed on this Pi 5: /dev/ttyUSB0.
+  stm32_port: /dev/serial/by-path/platform-xhci-hcd.0-usb-0:1:1.0-port0
+
+camera:
+  device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._rapoo_camera_SN0001-video-index0
+
+# A test buoy detects and follows people without a route from the shore
+# station. --no-lidar in run_buoy_test.py keeps the test independent of the
+# optional LiDAR hardware.
+follow:
+  only_on_route: false
+camera:
+  scan:
+    always: true

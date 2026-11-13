@@ -189,7 +189,7 @@
 /* Overturned for this long after the first tilt event: report it once more, with the boat's GPS then. */
 #define TILT_REPEAT_MS             30000U
 
-/* Battery: INA226 on I2C1 next to the BNO055 (0x44 on this boat; any of 0x40..0x4F is found), IN+/IN- in series with the pack.
+/* Battery: INA226 on I2C1 (PB8/PB9; 0x44 on this boat; any of 0x40..0x4F is found), IN+/IN- in series with the pack.
    Many INA226 modules carry a 0.1 ohm shunt (R100), which reads up to 0.8 A only: measure the shunt on
    yours and set it here before trusting the current. The charge needs the voltage only. */
 #define INA226_ENABLED             1

@@ -84,10 +84,6 @@ void Error_Handler(void);
 #define LORA_NSS_GPIO_Port GPIOB
 #define BNO055_RST_Pin GPIO_PIN_6
 #define BNO055_RST_GPIO_Port GPIOC
-#define GPS_SW_LED_Pin GPIO_PIN_9
-#define GPS_SW_LED_GPIO_Port GPIOC
-#define GPS_SW_Pin GPIO_PIN_8
-#define GPS_SW_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 

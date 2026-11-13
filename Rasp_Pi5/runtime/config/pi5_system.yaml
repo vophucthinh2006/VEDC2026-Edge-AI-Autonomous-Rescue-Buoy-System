@@ -1,0 +1,19 @@
+# Raspberry Pi 5 I/O overlay for the complete STM32F407 / shore / web system.
+#
+# Unlike a Raspberry Pi 4, a Pi 5 uses its dedicated debug UART as serial0 by
+# default.  The production program therefore names UART0 on GPIO14/15 directly
+# instead of relying on /dev/serial0.  Enable the hardware UART and disable its
+# login shell before using this configuration (see ../README.md).
+#
+# The LiDAR port is UART1 on the Pi 5 header.  If the real buoy instead uses a
+# USB-to-TTL adapter, pass a later --overlay that sets serial.lidar_port to the
+# stable /dev/serial/by-id/... path reported by tools/port_probe.py.
+serial:
+  # USB-UART STM32F407, confirmed on this Pi 5: /dev/ttyUSB0.
+  stm32_port: /dev/serial/by-path/platform-xhci-hcd.0-usb-0:1:1.0-port0
+  # USB-UART LD14, confirmed on this Pi 5: /dev/ttyUSB1.
+  lidar_port: /dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0
+
+camera:
+  device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._rapoo_camera_SN0001-video-index0
+

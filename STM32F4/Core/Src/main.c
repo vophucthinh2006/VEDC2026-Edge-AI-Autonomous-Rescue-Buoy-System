@@ -156,6 +156,7 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_I2C1_Init();
+  MX_I2C3_Init();
   MX_SPI2_Init();
   MX_USART3_UART_Init();
   MX_USART1_UART_Init();
@@ -179,7 +180,7 @@ int main(void)
   Buzzer_Beep(1U);         /* firmware is up */
 #endif
   ImuWatchdog_Init(&imu_watchdog, IMU_Init(), HAL_GetTick());   /* a failed init is tried again */
-  Battery_Init(&hi2c1);    /* INA226 on the BNO055's bus */
+  Battery_Init(&hi2c1);    /* INA226 remains on I2C1 (PB8/PB9); BNO055 uses I2C3. */
 
   HAL_UART_Receive_IT(&huart4, &pi_rx_byte, 1U);
   HAL_UART_Receive_IT(&huart3, &gps_rx_byte, 1U);
@@ -203,26 +204,27 @@ int main(void)
     if ((uint32_t)(now - last_control) >= CONTROL_PERIOD_MS)
     {
       last_control = now;
-      /* A stuck I2C bus is recovered instead of read: each transfer on it waited 25 ms for nothing. */
-      bool bus_ok = I2cBus_Ready(&hi2c1, now);
-      bool imu_read = bus_ok && IMU_Read(&imu);
+      /* The BNO055 and INA226 now have separate I2C buses; recover one without blocking the other. */
+      bool imu_bus_ok = I2cBus_Ready(&hi2c3, now);
+      bool battery_bus_ok = I2cBus_Ready(&hi2c1, now);
+      bool imu_read = imu_bus_ok && IMU_Read(&imu);
       if (imu_read) control.last_imu_ms = now;
-      else if (!bus_ok) imu.valid = false;
+      else if (!imu_bus_ok) imu.valid = false;
       ImuWatchdog_OnRead(&imu_watchdog, imu_read, now);
-      if (bus_ok) Battery_Tick(now);   /* same bus as the IMU, after it, never during */
+      if (battery_bus_ok) Battery_Tick(now);
 #if !HW_TEST_ENABLED
       /* The BNO055 lost, or reset by itself: started again. That blocks ~0.7..2 s, so every motor is
          stopped first (HwTest never does it: its motor time limit would stall meanwhile). A lost
          IMU has disarmed the boat already; only BENCH_IGNORE_IMU drives on without one, and the
          stand is then left driving. A sensor that reset itself reads zeros that look fresh: that
          one is stopped and started again whatever the boat does. */
-      if (bus_ok && ImuWatchdog_CheckDue(&imu_watchdog, now))
+      if (imu_bus_ok && ImuWatchdog_CheckDue(&imu_watchdog, now))
         ImuWatchdog_OnModeCheck(&imu_watchdog, IMU_SensorReset(), now);
       bool driving = control.operating_mode == 'A';
       if (ImuWatchdog_ReinitDue(&imu_watchdog, now) && (!driving || imu_watchdog.cause == IMU_CAUSE_MODE))
       {
         Control_Stop(&control);
-        if (!bus_ok) I2cBus_Recover(&hi2c1);
+        if (!imu_bus_ok) I2cBus_Recover(&hi2c3);
         bool ok = IMU_Init();
         now = HAL_GetTick();
         ImuWatchdog_OnReinit(&imu_watchdog, ok, now);

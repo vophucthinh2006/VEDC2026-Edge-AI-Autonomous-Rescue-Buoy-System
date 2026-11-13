@@ -106,8 +106,8 @@ cấu hình đầy đủ: pinout, clock tree, tham số từng ngoại vi, và b
 | UART Raspberry Pi | UART4 | PC10 TX, PC11 RX | 115200 8N1, RX interrupt | Pi GPIO15/RXD0 ← PC10; Pi GPIO14/TXD0 → PC11 |
 | GPS Holybro M10 V2 | USART3 | PB10 TX, PB11 RX | 9600 8N1, RX interrupt | GPS TX → PB11; GPS RX ← PB10 |
 | (không dùng) USART2 | USART2 | PA2 (single-wire half-duplex) | 115200 8N1 | từng là iBUS của receiver FS-iA6B; đã bỏ tay cầm, firmware không đọc nữa (CubeMX vẫn khởi tạo) |
-| IMU BNO055 | I2C1 | PB8 SCL, PB9 SDA | Fast Mode 400 kHz | địa chỉ 0x29 (ADR thả nổi) |
-| Pin INA226 | I2C1 (chung với BNO055) | PB8 SCL, PB9 SDA | 0x40 (A0 = A1 = GND) | IN+ / IN− nối tiếp đường pin; đo shunt của module rồi đặt `INA226_SHUNT_OHM` |
+| IMU BNO055 | I2C3 | PA8 SCL, PC9 SDA | Fast Mode 400 kHz | địa chỉ 0x28 (ADD = GND) |
+| Pin INA226 | I2C1 | PB8 SCL, PB9 SDA | 0x40 (A0 = A1 = GND) | IN+ / IN− nối tiếp đường pin; đo shunt của module rồi đặt `INA226_SHUNT_OHM` |
 | Reset BNO055 | GPIO_Output | PB5 | mức cao khi chạy | chân nRESET của module |
 | ESC sau trái | TIM2_CH1 | PA5 | PWM 50 Hz, một chiều, **dừng và kích hoạt = 1500 µs**, **ga 1550–2000 µs** | chỉ dây signal + GND |
 | ESC sau phải | TIM2_CH4 | PA3 | PWM 50 Hz, một chiều, **dừng và kích hoạt = 1500 µs**, **ga 1550–2000 µs** | chỉ dây signal + GND |
@@ -164,11 +164,10 @@ méo hoặc mất hẳn. `MX_GPIO_Init()` đặt PE3 lên cao trước khi timer
 **Không cắm gì vào cổng USB OTG (CN5).** PA9/PA10 là VBUS và ID của cổng đó. Cắm thiết bị
 vào là 5 V trên VBUS chống lại chân USART1_TX. Chỉ dùng CN1 (ST-LINK) để nạp và cấp nguồn.
 
-**PB9 đã có điện trở pull-up sẵn, PB8 thì không.** PB6/PB9 là bus I2C của codec CS43L22
-trên board nên PB9 được pull-up sẵn. Codec nằm cùng bus ở địa chỉ 0x4A, bị giữ reset bởi
-PD4 nên không quấy bus. Module GY-BNO055 thường có pull-up riêng nên thường vẫn chạy;
-nếu `BNO055_Init()` trả `ERR_I2C` thì gắn 4.7 kΩ từ **PB8 lên 3.3 V** là thứ đáng thử đầu
-tiên. **Không bật I2S2/I2S3** vì PC7 và PB10 dính vào codec và micro MEMS.
+**BNO055 dùng I2C3: PA8 là SCL, PC9 là SDA.** Hai chân này thay thế hoàn toàn PB8/PB9
+cho IMU. Đường I2C phải có pull-up lên 3.3 V (nhiều GY-BNO055 đã có sẵn); nếu `BNO055_Init()`
+trả `ERR_I2C`, kiểm tra dây, nguồn 3.3 V/GND và pull-up 4.7 kΩ. PB8/PB9 vẫn là I2C1 riêng
+cho INA226. **Không bật I2S2/I2S3** vì PC7 và PB10 dính vào codec và micro MEMS.
 
 ---
 
@@ -363,7 +362,7 @@ lại khi đổi module hoặc đổi vị trí gá:
 |---|---|---|
 | 0 | `BNO055_OK` | chạy tốt |
 | 1 | `ERR_PARAM` | lỗi code, không xảy ra khi dùng bình thường |
-| 2 | `ERR_I2C` | NACK hoặc lỗi bus — sai dây SCL/SDA, thiếu pull-up ở PB8, hoặc còn cắm ở PB6/PB7 cũ |
+| 2 | `ERR_I2C` | NACK hoặc lỗi bus — sai dây SCL/SDA tại PA8/PC9, thiếu pull-up lên 3.3 V, hoặc còn cắm ở PB8/PB9 cũ |
 | 3 | `ERR_TIMEOUT` | cảm biến không sẵn sàng kịp — nguồn yếu, hoặc chân reset kẹt mức thấp |
 | 4 | `ERR_CHIP_ID` | bus thông nhưng CHIP_ID ≠ 0xA0 — nhiều khả năng sai địa chỉ, thử 0x28 |
 | 5 | `ERR_MODE` | ghi OPR_MODE nhưng đọc lại không khớp |
@@ -378,7 +377,7 @@ Triệu chứng khác:
 | Đã arm mà motor không chạy | Pi không lái: chưa có lộ trình từ dashboard, Pi gửi STOP (`gps_stale_or_no_fix`, `no_goal`...) hoặc Pi im (`heading_debug.block` = 2) |
 | GPS không có fix, `gps.fix` = 0 | baud USART3. Holybro M10 nhiều khả năng mặc định **38400** chứ không phải 9600 — xác minh bằng u-center |
 | PWM ESC trái méo hoặc mất | PE3 không ở mức cao → LIS3DSH đang đẩy tín hiệu vào PA6 |
-| `bno055_read_status` thỉnh thoảng nhảy 2 | nhiễu I2C — dây dài, thiếu pull-up ở PB8 |
+| `bno055_read_status` thỉnh thoảng nhảy 2 | nhiễu I2C — dây dài, thiếu pull-up tại PA8/PC9 |
 | Dashboard vẽ số vô lý | địa chỉ trong flow đã lệch sau khi sửa firmware — xem mục 7 |
 | Treo trong `SystemClock_Config()` | chỉ xảy ra sau khi chuyển sang HSE — đổi sang `BYPASS Clock Source` |
 

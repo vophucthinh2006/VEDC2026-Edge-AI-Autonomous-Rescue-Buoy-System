@@ -1,0 +1,225 @@
+serial:
+  stm32_port: /dev/serial0
+  stm32_baud: 115200
+  lidar_port: /dev/ttyAMA3
+  lidar_baud: 115200
+  # ld14: LDROBOT LD14, the fitted module (115200 baud; an LD14P runs at 230400, set lidar_baud).
+  # lds008: the earlier robot-vacuum unit, decoded as its sibling LDS-006. none (main.py only): no LiDAR.
+  lidar_model: ld14
+vehicle:
+  lidar_yaw_offset_deg: -8.0 # LiDAR angle zero -> bow; positive clockwise. An object at the bow read 8 deg on the LD14 (bench, 2026-10-18)
+  lidar_anticlockwise: false # true if the LiDAR's angle grows anticlockwise seen from above
+  # The boat's own parts in the scan (modules/lidar_serial.py), in the LiDAR's own angles, before
+  # lidar_yaw_offset_deg. Any return nearer than lidar_min_range_m is dropped (the mast and cables
+  # next to the LD14 show at 0.10 m), and in each [from_deg, to_deg, max_m] of lidar_mask any return
+  # up to max_m. Find them with the boat in open space: python3 tools/lidar_near.py PORT
+  lidar_min_range_m: 0.30
+  lidar_mask:                # measured on the bench 2026-10-18, a margin added to each
+    - [226, 251, 0.95]       # boat part toward the stern: 0.59..0.87 m at 228..249 deg
+    - [175, 180, 0.80]       # boat part astern: 0.69 m at 177..178 deg
+  boat_radius_m: 0.35
+  safety_margin_m: 0.40
+  max_speed_mps: 0.50
+  approach_speed_mps: 0.20
+  stop_distance_m: 1.00
+  slow_distance_m: 2.00
+  influence_distance_m: 3.00
+  # main.py: the F407 turns the Pi's speed into a throttle open-loop, and the boat may run several
+  # times that speed (the simulator: 1.43 m/s when told 0.29). The stop and slow distances, and the
+  # stand-off from a person, grow by the way the boat still goes once the throttle is cut, at the
+  # speed the GPS measures: reaction_s of it (a NAV round trip), then the coast, about v * coast_s
+  # (simulator, 2026-10-22: 0.65 m/s to rest in 2.1 m, 0.64 in 1.4 m). Tune both on the water.
+  reaction_s: 0.5
+  coast_s: 3.0
+  # The throttle goes off while the GPS speed is more than overspeed_mps above the speed given, and
+  # comes back below half of that margin (reason overspeed). 0: off.
+  overspeed_mps: 0.30
+  # main.py: the boat cannot turn on the spot; swinging away from an obstacle it first goes on along
+  # its bow. An obstacle on the bow (or on the course over the ground) less than turn_room_m plus the
+  # braking distance clear of the hull keeps it stopped (bow_blocked) instead of driving onto it.
+  turn_room_m: 0.50
+  arrive_radius_m: 4.0
+  target_standoff_m: 2.0
+  # main.py: the water kept between the bow and the person, and how far the bow is ahead
+  # of the LiDAR and camera that measure the person's range (LD14 at 0.30 m, bow at 0.55 m from the
+  # hull's centre, sim/models/vedc_buoy). The boat holds at a range of person_gap_m + bow_ahead_m.
+  # 2 m off the bow, on the water and on the stand alike (the team, 2026-10-22).
+  person_gap_m: 2.0
+  bow_ahead_m: 0.25
+  target_timeout_s: 2.0
+  # main.py (STM32 boat): the bow follows the camera. With the person more than face_tolerance_deg
+  # off the bow the boat turns to them at face_speed_mps before going to them, and keeps the bow on
+  # them at the stand-off (the STM32 only steers while it is given a speed).
+  face_tolerance_deg: 10.0
+  face_speed_mps: 0.15
+  max_turn_rate_deg_s: 35.0
+  max_pitch_deg: 35.0
+  max_roll_deg: 35.0
+  nav_ttl_ms: 300
+  lidar_stale_s: 0.50
+  # false only while the LD14 is not fitted: AUTO then runs with NO obstacle avoidance.
+  lidar_required: false
+  imu_stale_s: 0.30
+  gps_stale_s: 2.0
+  # true: no AUTO to a waypoint or home without a fresh GPS fix (gps_stale_or_no_fix); a person is
+  # followed anyway (the camera's bearing). false (main.py, indoors where no fix ever comes): the
+  # route's speed along the bow instead (bow_no_gps), the LiDAR still avoiding.
+  gps_required: true
+planner:
+  attractive_gain: 1.0
+  repulsive_gain: 0.75
+  bias_gain: 0.22
+  preferred_side: starboard
+  front_fov_deg: 110.0
+  cluster_gap_m: 0.25
+camera:
+  enabled: true
+  device: 0
+  camera_lost_s: 2.0          # no frame for this long: warn once, release the camera, reopen it every camera_lost_s
+  horizontal_fov_deg: 60.0    # OV9726 with the 60 deg lens
+  # yolo_movenet: the team's YOLOv8n (person, boat) + MoveNet pose, from ../YOLO_Movenet/weights.
+  # ssd: the earlier COCO SSD MobileNet v1, model_path: models/detect.tflite.
+  model: yolo_movenet
+  model_path: ../YOLO_Movenet/weights/yolov8n_640_int8.tflite
+  pose_model_path: ../YOLO_Movenet/weights/movenet_lighting_int8.tflite
+  # CPU threads of YOLO and MoveNet (tflite-runtime num_threads). Unset, the runtime's default: one
+  # thread, one of the Pi 4's four cores. The log says the detector's frames a second every 30 s
+  # ("detector: ... frames/s"): compare there before changing it.
+  num_threads: 4
+  # yolov8n_640_int8: int8 inside, float in and out, 640 px; the model of YOLO_Movenet (c902916). On the Pi 4 about
+  # 0.78 s a frame (the 320 px yolov8n_320_drq it replaced: 0.24 s). On 30 frames of
+  # YOLO_Movenet/videos/rescue_test1..3 it found a person in 22 (the 320 drq in 11), small and far ones
+  # included, but every score sits at 0.50: the threshold only splits found from not found.
+  # Somebody standing far off on a bank can come out in the water: too small for the pose to show their legs.
+  confidence_threshold: 0.35
+  nms_threshold: 0.45
+  on_boat_overlap: 0.4          # a person box this much inside a boat box is on the boat: not a victim
+  water_lower_body_score: 0.25  # hips, knees, ankles scored below this on average: in the water
+  near_camera_margin: 0.03      # unless the box reaches this close to the bottom edge (of the frame height): legs cut off by the frame
+  max_poses: 3                  # MoveNet runs on at most this many people a frame (the nearest); the others are MEDIUM
+  # Risk of each person (modules/edge_model.py): SAFE on a boat, MEDIUM lower body seen, HIGH in
+  # the water, CRITICAL in the water with signs of drowning: both wrists above the shoulders (each of
+  # the four keypoints scored wrist_score or more), or only the head above the water (both
+  # shoulders below shoulder_hidden_score while the nose or an eye reaches head_score).
+  risk:
+    wrist_score: 0.3
+    shoulder_hidden_score: 0.2
+    head_score: 0.3
+  detection_hold_s: 0.40
+  report_cooldown_s: 10.0
+  lidar_association_half_angle_deg: 8.0
+  min_target_distance_m: 1.0
+  max_target_distance_m: 8.0
+  # lidar: range from the LiDAR return at the person's bearing, none without one.
+  # bbox: range from the person box height (no LiDAR, about +-30 %).
+  # fused: the LiDAR return when there is one, else the box.
+  distance_source: bbox
+  vertical_fov_deg: 47.0      # 60 deg horizontal at 4:3; calibrate with a person at a measured distance
+  # Height the box covers. 1.7 is a standing person; a swimmer shows only head and
+  # shoulders (about 0.4 m), so with 1.7 the range to a person in the water reads several times too far.
+  person_height_m: 1.7
+  # A box that scores standing_score_min or more (perception.standing_score: tall and narrow,
+  # bottom edge above the horizon) is somebody standing clear of the water, on a roof: their box
+  # covers standing_height_m. Below it, a swimmer: person_height_m.
+  standing_height_m: 1.7
+  standing_score_min: 2.5
+  # Camera servo (STM32 CAM packet) follows the person, positive right of the bow.
+  pan_gain: 0.25
+  pan_deadband_deg: 2.0
+  pan_limit_deg: 80.0
+  # The smooth sweep goes out this many times a second from its own thread, whatever the detector's
+  # pace; the controller glides the servo between commands (STM32F4 App/camera_pan.c). 0: once a frame.
+  pan_rate_hz: 20.0
+  recenter_after_s: 1.5
+  recenter_step_deg: 3.0
+  # Search sweep, while the autopilot is armed in one of `modes` and nobody is in view. Any other
+  # mode: camera ahead. With the 60 deg lens, pointing between -60 and +60 covers the 180 deg ahead.
+  #   mode: step   the servo steps through angles_deg (from the bow, positive right), waits settle_s
+  #                for it to stop, looks at dwell_frames frames, steps on. Ahead is listed twice
+  #                because that is where the boat is going.
+  #   mode: sweep  the servo turns smoothly between -sweep_limit_deg and +sweep_limit_deg at
+  #                sweep_rate_deg_s. Slower keeps a person in view longer (60 / rate seconds) but
+  #                takes 4 * limit / rate seconds to come back to the same side.
+  scan:
+    enabled: true
+    mode: sweep
+    angles_deg: [0, -60, 0, 60]
+    settle_s: 0.25
+    dwell_frames: 3
+    sweep_limit_deg: 60
+    sweep_rate_deg_s: 30
+    modes: [AUTO]
+    always: false               # true: sweep whether armed or not, for a bench without the RC (config/bench_scan.yaml)
+# STM32 boat (main.py) only. The search route the Pi drives itself (modules/waypoints.py): a YAML
+# list of lat/lon or a Mission Planner .waypoints file; tools/set_waypoints.py writes it. No file: no route.
+mission:
+  file: config/mission_stm32.yaml
+  # false: only the file's geofence is used; the waypoints come from the dashboard alone
+  # (docs/lora-route-downlink.md). config/boat_stm32.yaml sets it.
+  waypoints_from_file: true
+# STM32 boat (main.py) only: PATROL the route, FOLLOW a person, back (modules/mission.py, follow.py).
+follow:
+  confirm_frames: 3           # seen in this many detector passes
+  confirm_s: 2.5              # within this long (the 640 px detector looks about every 0.8 s)
+  lost_s: 4.0                 # no sighting this long while following: back to the route
+  # true: with no route to run (none sent yet, an empty one sent, or the last waypoint reached)
+  # the boat stays still and follows nobody (IDLE). config/boat_stm32.yaml sets it: no RC to stop it.
+  only_on_route: false
+  # Reports to the shore ($TXD VICTIM_FOUND): everybody confirmed once, not twice within
+  # report_dedup_m; while following, the person's risk when it changed (seen risk_frames times in a
+  # row) and, every report_every_s, their position if it moved more than report_moved_m.
+  report_every_s: 20.0
+  report_moved_m: 3.0
+  report_dedup_m: 5.0
+  risk_frames: 2
+  # The confirm button pressed while following: the person took the supplies. Nobody within
+  # ignore_radius_m of them (by compass bearing without a GPS fix) is followed for ignore_s.
+  ignore_s: 60.0
+  ignore_radius_m: 5.0
+  # With the same person this long and no press (they may not be able to reach the button), the
+  # boat leaves them, already reported, and goes on with the route; nobody within ignore_radius_m
+  # of them is followed for hold_ignore_s. Lost and found again within 30 s counts as the same
+  # stay. 0: stay as long as they are in view.
+  max_hold_s: 180.0
+  hold_ignore_s: 600.0
+  # One person, one boat (docs/victim-claim.md): the shore station gives each person to the first boat
+  # that reported them and tells the others ($SKP). Nobody within claim_radius_m of such a person is
+  # followed or reported, for claim_ttl_s after the station last named them.
+  claim_ttl_s: 120.0
+  claim_radius_m: 6.0
+# STM32 boat (main.py) only: no word from the shore station (the F407's $LNK shore_ok 0, after 60 s)
+# sends the boat home (RETURN), to the station's GPS position; a station outside the geofence is
+# brought fence_margin_m inside it. Within arrive_radius_m the boat holds (HOME_HOLD).
+return:
+  arrive_radius_m: 3.0
+  fence_margin_m: 2.0
+  # The pack below battery_low_pct (the F407's $SYS charge): home, whatever the boat was doing, and stay
+  # there until it reads battery_ok_pct again (a fresh pack). -1 (no INA226) never triggers it.
+  battery_low_pct: 20
+  battery_ok_pct: 30
+  # Only a reading held this long counts, either way: under the motors the pack sags (10.94 V, read
+  # 15 %, on the stand 2026-10-22) and is back up a second or two later.
+  battery_hold_s: 30.0
+# STM32 boat (main.py) only: spoken messages (modules/announcer.py), WAVs from tools/make_sounds.ps1.
+audio:
+  # The Pi's 3.5 mm jack by its ALSA name: on Bookworm card 0 is the HDMI output and the jack card 1,
+  # and the numbers can move; aplay -l lists them.
+  device: plughw:CARD=Headphones,DEV=0
+  sounds_dir: sounds
+  # sounds/<periodic_sound>.wav ("phao cứu hộ") every periodic_s, the first at start; 0: never.
+  periodic_sound: rescue_boat
+  periodic_s: 100
+# Obstacle ranges used by the Pi's local safety and live-view calculations.
+avoidance:
+  rate_hz: 5.0
+  min_range_m: 0.15
+  max_range_m: 8.0
+  lidar_stale_s: 1.0          # with a LiDAR: no scan for this long stops the feed, the autopilot then reports the sensor failed
+  # Circle around a person already attended. The autopilot adds OA_MARGIN_MAX (1 m) to it; the
+  # two together must stay below the stand-off, or the boat cannot leave the person it holds next to.
+  keep_out_radius_m: 0.4
+logging:
+  level: INFO
+  directory: logs
+  # main.py: a file per run, logs/main_YYYYmmdd_HHMMSS.log, as well as the terminal; the newest kept.
+  keep_runs: 30

@@ -37,8 +37,8 @@ static float IMU_TrueHeading(float magnetic_heading_deg) {
 }
 
 bool IMU_Init(void) {
-    hbno055.hi2c = &hi2c1;
-    hbno055.address = BNO055_I2C_ADDR_COM3_HIGH; /* ADR floating/high -> 0x29 */
+    hbno055.hi2c = &hi2c3;
+    hbno055.address = BNO055_I2C_ADDR_COM3_LOW; /* ADD tied to GND -> 0x28 */
     hbno055.rst_port = BNO055_RST_GPIO_Port;
     hbno055.rst_pin = BNO055_RST_Pin;
     hbno055.mode = BNO055_OPR_MODE_NDOF;
@@ -54,7 +54,7 @@ bool IMU_Init(void) {
        address only when the first failure means that no valid BNO055 was
        found. Keep hbno055.address on the detected address for later reads. */
     if (IMU_AddressMayBeWrong(bno055_init_status)) {
-        hbno055.address = BNO055_I2C_ADDR_COM3_LOW; /* ADR low -> 0x28 */
+        hbno055.address = BNO055_I2C_ADDR_COM3_HIGH; /* ADD floating/high -> 0x29 */
         bno055_init_status = BNO055_Init(&hbno055);
     }
 
