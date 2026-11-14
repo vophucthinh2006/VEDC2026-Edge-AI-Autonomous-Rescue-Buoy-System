@@ -132,6 +132,8 @@ idf.py -p COMx build flash monitor
 
 Hành vi firmware:
 - WiFi rớt thì tự nối lại mãi; LoRa vẫn nhận, tối đa 16 bản tin xếp hàng chờ gửi. Đầy thì bỏ bản tin cũ nhất.
+- Có module 4G Cat.1 Ca-01 (UART2: GPIO4 TX, GPIO5 RX) thì mất WiFi tự đi 4G, có WiFi lại thì quay về WiFi.
+  Nối dây, APN và cách kiểm thử: [docs/tram-bo-4g.md](../docs/tram-bo-4g.md).
 - Gửi lỗi mạng thì thử lại 3 lần (cách nhau 2 giây). Sai token (HTTP 401) thì dừng ngay và báo log.
 - Xác thực chứng chỉ HTTPS bằng bundle của ESP-IDF.
 

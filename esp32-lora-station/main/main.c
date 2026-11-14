@@ -24,7 +24,19 @@
 #include "lora_payload.h"
 #include "route_downlink.h"
 #include "victim_claims.h"
+#include "cellular.h"
 #include "secrets.h"   // WIFI_SSID, WIFI_PASSWORD, CLOUD_INGEST_URL, CLOUD_INGEST_TOKEN (xem secrets.example.h)
+
+// ĐƯỜNG LÊN CLOUD: WiFi (ưu tiên) và 4G Cat.1 dự phòng (cellular.c, docs/tram-bo-4g.md). Đặt trong secrets.h.
+#ifndef NET_USE_WIFI
+#define NET_USE_WIFI 1
+#endif
+#ifndef NET_USE_CELL
+#define NET_USE_CELL 1
+#endif
+#if !NET_USE_WIFI && !NET_USE_CELL
+#error "Can bat it nhat mot duong mang: NET_USE_WIFI hoac NET_USE_CELL"
+#endif
 
 static const char *TAG = "tram_bo";
 
@@ -66,7 +78,8 @@ static const char *TAG = "tram_bo";
 typedef struct { char json[JSON_MAX]; bool station; } cloud_msg_t;   // station: vị trí trạm (/api/station), ngược lại là gói phao (/api/ingest)
 
 static sx127x_t lora_dev;
-static EventGroupHandle_t wifi_event_group;
+static EventGroupHandle_t net_event_group;   // WIFI_UP_BIT, CELL_UP_BIT
+static esp_netif_t *sta_netif;
 static QueueHandle_t cloud_queue;
 static route_downlink_t downlinks[DOWNLINK_SLOTS];   // mỗi phao một bản đang gửi, rev = 0: ô trống
 static SemaphoreHandle_t downlink_lock;
@@ -100,7 +113,20 @@ static uint32_t now_ms(void) {
 // VỊ TRÍ TRẠM cho ACK: phao mất liên lạc quá 60 s thì tự chạy về đây.
 static gps_fix_t tram_fix;
 static portMUX_TYPE tram_fix_mux = portMUX_INITIALIZER_UNLOCKED;
-#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_UP_BIT  BIT0
+#define CELL_UP_BIT  BIT1
+#define NET_UP_BITS  (WIFI_UP_BIT | CELL_UP_BIT)
+
+// Chờ tới khi có ÍT NHẤT MỘT đường lên cloud (WiFi hoặc 4G)
+static void cho_co_mang(void) {
+    xEventGroupWaitBits(net_event_group, NET_UP_BITS, pdFALSE, pdFALSE, portMAX_DELAY);
+}
+
+// Đường đang dùng để log: lwIP đi WiFi khi WiFi còn (route_prio cao hơn)
+static const char *duong_mang(void) {
+    EventBits_t b = xEventGroupGetBits(net_event_group);
+    return (b & WIFI_UP_BIT) ? "WiFi" : (b & CELL_UP_BIT) ? "4G" : "mat mang";
+}
 
 // ---------------------------------------------------------------- WiFi Station
 // Không chặn app_main: LoRa vẫn chạy khi chưa có WiFi, gói nhận được xếp hàng chờ gửi.
@@ -109,30 +135,25 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        bool vua_mat = (xEventGroupClearBits(net_event_group, WIFI_UP_BIT) & WIFI_UP_BIT) != 0;
+        // DNS của hotspot không dùng được khi lwIP chuyển sang 4G
+        if (vua_mat) net_use_public_dns(sta_netif);
         // 201 = khong thay AP (sai ten / AP o 5 GHz), 15/204/210 = sai mat khau hoac kieu bao mat
-        ESP_LOGW(TAG, "Mat ket noi WiFi (reason %d), dang thu lai...",
-                 ((wifi_event_sta_disconnected_t *)event_data)->reason);
+        ESP_LOGW(TAG, "Mat ket noi WiFi (reason %d), dang thu lai...%s",
+                 ((wifi_event_sta_disconnected_t *)event_data)->reason,
+                 (vua_mat && (xEventGroupGetBits(net_event_group) & CELL_UP_BIT)) ? " Chuyen sang 4G." : "");
         esp_wifi_connect();   // thử lại mãi mãi
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Da ket noi WiFi, IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        net_use_public_dns(event->esp_netif);
+        xEventGroupSetBits(net_event_group, WIFI_UP_BIT);
     }
 }
 
+__attribute__((unused))   // NET_USE_WIFI 0: không gọi, tránh -Werror=unused-function
 static void khoi_dong_wifi_sta(void) {
-    wifi_event_group = xEventGroupCreate();
-
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    sta_netif = esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -153,6 +174,29 @@ static void khoi_dong_wifi_sta(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "Dang ket noi WiFi \"%s\"...", WIFI_SSID);
+}
+
+// NVS, esp_netif, vòng sự kiện rồi bật các đường mạng. Không chặn: kết nối chạy ở nền.
+static void khoi_dong_mang(void) {
+    net_event_group = xEventGroupCreate();
+
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+#if NET_USE_WIFI
+    khoi_dong_wifi_sta();
+#else
+    ESP_LOGW(TAG, "WiFi dang TAT (NET_USE_WIFI 0): chi dung 4G");
+#endif
+#if NET_USE_CELL
+    cellular_start(net_event_group, CELL_UP_BIT);
+#endif
 }
 
 // Làm sạch chuỗi để nhúng an toàn vào JSON (thay dấu " \ và ký tự điều khiển bằng khoảng trắng)
@@ -183,7 +227,9 @@ static bool json_append(char *dst, size_t capacity, size_t *used, const char *fo
 // Hàng đợi đầy (mất mạng lâu): bỏ bản tin CŨ NHẤT để giữ dữ liệu mới nhất
 static void xep_hang_cloud(const cloud_msg_t *m) {
     if (xQueueSend(cloud_queue, m, 0) != pdTRUE) {
-        cloud_msg_t bo;
+        // static: 516 byte trên stack task nhan_lora (cộng bản tin của hàm gọi) làm tràn stack khi mất mạng lâu.
+        // Chỉ task nhan_lora gọi hàm này nên dùng chung một bộ đệm được.
+        static cloud_msg_t bo;
         xQueueReceive(cloud_queue, &bo, 0);
         xQueueSend(cloud_queue, m, 0);
         ESP_LOGW(TAG, "Hang doi cloud day, da bo ban tin cu nhat");
@@ -567,7 +613,21 @@ static bool doc_downlink(const char *body, route_downlink_t *out, light_cmd_t *d
     return ok;
 }
 
+// Gom thân response vào bộ đệm (dùng với esp_http_client_perform)
+typedef struct { char *buf; int len; int cap; } http_body_t;
+
+static esp_err_t gom_body(esp_http_client_event_t *evt) {
+    http_body_t *b = (http_body_t *)evt->user_data;
+    if (evt->event_id == HTTP_EVENT_ON_DATA && b != NULL) {
+        int n = evt->data_len;
+        if (n > b->cap - 1 - b->len) n = b->cap - 1 - b->len;   // quá dài thì cắt, JSON sẽ báo sai dạng
+        if (n > 0) { memcpy(b->buf + b->len, evt->data, (size_t)n); b->len += n; }
+    }
+    return ESP_OK;
+}
+
 // ------------------------------------------------- Task lấy lộ trình admin đã bấm gửi
+// Giữ kết nối HTTPS (keep-alive) giữa các lần hỏi: không bắt tay TLS lại mỗi 5 s, đỡ tốn dung lượng 4G.
 static void task_lay_lo_trinh(void *arg) {
     static char url[160];
     static route_downlink_t moi[DOWNLINK_SLOTS];      // 5 KB mỗi phao: không để trên stack của task
@@ -576,24 +636,27 @@ static void task_lay_lo_trinh(void *arg) {
     tao_url_downlink(url, sizeof(url));
     char *body = malloc(DOWNLINK_BODY_MAX);
     if (body == NULL) { ESP_LOGE(TAG, "Khong du bo nho cho lo trinh"); vTaskDelete(NULL); return; }
+    static http_body_t thu;
+    thu = (http_body_t){ .buf = body, .len = 0, .cap = DOWNLINK_BODY_MAX };
     esp_http_client_config_t cfg = {
         .url = url,
         .method = HTTP_METHOD_GET,
         .timeout_ms = CLOUD_HTTP_TIMEOUT_MS,
         .crt_bundle_attach = esp_crt_bundle_attach,
+        .keep_alive_enable = true,
+        .event_handler = gom_body,
+        .user_data = &thu,
     };
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (client == NULL) { ESP_LOGE(TAG, "Khong tao duoc HTTP client lo trinh"); free(body); vTaskDelete(NULL); return; }
+    esp_http_client_set_header(client, "Authorization", "Bearer " CLOUD_INGEST_TOKEN);
     while (true) {
-        xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
-        esp_http_client_handle_t client = esp_http_client_init(&cfg);
-        esp_http_client_set_header(client, "Authorization", "Bearer " CLOUD_INGEST_TOKEN);
+        cho_co_mang();
+        thu.len = 0;
         int len = -1;
-        if (esp_http_client_open(client, 0) == ESP_OK && esp_http_client_fetch_headers(client) >= 0 &&
-            esp_http_client_get_status_code(client) == 200) {
-            len = 0;
-            int r;
-            while (len < DOWNLINK_BODY_MAX - 1 && (r = esp_http_client_read(client, body + len, DOWNLINK_BODY_MAX - 1 - len)) > 0) len += r;
-        }
-        esp_http_client_cleanup(client);
+        esp_err_t err = esp_http_client_perform(client);
+        if (err == ESP_OK && esp_http_client_get_status_code(client) == 200) len = thu.len;
+        else if (err != ESP_OK) ESP_LOGD(TAG, "[LO TRINH] loi hoi Worker qua %s: %s", duong_mang(), esp_err_to_name(err));
         if (len >= 0) {
             body[len] = '\0';
             int so_den = 0, so_nhan = 0;
@@ -651,7 +714,7 @@ static void task_gui_cloud(void *arg) {
 
         bool ok = false;
         for (int lan = 1; lan <= CLOUD_MAX_TRIES && !ok; lan++) {
-            xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+            cho_co_mang();
 
             esp_http_client_set_url(client, m.station ? station_url : CLOUD_INGEST_URL);
             esp_http_client_set_post_field(client, m.json, strlen(m.json));
@@ -668,11 +731,11 @@ static void task_gui_cloud(void *arg) {
                     ESP_LOGW(TAG, "Cloud tra ve HTTP %d (lan %d/%d)", status, lan, CLOUD_MAX_TRIES);
                 }
             } else {
-                ESP_LOGW(TAG, "Gui cloud loi: %s (lan %d/%d)", esp_err_to_name(err), lan, CLOUD_MAX_TRIES);
+                ESP_LOGW(TAG, "Gui cloud qua %s loi: %s (lan %d/%d)", duong_mang(), esp_err_to_name(err), lan, CLOUD_MAX_TRIES);
             }
             if (!ok) vTaskDelay(pdMS_TO_TICKS(2000));
         }
-        if (ok) ESP_LOGI(TAG, "[CLOUD] da gui: %s", m.json);
+        if (ok) ESP_LOGI(TAG, "[CLOUD] da gui qua %s: %s", duong_mang(), m.json);
         else    ESP_LOGE(TAG, "[CLOUD] bo ban tin sau %d lan that bai", CLOUD_MAX_TRIES);
     }
 }
@@ -743,7 +806,7 @@ void app_main(void) {
     downlink_lock = xSemaphoreCreateMutex();
     Claims_Init(&claims);
 
-    khoi_dong_wifi_sta();   // không chặn: WiFi kết nối ở nền
+    khoi_dong_mang();   // không chặn: WiFi và 4G kết nối ở nền
 
     // GPS trạm và cloud chạy dù LoRa chưa lên: vị trí trạm vẫn lên dashboard trong lúc sửa dây.
     xTaskCreate(task_gps_tram, "gps_tram", 3072, NULL, 3, NULL);
@@ -763,7 +826,7 @@ void app_main(void) {
     sx127x_set_coding_rate(&lora_dev, LORA_CODING_RATE);
     sx127x_set_crc(&lora_dev, true);   // khung lộ trình gửi xuống phao có CRC như beacon của phao
 
-    xTaskCreate(task_nhan_lora, "nhan_lora", 4096, NULL, 5, NULL);
+    xTaskCreate(task_nhan_lora, "nhan_lora", 6144, NULL, 5, NULL);   // 4096 tràn khi hàng đợi cloud đầy
 
     ESP_LOGI(TAG, "San sang. Dang cho tin hieu LoRa...");
 }
