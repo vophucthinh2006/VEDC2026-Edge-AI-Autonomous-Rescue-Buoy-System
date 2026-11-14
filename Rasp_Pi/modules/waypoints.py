@@ -40,6 +40,28 @@ class Route:
         """The waypoint being gone to; None with no route, or once a route without loop is done."""
         return self.waypoints[self.index] if self.index < len(self.waypoints) else None
 
+    def aim(self, lat: float, lon: float, lookahead_m: float) -> tuple[float, float] | None:
+        """The point to steer at: lookahead_m along the leg from the last waypoint to the current one, from
+        the boat's foot on that leg, never past the current waypoint. Heading straight at a waypoint 60 m off,
+        the boat drifts off the lane with the waves and cuts the turns; on the leg it keeps to the lane.
+        The current waypoint itself on the first leg (no last waypoint) or with lookahead_m 0."""
+        goal = self.current
+        if goal is None or lookahead_m <= 0 or (self.index == 0 and not self.laps):
+            return goal
+        last = self.waypoints[self.index - 1]
+        k_north, k_east = 111_320.0, 111_320.0 * cos(radians(lat))
+        # Flat metres (north, east) from the boat
+        a = ((last[0] - lat) * k_north, (last[1] - lon) * k_east)
+        b = ((goal[0] - lat) * k_north, (goal[1] - lon) * k_east)
+        d = (b[0] - a[0], b[1] - a[1])
+        length = hypot(*d)
+        if length < 0.01:
+            return goal
+        along = max(0.0, -(a[0] * d[0] + a[1] * d[1]) / length) + lookahead_m   # metres from last, foot + lookahead
+        if along >= length:
+            return goal
+        return lat + (a[0] + d[0] * along / length) / k_north, lon + (a[1] + d[1] * along / length) / k_east
+
     def update(self, lat: float, lon: float) -> bool:
         """Move on when the boat is inside arrive_radius_m of the current waypoint. True if it moved on."""
         goal = self.current

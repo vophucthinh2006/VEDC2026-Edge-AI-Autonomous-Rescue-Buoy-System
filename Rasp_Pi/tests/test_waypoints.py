@@ -32,6 +32,18 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(route.current, A)                              # round again
         self.assertEqual(route.laps, 1)
 
+    def test_aims_along_the_leg_not_at_the_waypoint(self):
+        from utils.geometry import haversine_m
+        route = Route([A, B], arrive_radius_m=3.0, loop=False)
+        here = offset_latlon(*A, 0.0, 4.0)                             # 4 m north of A
+        self.assertEqual(route.aim(*here, 5.0), A)                      # first leg: the waypoint itself
+        route.update(*A)
+        here = offset_latlon(*offset_latlon(*A, 90.0, 6.0), 0.0, 4.0)  # 6 m along the leg A-B, 4 m north of it
+        aim = route.aim(*here, 5.0)
+        self.assertAlmostEqual(haversine_m(*aim, *offset_latlon(*A, 90.0, 11.0)), 0.0, delta=0.05)   # back on the lane, 5 m on
+        self.assertEqual(route.aim(*offset_latlon(*B, 270.0, 3.5), 5.0), B)   # never past the waypoint
+        self.assertEqual(route.aim(*here, 0.0), B)                      # off: straight at it
+
     def test_without_loop_the_route_ends(self):
         route = Route([A], arrive_radius_m=3.0, loop=False)
         route.update(*A)
