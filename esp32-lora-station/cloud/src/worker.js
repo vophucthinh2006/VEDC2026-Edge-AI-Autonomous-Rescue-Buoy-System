@@ -134,7 +134,8 @@ export function sanitizePlan(m) {
   const shape = m.shape === undefined ? "line" : m.shape;
   if (!["line", "v", "column"].includes(shape)) return null;
   const leader = typeof m.leader === "string" ? m.leader.replace(/[^\w.\-]/g, "").slice(0, 31) : null;
-  return { mode: m.mode, poly: cleanPts(m.poly), ids, spacing, angle, shape, leader, loop: m.loop === true, dry: m.dry === true };
+  return { mode: m.mode, poly: cleanPts(m.poly), ids, spacing, angle, shape, leader, loop: m.loop === true, dry: m.dry === true,
+    ...(m.offsets === "ned" ? { offsets: "ned" } : {}) };   // "ned": src/fleetplan.js nedOffsets
 }
 
 // Lệnh admin: phiên admin từ trình duyệt (kèm Origin đúng), hoặc Bearer ADMIN_API_TOKEN cho script thử.

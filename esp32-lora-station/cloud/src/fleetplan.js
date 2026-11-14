@@ -89,28 +89,29 @@ export function planSectors(poly, boats, spacing = 10, angle = null) {
     sectors.push(serpentine(ls.slice(k, k + take), back));
     k += take;
   }
-  // Gán tham lam: lần lượt cặp (phao, dải) có khoảng cách tới một đầu dải nhỏ nhất
-  const free = boats.map(b => ({ ...b }));
-  const out = [];
-  const left = sectors.map((path, i) => ({ path, i }));
-  while (left.length && free.length) {
-    let best = null;
-    for (const s of left) {
-      if (!s.path.length) continue;
-      for (const b of free) {
-        const known = b.lat !== undefined && b.lon !== undefined;
-        const dStart = known ? distM(b, s.path[0]) : 0, dEnd = known ? distM(b, s.path.at(-1)) : Infinity;
-        const d = Math.min(dStart, dEnd);
-        if (!best || d < best.d) best = { s, b, d, reverse: dEnd < dStart };
-      }
+  // Gán phao cho dải sao cho tổng quãng đường tới đầu dải gần nhất là nhỏ nhất (thử mọi cách, đội chỉ vài phao).
+  // Tổng nhỏ nhất thì các đường đi tới dải không cắt nhau; gán tham lam từng cặp gần nhất có thể bắt một phao
+  // chạy cắt ngang đường phao khác (mô phỏng 2026-11-12: phao giữa sang dải xa, cắt qua phao bên cạnh).
+  const paths = sectors.filter(p => p.length);
+  const cost = (b, path) => {
+    if (b.lat === undefined || b.lon === undefined) return { d: 0, reverse: false };
+    const dStart = distM(b, path[0]), dEnd = distM(b, path.at(-1));
+    return { d: Math.min(dStart, dEnd), reverse: dEnd < dStart };
+  };
+  let best = null;
+  const tryOrder = (order, used) => {   // order[k]: the boat for paths[k]
+    if (order.length === paths.length) {
+      const d = order.reduce((s, b, k) => s + cost(boats[b], paths[k]).d, 0);
+      if (!best || d < best.d - 1e-6) best = { d, order: [...order] };
+      return;
     }
-    if (!best) break;
-    const path = best.reverse ? [...best.s.path].reverse() : best.s.path;
-    out.push({ id: best.b.id, pts: path.map(p => [p.lat, p.lon]) });
-    left.splice(left.indexOf(best.s), 1);
-    free.splice(free.indexOf(best.b), 1);
-  }
-  return out;
+    for (let b = 0; b < boats.length; b++) if (!used.has(b)) { used.add(b); order.push(b); tryOrder(order, used); order.pop(); used.delete(b); }
+  };
+  tryOrder([], new Set());
+  return paths.map((path, k) => {
+    const b = boats[best.order[k]];
+    return { id: b.id, pts: (cost(b, path).reverse ? [...path].reverse() : path).map(p => [p.lat, p.lon]) };
+  });
 }
 
 // Chỗ của từng phao trong đội hình, so với phao dẫn đầu (mét, sang phải và lùi sau, theo hướng phao dẫn đầu):
@@ -126,6 +127,19 @@ export function formationOffsets(shape, followers, spacing = 10) {
     else out[id] = { right: Math.round(side * rank * spacing), back: 0 };
   });
   return out;
+}
+
+// Chỗ của từng phao theo kiểu FOLL_OFS_TYPE = 0 của ArduPilot (AP_Follow): mét về phía bắc và phía đông của phao dẫn
+// đầu, cố định trên mặt nước, tính theo làn đầu của lộ trình. Phao theo khỏi phải đổi bên mỗi lần phao dẫn đầu quay
+// đầu ở cuối làn, và đoạn từ chỗ xuất phát tới làn đầu không kéo nó chạy lên trước. Chỉ hợp với hàng ngang: hàng
+// dọc và chữ V lùi "phía sau" theo hướng của làn đầu, trên làn ngược lại chúng thành ở phía trước.
+export function nedOffsets(route, members) {
+  if (!route || route.length < 2) return null;
+  const h = bearingDeg({ lat: route[0][0], lon: route[0][1] }, { lat: route[1][0], lon: route[1][1] }) * RAD;
+  return Object.fromEntries(Object.entries(members).map(([id, m]) => [id, {
+    north: Math.round(-m.right * Math.sin(h) - m.back * Math.cos(h)) + 0,   // + 0: no -0
+    east: Math.round(m.right * Math.cos(h) - m.back * Math.sin(h)) + 0,
+  }]));
 }
 
 function bearingDeg(a, b) {
