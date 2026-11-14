@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+import os
 import socket
 import time
 from pathlib import Path
@@ -27,8 +28,9 @@ DOWNLINK_PORT = 47102       # station -> buoy (PHAO-01)
 BOAT_PORT_BASE = 47102      # boat n listens on BOAT_PORT_BASE + n - 1
 MAX_BOATS = 8
 AIR_PORTS = (BEACON_PORT, *range(BOAT_PORT_BASE, BOAT_PORT_BASE + MAX_BOATS))
-# Radio settings of both ends (STM32F4/App/app_config.h, esp32-lora-station/main/main.c)
-SF, BW_HZ, CR, PREAMBLE = 9, 125000, 5, 8
+# Radio settings of both ends (STM32F4/App/app_config.h, esp32-lora-station/main/main.c). VEDC_SIM_SF: another
+# spreading factor in the simulation only (fleet_sim.sh --fast-beacon), the boats' and station's firmware unchanged.
+SF, BW_HZ, CR, PREAMBLE = int(os.environ.get("VEDC_SIM_SF", "9")), 125000, 5, 8
 
 
 def airtime_s(length: int) -> float:
