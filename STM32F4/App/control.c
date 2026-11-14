@@ -58,7 +58,7 @@ static void stop_braking(controller_t *control, uint32_t now_ms) {
    throttle already in cmd->rear_left. */
 static void heading_steer(controller_t *control, const bno055_euler_t *imu, actuator_cmd_t *cmd) {
     control->heading_cmd = HeadingController_Update(&control->heading, control->heading_target_deg,
-                                                    imu->heading_deg, imu->yaw_rate_dps, DT_S);
+                                                    imu->heading_deg, imu->yaw_rate_dps, DT_S, cmd->rear_left);
     Heading_Mix(control->heading_cmd, cmd->rear_left, &cmd->rear_left, &cmd->rear_right, &cmd->steer);
 }
 

@@ -61,13 +61,21 @@
 /* Heading PID (AUTO). Output u in -1..1, positive turns
    the bow right. u = Kp*e + Ki*integral(e) - Kd*yaw_rate: the D term works on
    the gyro, so a target jump gives no kick and yaw noise is not differentiated.
-   Starting values, tune on the stand then on water: P first, then D until the
-   overshoot is gone, then a little I for a steady drift. */
-#define HEADING_KP                 0.020f  /* per degree: 20 deg error gives u = 0.4 */
-#define HEADING_KI                 0.002f  /* per degree-second */
+   Tuned in Gazebo (media/simulation/pid/README.md): the boat answers u within
+   ~0.3 s but small u barely turns it (u 0.3 gives ~2 deg/s, u 1 gives 5-10 deg/s),
+   so P is high, u saturates beyond ~10 deg of error. Check on water. */
+#define HEADING_KP                 0.10f   /* per degree: 10 deg error gives u = 1 */
+#define HEADING_KI                 0.010f  /* per degree-second: holds the ~1 deg/s drift */
 #define HEADING_KD                 0.008f  /* per deg/s: 30 deg/s turn gives 0.24 of braking */
 #define HEADING_DEADBAND_DEG       2.0f    /* P rests inside, I is held, D still damps */
-#define HEADING_INTEGRAL_LIMIT     100.0f  /* degree-seconds: Ki * limit = 0.2 of u */
+#define HEADING_INTEGRAL_LIMIT     100.0f  /* degree-seconds: Ki * limit = 1.0 of u */
+#define HEADING_INTEGRAL_ZONE_DEG  15.0f   /* the integral runs only this close to the target:
+                                              no windup over a long slow turn */
+/* Steering comes from thrust: below REF the same u turns the boat less, so the
+   PID output is scaled by REF / max(throttle, MIN) (at most 3x); above REF the
+   turn rate hardly changes with throttle, u is left alone. */
+#define HEADING_SCALE_REF_THROTTLE 0.15f
+#define HEADING_SCALE_MIN_THROTTLE 0.05f
 #define HEADING_RATE_LPF_HZ        5.0f    /* low-pass on the gyro rate for the D term */
 /* Mixing u onto the boat: all rudders get u * RUDDER_GAIN, the rear motors
    split u * DIFF_GAIN around their common throttle (capped so neither goes

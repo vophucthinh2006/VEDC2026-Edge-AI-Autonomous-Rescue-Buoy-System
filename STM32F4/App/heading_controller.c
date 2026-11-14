@@ -29,12 +29,20 @@ void HeadingController_Reset(heading_controller_t *controller) {
     controller->p = controller->i = controller->d = 0.0f;
 }
 
+/* 1 at or above HEADING_SCALE_REF_THROTTLE, up to REF / MIN below it. */
+static float throttle_scale(float throttle) {
+    const float t = throttle > HEADING_SCALE_MIN_THROTTLE ? throttle : HEADING_SCALE_MIN_THROTTLE;
+    return t < HEADING_SCALE_REF_THROTTLE ? HEADING_SCALE_REF_THROTTLE / t : 1.0f;
+}
+
 float HeadingController_Update(heading_controller_t *controller,
                                float target_deg,
                                float current_deg,
                                float yaw_rate_dps,
-                               float dt_s) {
+                               float dt_s,
+                               float throttle) {
     const float error = Heading_Error(target_deg, current_deg);
+    const float scale = throttle_scale(throttle);
     controller->error_deg = error;
 
     /* First-order low-pass on the gyro, primed with the first sample so the
@@ -46,21 +54,22 @@ float HeadingController_Update(heading_controller_t *controller,
         const float tau = 1.0f / (2.0f * 3.14159265f * HEADING_RATE_LPF_HZ);
         controller->rate_dps += (dt_s / (tau + dt_s)) * (yaw_rate_dps - controller->rate_dps);
     }
-    controller->d = -HEADING_KD * controller->rate_dps;
+    controller->d = -HEADING_KD * controller->rate_dps * scale;
 
     /* Inside the deadband the P term rests but the integral is held, not
        cleared: it carries the steady trim that offsets unequal motors. */
     if (fabsf(error) <= HEADING_DEADBAND_DEG) {
         controller->p = 0.0f;
-        controller->i = HEADING_KI * controller->integral;
+        controller->i = HEADING_KI * controller->integral * scale;
         return clampf(controller->i + controller->d, -OUTPUT_LIMIT, OUTPUT_LIMIT);
     }
 
-    const float candidate = clampf(controller->integral + error * dt_s,
-                                   -HEADING_INTEGRAL_LIMIT,
-                                   HEADING_INTEGRAL_LIMIT);
-    controller->p = HEADING_KP * error;
-    const float raw = controller->p + HEADING_KI * candidate + controller->d;
+    /* Far from the target the integral is held: a long turn would wind it up. */
+    const float candidate = fabsf(error) < HEADING_INTEGRAL_ZONE_DEG
+        ? clampf(controller->integral + error * dt_s, -HEADING_INTEGRAL_LIMIT, HEADING_INTEGRAL_LIMIT)
+        : controller->integral;
+    controller->p = HEADING_KP * error * scale;
+    const float raw = controller->p + HEADING_KI * candidate * scale + controller->d;
     const float output = clampf(raw, -OUTPUT_LIMIT, OUTPUT_LIMIT);
 
     /* Integrate only when unsaturated, or when the error would pull a
@@ -70,7 +79,7 @@ float HeadingController_Update(heading_controller_t *controller,
         (output <= -OUTPUT_LIMIT && error > 0.0f)) {
         controller->integral = candidate;
     }
-    controller->i = HEADING_KI * controller->integral;
+    controller->i = HEADING_KI * controller->integral * scale;
     return output;
 }
 
