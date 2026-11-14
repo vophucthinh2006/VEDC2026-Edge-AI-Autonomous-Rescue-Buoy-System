@@ -34,6 +34,19 @@ class MissionTest(unittest.TestCase):
         steps = [self.mission.step(snap(t, **kwargs), t) for t in times]
         return steps[-1], [r for s in steps for r in s.reports]
 
+    def test_the_aim_point_is_never_nearer_than_the_turn_radius_allows(self):
+        # vehicle.turn_radius_m 6: the aim point at least 1.5 x 6 = 9 m ahead, more than mission.lookahead_m 5 m.
+        cfg = {**CONFIG, "mission": {**CONFIG.get("mission", {}), "lookahead_m": 5.0},
+               "vehicle": {**CONFIG.get("vehicle", {}), "turn_radius_m": 6.0}}
+        self.assertAlmostEqual(Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True).lookahead_m, 9.0)
+        # A long lookahead stays; lookahead 0 (steer at the waypoint) stays 0; no radius: as configured.
+        cfg["mission"]["lookahead_m"] = 12.0
+        self.assertAlmostEqual(Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True).lookahead_m, 12.0)
+        cfg["mission"]["lookahead_m"] = 0.0
+        self.assertEqual(Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True).lookahead_m, 0.0)
+        cfg["mission"]["lookahead_m"], cfg["vehicle"]["turn_radius_m"] = 5.0, 0.0
+        self.assertAlmostEqual(Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True).lookahead_m, 5.0)
+
     def test_idle_without_a_route_then_patrol_once_one_comes(self):
         step = self.mission.step(snap(0.0, people=[(10.0, 5.0, HIGH)]), 0.0)
         self.assertEqual(self.mission.state, IDLE)
