@@ -3,7 +3,7 @@
 # camera detections, IMU/GPS, and all safety feedback. Pi 5's /dev/serial0 is
 # its dedicated debug UART, so this uses UART0 directly.
 serial:
-  # USB-UART STM32F407, confirmed on this Pi 5: /dev/ttyUSB0.
+  # USB-UART STM32F407, confirmed on this Pi 5: usb-0:1.
   stm32_port: /dev/serial/by-path/platform-xhci-hcd.0-usb-0:1:1.0-port0
 
 camera:

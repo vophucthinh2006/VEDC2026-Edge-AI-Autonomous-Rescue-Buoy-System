@@ -124,14 +124,32 @@ class Stm32Uart(threading.Thread):
                 return
 
     def _serve(self, ser: object) -> None:
+        rx_buffer = bytearray()
         while not self._stop_event.is_set():
-            raw = ser.readline()
+            # pyserial.readline() returns a partial line when its short timeout
+            # expires. Accumulate bytes ourselves so a split STM32 packet is not
+            # silently discarded before its newline arrives.
+            read = getattr(ser, "read", None)
+            raw = read(256) if callable(read) else ser.readline()
             if raw:
-                packet = decode(raw)
-                if packet is None:
-                    self.rx_errors += 1
-                else:
-                    self._handle_packet(packet)
+                if isinstance(raw, str):
+                    raw = raw.encode("ascii", "replace")
+                rx_buffer.extend(raw)
+                while b"\n" in rx_buffer:
+                    line, _, remainder = rx_buffer.partition(b"\n")
+                    rx_buffer = bytearray(remainder)
+                    # Keep the NMEA packet after a binary preamble, if any.
+                    start = line.rfind(b"$")
+                    packet = decode(bytes(line[start:] if start >= 0 else line))
+                    if packet is None:
+                        self.rx_errors += 1
+                    else:
+                        self._handle_packet(packet)
+                # A device sending binary data without a newline must not make
+                # this buffer unbounded. Preserve a possible partial NMEA frame.
+                if len(rx_buffer) > 2 * 256:
+                    start = rx_buffer.rfind(b"$")
+                    rx_buffer = rx_buffer[start:] if start >= 0 else bytearray()
             # Drain everything queued: one packet per loop cannot keep up with NAV+HBT+CAM.
             while True:
                 try:

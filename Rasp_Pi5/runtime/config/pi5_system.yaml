@@ -9,9 +9,9 @@
 # USB-to-TTL adapter, pass a later --overlay that sets serial.lidar_port to the
 # stable /dev/serial/by-id/... path reported by tools/port_probe.py.
 serial:
-  # USB-UART STM32F407, confirmed on this Pi 5: /dev/ttyUSB0.
+  # USB-UART STM32F407, confirmed on this Pi 5: usb-0:1.
   stm32_port: /dev/serial/by-path/platform-xhci-hcd.0-usb-0:1:1.0-port0
-  # USB-UART LD14, confirmed on this Pi 5: /dev/ttyUSB1.
+  # USB-UART LD14, confirmed on this Pi 5: usb-0:2.
   lidar_port: /dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0
 
 camera:

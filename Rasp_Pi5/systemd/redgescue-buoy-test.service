@@ -1,0 +1,17 @@
+[Unit]
+Description=RedgeSCUE buoy-only test runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/thinh/Rasp_Pi5
+ExecStart=/home/thinh/Rasp_Pi5/.venv/bin/python -u /home/thinh/Rasp_Pi5/run_buoy_test.py
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+StandardOutput=append:/home/thinh/Rasp_Pi5/logs/buoy_test.service.log
+StandardError=append:/home/thinh/Rasp_Pi5/logs/buoy_test.service.log
+
+[Install]
+WantedBy=default.target
