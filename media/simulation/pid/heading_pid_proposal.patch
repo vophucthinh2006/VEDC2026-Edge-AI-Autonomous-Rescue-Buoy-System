@@ -1,0 +1,216 @@
+diff -ru a/STM32F4/App/app_config.h b/STM32F4/App/app_config.h
+--- a/STM32F4/App/app_config.h	2026-11-13 07:20:06.410747700 +0000
++++ b/STM32F4/App/app_config.h	2026-11-13 07:20:16.360855400 +0000
+@@ -61,13 +61,21 @@
+ /* Heading PID (AUTO). Output u in -1..1, positive turns
+    the bow right. u = Kp*e + Ki*integral(e) - Kd*yaw_rate: the D term works on
+    the gyro, so a target jump gives no kick and yaw noise is not differentiated.
+-   Starting values, tune on the stand then on water: P first, then D until the
+-   overshoot is gone, then a little I for a steady drift. */
+-#define HEADING_KP                 0.020f  /* per degree: 20 deg error gives u = 0.4 */
+-#define HEADING_KI                 0.002f  /* per degree-second */
++   Tuned in Gazebo (media/simulation/pid/README.md): the boat answers u within
++   ~0.3 s but small u barely turns it (u 0.3 gives ~2 deg/s, u 1 gives 5-10 deg/s),
++   so P is high, u saturates beyond ~10 deg of error. Check on water. */
++#define HEADING_KP                 0.10f   /* per degree: 10 deg error gives u = 1 */
++#define HEADING_KI                 0.010f  /* per degree-second: holds the ~1 deg/s drift */
+ #define HEADING_KD                 0.008f  /* per deg/s: 30 deg/s turn gives 0.24 of braking */
+ #define HEADING_DEADBAND_DEG       2.0f    /* P rests inside, I is held, D still damps */
+-#define HEADING_INTEGRAL_LIMIT     100.0f  /* degree-seconds: Ki * limit = 0.2 of u */
++#define HEADING_INTEGRAL_LIMIT     100.0f  /* degree-seconds: Ki * limit = 1.0 of u */
++#define HEADING_INTEGRAL_ZONE_DEG  15.0f   /* the integral runs only this close to the target:
++                                              no windup over a long slow turn */
++/* Steering comes from thrust: below REF the same u turns the boat less, so the
++   PID output is scaled by REF / max(throttle, MIN) (at most 3x); above REF the
++   turn rate hardly changes with throttle, u is left alone. */
++#define HEADING_SCALE_REF_THROTTLE 0.15f
++#define HEADING_SCALE_MIN_THROTTLE 0.05f
+ #define HEADING_RATE_LPF_HZ        5.0f    /* low-pass on the gyro rate for the D term */
+ /* Mixing u onto the boat: all rudders get u * RUDDER_GAIN, the rear motors
+    split u * DIFF_GAIN around their common throttle (capped so neither goes
+diff -ru a/STM32F4/App/control.c b/STM32F4/App/control.c
+--- a/STM32F4/App/control.c	2026-11-13 07:20:06.451858900 +0000
++++ b/STM32F4/App/control.c	2026-11-13 07:20:34.498266600 +0000
+@@ -58,7 +58,7 @@
+    throttle already in cmd->rear_left. */
+ static void heading_steer(controller_t *control, const bno055_euler_t *imu, actuator_cmd_t *cmd) {
+     control->heading_cmd = HeadingController_Update(&control->heading, control->heading_target_deg,
+-                                                    imu->heading_deg, imu->yaw_rate_dps, DT_S);
++                                                    imu->heading_deg, imu->yaw_rate_dps, DT_S, cmd->rear_left);
+     Heading_Mix(control->heading_cmd, cmd->rear_left, &cmd->rear_left, &cmd->rear_right, &cmd->steer);
+ }
+ 
+diff -ru a/STM32F4/App/heading_controller.c b/STM32F4/App/heading_controller.c
+--- a/STM32F4/App/heading_controller.c	2026-11-13 07:20:06.424233000 +0000
++++ b/STM32F4/App/heading_controller.c	2026-11-13 07:20:32.320158400 +0000
+@@ -29,12 +29,20 @@
+     controller->p = controller->i = controller->d = 0.0f;
+ }
+ 
++/* 1 at or above HEADING_SCALE_REF_THROTTLE, up to REF / MIN below it. */
++static float throttle_scale(float throttle) {
++    const float t = throttle > HEADING_SCALE_MIN_THROTTLE ? throttle : HEADING_SCALE_MIN_THROTTLE;
++    return t < HEADING_SCALE_REF_THROTTLE ? HEADING_SCALE_REF_THROTTLE / t : 1.0f;
++}
++
+ float HeadingController_Update(heading_controller_t *controller,
+                                float target_deg,
+                                float current_deg,
+                                float yaw_rate_dps,
+-                               float dt_s) {
++                               float dt_s,
++                               float throttle) {
+     const float error = Heading_Error(target_deg, current_deg);
++    const float scale = throttle_scale(throttle);
+     controller->error_deg = error;
+ 
+     /* First-order low-pass on the gyro, primed with the first sample so the
+@@ -46,21 +54,22 @@
+         const float tau = 1.0f / (2.0f * 3.14159265f * HEADING_RATE_LPF_HZ);
+         controller->rate_dps += (dt_s / (tau + dt_s)) * (yaw_rate_dps - controller->rate_dps);
+     }
+-    controller->d = -HEADING_KD * controller->rate_dps;
++    controller->d = -HEADING_KD * controller->rate_dps * scale;
+ 
+     /* Inside the deadband the P term rests but the integral is held, not
+        cleared: it carries the steady trim that offsets unequal motors. */
+     if (fabsf(error) <= HEADING_DEADBAND_DEG) {
+         controller->p = 0.0f;
+-        controller->i = HEADING_KI * controller->integral;
++        controller->i = HEADING_KI * controller->integral * scale;
+         return clampf(controller->i + controller->d, -OUTPUT_LIMIT, OUTPUT_LIMIT);
+     }
+ 
+-    const float candidate = clampf(controller->integral + error * dt_s,
+-                                   -HEADING_INTEGRAL_LIMIT,
+-                                   HEADING_INTEGRAL_LIMIT);
+-    controller->p = HEADING_KP * error;
+-    const float raw = controller->p + HEADING_KI * candidate + controller->d;
++    /* Far from the target the integral is held: a long turn would wind it up. */
++    const float candidate = fabsf(error) < HEADING_INTEGRAL_ZONE_DEG
++        ? clampf(controller->integral + error * dt_s, -HEADING_INTEGRAL_LIMIT, HEADING_INTEGRAL_LIMIT)
++        : controller->integral;
++    controller->p = HEADING_KP * error * scale;
++    const float raw = controller->p + HEADING_KI * candidate * scale + controller->d;
+     const float output = clampf(raw, -OUTPUT_LIMIT, OUTPUT_LIMIT);
+ 
+     /* Integrate only when unsaturated, or when the error would pull a
+@@ -70,7 +79,7 @@
+         (output <= -OUTPUT_LIMIT && error > 0.0f)) {
+         controller->integral = candidate;
+     }
+-    controller->i = HEADING_KI * controller->integral;
++    controller->i = HEADING_KI * controller->integral * scale;
+     return output;
+ }
+ 
+diff -ru a/STM32F4/App/heading_controller.h b/STM32F4/App/heading_controller.h
+--- a/STM32F4/App/heading_controller.h	2026-11-13 07:20:06.438680100 +0000
++++ b/STM32F4/App/heading_controller.h	2026-11-13 07:20:19.785163500 +0000
+@@ -15,12 +15,14 @@
+ void HeadingController_Init(heading_controller_t *controller);
+ void HeadingController_Reset(heading_controller_t *controller);
+ /* PID turn command in -1..1, positive turns the bow right. yaw_rate_dps is
+-   positive clockwise, like the heading. */
++   positive clockwise, like the heading. throttle 0..1: the rear throttle the
++   command is mixed around, for HEADING_SCALE_REF_THROTTLE. */
+ float HeadingController_Update(heading_controller_t *controller,
+                                float target_deg,
+                                float current_deg,
+                                float yaw_rate_dps,
+-                               float dt_s);
++                               float dt_s,
++                               float throttle);
+ /* Turn command u onto the boat: steer = u * HEADING_RUDDER_GAIN, the two rear
+    motors split u * HEADING_DIFF_GAIN around throttle, capped so neither goes
+    below 0 or above 1. Positive u with HEADING_DIFF_DIR +1 speeds up the left. */
+diff -ru a/STM32F4/Tests/heading_controller_test.c b/STM32F4/Tests/heading_controller_test.c
+--- a/STM32F4/Tests/heading_controller_test.c	2026-11-13 07:20:06.511753500 +0000
++++ b/STM32F4/Tests/heading_controller_test.c	2026-11-13 07:21:48.728802400 +0000
+@@ -5,6 +5,7 @@
+ #include <stdio.h>
+ 
+ #define DT 0.01f
++#define TH HEADING_SCALE_REF_THROTTLE   /* throttle at which u is not scaled */
+ 
+ static void close_to(float actual, float expected, float tolerance) {
+     assert(fabsf(actual - expected) <= tolerance);
+@@ -18,44 +19,63 @@
+ 
+     heading_controller_t c;
+ 
+-    /* P: 10 deg right of the target turns the bow right. */
++    /* P: 5 deg right of the target turns the bow right. */
+     HeadingController_Init(&c);
+-    float u = HeadingController_Update(&c, 10.0f, 0.0f, 0.0f, DT);
+-    close_to(u, HEADING_KP * 10.0f + HEADING_KI * 10.0f * DT, 0.0005f);
++    float u = HeadingController_Update(&c, 5.0f, 0.0f, 0.0f, DT, TH);
++    close_to(u, HEADING_KP * 5.0f + HEADING_KI * 5.0f * DT, 0.0005f);
+     assert(u > 0.0f && c.error_deg > 0.0f);
+ 
+     /* Across north: target 350, heading 0 turns left. */
+     HeadingController_Reset(&c);
+-    assert(HeadingController_Update(&c, 350.0f, 0.0f, 0.0f, DT) < 0.0f);
++    assert(HeadingController_Update(&c, 350.0f, 0.0f, 0.0f, DT, TH) < 0.0f);
+ 
+     /* D on the gyro: already turning right at 30 deg/s toward the target,
+        the D term brakes; it does not depend on the target at all. */
+     HeadingController_Reset(&c);
+-    u = HeadingController_Update(&c, 10.0f, 0.0f, 30.0f, DT);
++    u = HeadingController_Update(&c, 5.0f, 0.0f, 30.0f, DT, TH);
+     close_to(c.d, -HEADING_KD * 30.0f, 0.0001f);
+-    assert(u < HEADING_KP * 10.0f);
++    assert(u < HEADING_KP * 5.0f);
+     HeadingController_Reset(&c);
+-    (void)HeadingController_Update(&c, 0.0f, 0.0f, 30.0f, DT);
++    (void)HeadingController_Update(&c, 0.0f, 0.0f, 30.0f, DT, TH);
+     close_to(c.d, -HEADING_KD * 30.0f, 0.0001f);   /* same D with no error */
+ 
+     /* The rate low-pass: a single spike after priming moves D only a little. */
+     HeadingController_Reset(&c);
+-    (void)HeadingController_Update(&c, 0.0f, 0.0f, 0.0f, DT);
+-    (void)HeadingController_Update(&c, 0.0f, 0.0f, 100.0f, DT);
++    (void)HeadingController_Update(&c, 0.0f, 0.0f, 0.0f, DT, TH);
++    (void)HeadingController_Update(&c, 0.0f, 0.0f, 100.0f, DT, TH);
+     assert(fabsf(c.d) < HEADING_KD * 100.0f * 0.5f);
+ 
+     /* Deadband: P rests, the integral is held and keeps its trim. */
+     HeadingController_Reset(&c);
+-    (void)HeadingController_Update(&c, 10.0f, 0.0f, 0.0f, 1.0f);   /* integral 10 */
+-    close_to(c.integral, 10.0f, 0.001f);
+-    u = HeadingController_Update(&c, 1.0f, 0.0f, 0.0f, DT);
+-    close_to(u, HEADING_KI * 10.0f, 0.0005f);
++    (void)HeadingController_Update(&c, 5.0f, 0.0f, 0.0f, 1.0f, TH);   /* integral 5 */
++    close_to(c.integral, 5.0f, 0.001f);
++    u = HeadingController_Update(&c, 1.0f, 0.0f, 0.0f, DT, TH);
++    close_to(u, HEADING_KI * 5.0f, 0.0005f);
+     close_to(c.p, 0.0f, 0.0001f);
+-    close_to(c.integral, 10.0f, 0.001f);
++    close_to(c.integral, 5.0f, 0.001f);
++
++    /* Integral zone: a long way from the target the integral is held (a 150 deg/s
++       turn toward it keeps the output unsaturated, so only the zone holds it). */
++    HeadingController_Reset(&c);
++    (void)HeadingController_Update(&c, HEADING_INTEGRAL_ZONE_DEG + 5.0f, 0.0f, 150.0f, DT, TH);
++    assert(fabsf(c.p + c.d) < 1.0f);
++    close_to(c.integral, 0.0f, 0.001f);
++    (void)HeadingController_Update(&c, HEADING_INTEGRAL_ZONE_DEG - 10.0f, 0.0f, 0.0f, 1.0f, TH);
++    assert(c.integral > 0.0f);
++
++    /* Throttle scale: below the reference throttle the same error asks for more
++       turn, at most REF / MIN times; above it, the same as at the reference. */
++    HeadingController_Reset(&c);
++    float at_ref = HeadingController_Update(&c, 3.0f, 0.0f, 0.0f, DT, TH);
++    HeadingController_Reset(&c);
++    close_to(HeadingController_Update(&c, 3.0f, 0.0f, 0.0f, DT, 0.5f), at_ref, 0.0001f);
++    HeadingController_Reset(&c);
++    float low = HeadingController_Update(&c, 3.0f, 0.0f, 0.0f, DT, 0.0f);
++    close_to(low, fminf(1.0f, at_ref * HEADING_SCALE_REF_THROTTLE / HEADING_SCALE_MIN_THROTTLE), 0.0005f);
+ 
+     /* Saturation at +/-1 with anti-windup. */
+     HeadingController_Reset(&c);
+-    close_to(HeadingController_Update(&c, 179.0f, 0.0f, 0.0f, DT), 1.0f, 0.0001f);
++    close_to(HeadingController_Update(&c, 179.0f, 0.0f, 0.0f, DT, TH), 1.0f, 0.0001f);
+     close_to(c.integral, 0.0f, 0.001f);
+ 
+     HeadingController_Reset(&c);
