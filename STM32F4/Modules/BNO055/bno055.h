@@ -9,7 +9,7 @@
   *          Usage:
   *            1. Fill hi2c, address, rst_port/rst_pin, mode, use_ext_crystal,
   *               calib_profile (optional, see bno055_calib_profile.h).
-  *            2. Call BNO055_Init() once after MX_I2C1_Init().
+  *            2. Call BNO055_Init() once after MX_I2C3_Init().
   *            3. Call BNO055_ReadEuler() periodically (fusion output 100 Hz).
   *            4. Once CALIB_STAT is fully calibrated, BNO055_ReadCalibProfile()
   *               gives the profile to store (section 3.11.5).

@@ -1,7 +1,6 @@
 #pragma once
 
-/* Battery voltage, current and charge left, from the INA226 on I2C1 (shared with the BNO055: both
- * are read from the main loop, one after the other, never at the same time). The charge is read off
+/* Battery voltage, current and charge left, from the INA226 on I2C1 (PB8/PB9). The charge is read off
  * the resting voltage of a LiPo pack of BATTERY_CELLS cells, so it dips while the motors pull hard;
  * a slow filter keeps it from jumping. */
 
