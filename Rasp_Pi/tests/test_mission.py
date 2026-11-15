@@ -34,18 +34,25 @@ class MissionTest(unittest.TestCase):
         steps = [self.mission.step(snap(t, **kwargs), t) for t in times]
         return steps[-1], [r for s in steps for r in s.reports]
 
-    def test_the_aim_point_is_never_nearer_than_the_turn_radius_allows(self):
-        # vehicle.turn_radius_m 6: the aim point at least 1.5 x 6 = 9 m ahead, more than mission.lookahead_m 5 m.
-        cfg = {**CONFIG, "mission": {**CONFIG.get("mission", {}), "lookahead_m": 5.0},
-               "vehicle": {**CONFIG.get("vehicle", {}), "turn_radius_m": 6.0}}
-        self.assertAlmostEqual(Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True).lookahead_m, 9.0)
-        # A long lookahead stays; lookahead 0 (steer at the waypoint) stays 0; no radius: as configured.
-        cfg["mission"]["lookahead_m"] = 12.0
-        self.assertAlmostEqual(Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True).lookahead_m, 12.0)
-        cfg["mission"]["lookahead_m"] = 0.0
-        self.assertEqual(Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True).lookahead_m, 0.0)
-        cfg["mission"]["lookahead_m"], cfg["vehicle"]["turn_radius_m"] = 5.0, 0.0
-        self.assertAlmostEqual(Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True).lookahead_m, 5.0)
+    def test_the_aim_point_reaches_out_to_the_turn_radius_only_in_a_turn(self):
+        # mission.lookahead_m 5, vehicle.turn_radius_m 6: 5 m on the leg, up to 1.5 x 6 = 9 m with the bow round.
+        cfg = {**CONFIG, "mission": {"lookahead_m": 5.0}, "vehicle": {"turn_radius_m": 6.0}}
+        mission = Mission(cfg, Route([], 3.0, False, FENCE), only_on_route=True)
+        mission.set_route(Route([BOAT, WP1, WP2], 3.0, False, FENCE))
+        mission.route.index = 1                      # on the leg north, from BOAT to WP1
+        self.assertAlmostEqual(mission.aim_m(snap(0.0, yaw=0.0), 0.0), 5.0)          # along it
+        self.assertAlmostEqual(mission.aim_m(snap(1.0, yaw=180.0), 1.0), 9.0)        # turned about (a lane end): at once
+        self.assertAlmostEqual(mission.aim_m(snap(2.0, yaw=60.0), 2.0), 9.0 - 2.0 / 5.0)   # half-way (7 m wanted): a fifth down a second
+        self.assertGreater(mission.aim_m(snap(3.0, yaw=60.0), 3.0), 7.0)
+        for t in range(4, 60):
+            aim = mission.aim_m(snap(float(t), yaw=0.0), float(t))
+        self.assertAlmostEqual(aim, 5.0, places=1)                                   # back on the leg: 5 m again
+        # No radius, or lookahead 0 (steer at the waypoint): as configured, whatever the bow.
+        for vehicle, lookahead, want in (({}, 5.0, 5.0), ({"turn_radius_m": 6.0}, 0.0, 0.0)):
+            m = Mission({**CONFIG, "mission": {"lookahead_m": lookahead}, "vehicle": vehicle}, Route([], 3.0, False, FENCE), only_on_route=True)
+            m.set_route(Route([BOAT, WP1, WP2], 3.0, False, FENCE))
+            m.route.index = 1
+            self.assertEqual(m.aim_m(snap(0.0, yaw=180.0), 0.0), want)
 
     def test_idle_without_a_route_then_patrol_once_one_comes(self):
         step = self.mission.step(snap(0.0, people=[(10.0, 5.0, HIGH)]), 0.0)
