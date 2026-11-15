@@ -14,6 +14,9 @@ vehicle:
   # next to the LD14 show at 0.10 m), and in each [from_deg, to_deg, max_m] of lidar_mask any return
   # up to max_m. Find them with the boat in open space: python3 tools/lidar_near.py PORT
   lidar_min_range_m: 0.30
+  # main.py: obstacles are taken out to this range (unset: influence_distance_m + 2 m, which was 5 m and let the
+  # detour ahead see obstacles late). The LD14 reaches 8 m (datasheet; the team: 8-10 m); check it on the boat.
+  lidar_max_range_m: 8.0
   lidar_mask:                # measured on the bench 2026-10-18, a margin added to each
     - [226, 251, 0.95]       # boat part toward the stern: 0.59..0.87 m at 228..249 deg
     - [175, 180, 0.80]       # boat part astern: 0.69 m at 177..178 deg
