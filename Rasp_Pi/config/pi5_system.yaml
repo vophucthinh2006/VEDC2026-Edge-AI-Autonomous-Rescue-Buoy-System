@@ -1,0 +1,11 @@
+# Raspberry Pi 5 ports for the complete STM32F407 / shore / web system (run_system.py), on top of
+# boat_stm32.yaml. The STM32F407 and the LD14 are on USB-to-TTL adapters, named by socket (by-path):
+# re-plugging into another socket changes the name, tools/port_probe.py prints the new one.
+serial:
+  # USB-UART STM32F407, confirmed on this Pi 5: usb-0:1.
+  stm32_port: /dev/serial/by-path/platform-xhci-hcd.0-usb-0:1:1.0-port0
+  # USB-UART LD14, confirmed on this Pi 5: usb-0:2.
+  lidar_port: /dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0
+
+camera:
+  device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._rapoo_camera_SN0001-video-index0

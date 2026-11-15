@@ -1,0 +1,14 @@
+# Raspberry Pi 5, one buoy with its STM32F407 and no shore route (run_buoy_test.py, which adds --no-lidar):
+# the camera finds and follows people, $CAM turns the servo, $NAV drives. On top of boat_stm32.yaml.
+serial:
+  # USB-UART STM32F407, confirmed on this Pi 5: usb-0:1.
+  stm32_port: /dev/serial/by-path/platform-xhci-hcd.0-usb-0:1:1.0-port0
+
+camera:
+  device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._rapoo_camera_SN0001-video-index0
+  scan:
+    always: true
+
+# Follow people seen anywhere, not only on a route from the shore station.
+follow:
+  only_on_route: false

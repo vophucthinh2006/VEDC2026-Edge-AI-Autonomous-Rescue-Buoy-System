@@ -10,6 +10,26 @@ pip install -r requirements.txt
 python3 main.py --no-camera
 ```
 
+## Cài đặt trên Raspberry Pi 5
+
+Cùng thư mục `Rasp_Pi` và cùng `main.py` với Pi 4 và mô phỏng; Pi 5 chỉ khác thư viện và cổng.
+
+```bash
+cd Rasp_Pi
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements-pi5.txt      # Python 3.13: numpy 2, ai-edge-litert thay tflite-runtime
+python3 run_pi5.py                       # cả hệ thống: boat_stm32.yaml + config/pi5_system.yaml
+python3 run_pi5.py --buoy-test           # một phao, không lộ trình, không LiDAR: + config/pi5_buoy_test.yaml
+```
+
+- **Cổng:** STM32F407 và LD14 qua USB-to-TTL, gọi theo ổ cắm (`/dev/serial/by-path/...`) trong
+  `config/pi5_system.yaml`. Cắm sang ổ khác thì tên đổi: `tools/port_probe.py` in ra tên mới, đặt vào một
+  `--overlay` của mình (`--overlay` sau cùng thắng).
+- **UART GPIO14/15 thay cho USB:** trên Pi 5, `/dev/serial0` là cổng debug riêng, không phải GPIO14/15. Bật UART
+  phần cứng, tắt login shell trong `raspi-config`, rồi dùng `/dev/ttyAMA0` (LD14: `/dev/ttyAMA1`).
+- **Chạy khi bật máy:** `systemd/redgescue-buoy-test.service` (service của user, hướng dẫn ở đầu file).
+
 Model nhận diện là **model edge của đội** (`../YOLO_Movenet/weights`, chọn bằng `camera.model: yolo_movenet`),
 nối vào `modules/edge_model.py`:
 

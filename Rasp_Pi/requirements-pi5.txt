@@ -1,0 +1,6 @@
+numpy>=2,<3
+pyserial>=3.5,<4
+PyYAML>=6.0,<7
+opencv-python-headless>=4.12
+ai-edge-litert>=2.3         # TensorFlow Lite runtime available on Raspberry Pi 5 / Python 3.13
+Pillow>=9                   # viewer text (modules/ui_draw.py); without it the viewer falls back to OpenCV's font
