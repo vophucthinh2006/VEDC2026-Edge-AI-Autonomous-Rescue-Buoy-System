@@ -2,7 +2,7 @@
 // Chạy:  node --test test/fleetplan.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formationOffsets, planFormation, planSectors, sweepAngle } from "../src/fleetplan.js";
+import { formationOffsets, nedOffsets, planFormation, planSectors, sweepAngle } from "../src/fleetplan.js";
 
 // Hình chữ nhật 120 m (đông-tây) x 60 m (bắc-nam) quanh Hồ Đá
 const O = { lat: 10.8834, lon: 106.7960 };
@@ -32,6 +32,24 @@ test("three boats get three strips that cover the area once, nearest boat to eac
   assert.deepEqual(all, [5, 15, 25, 35, 45, 55]);                 // six lanes, each once
   assert.deepEqual(ys["PHAO-01"].sort(), [45, 55]);              // the northern strip to the northern boat
   assert.deepEqual(ys["PHAO-03"].sort((a, b) => a - b), [5, 15]);
+});
+
+test("the strips go to the boats so that their ways there do not cross", () => {
+  // As in the simulator: PHAO-01 in the middle, PHAO-02 north-west, PHAO-03 south-west of it. Greedy, PHAO-03
+  // took the middle strip (nearest pair first) and PHAO-01 the southern one, crossing PHAO-03's way.
+  const S = [at(0, 0), at(60, 0), at(60, 36), at(0, 36)];
+  const boats = [{ id: "PHAO-01", ...at(0, 18) }, { id: "PHAO-02", ...at(-3, 22) }, { id: "PHAO-03", ...at(-3, 14) }];
+  const plan = planSectors(S, boats, 6);
+  const mid = id => { const ys = plan.find(r => r.id === id).pts.map(p => xy(p).y); return (Math.min(...ys) + Math.max(...ys)) / 2; };
+  assert.ok(mid("PHAO-02") > mid("PHAO-01") && mid("PHAO-01") > mid("PHAO-03"));
+});
+
+test("NED offsets (AP_Follow FOLL_OFS_TYPE 0): the places square to the first lane, in metres north and east", () => {
+  const east = [[O.lat, O.lon], [at(60, 0).lat, at(60, 0).lon]];   // first lane due east: right is south
+  assert.deepEqual(nedOffsets(east, { B: { right: 6, back: 0 }, C: { right: -6, back: 0 } }), { B: { north: -6, east: 0 }, C: { north: 6, east: 0 } });
+  const north = [[O.lat, O.lon], [at(0, 60).lat, at(0, 60).lon]];  // due north: right is east, behind is south
+  assert.deepEqual(nedOffsets(north, { B: { right: 6, back: 4 } }), { B: { north: -4, east: 6 } });
+  assert.equal(nedOffsets([], { B: { right: 6, back: 0 } }), null);
 });
 
 test("more boats than lanes: the extra boats get nothing", () => {

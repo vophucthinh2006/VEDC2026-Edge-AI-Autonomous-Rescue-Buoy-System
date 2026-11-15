@@ -1,0 +1,22 @@
+# Raspberry Pi 5 buoy test as a user service (the repository's Rasp_Pi folder in the home directory):
+#   mkdir -p ~/.config/systemd/user && cp systemd/redgescue-buoy-test.service ~/.config/systemd/user/
+#   systemctl --user enable --now redgescue-buoy-test && sudo loginctl enable-linger $USER
+[Unit]
+Description=RedgeSCUE buoy-only test runtime (Raspberry Pi 5)
+After=network-online.target
+Wants=network-online.target
+# A program that fails at start is not restarted forever: 5 tries in 2 minutes, then it stays down.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Rasp_Pi
+ExecStart=%h/Rasp_Pi/.venv/bin/python -u %h/Rasp_Pi/run_pi5.py --buoy-test
+Restart=always
+RestartSec=3
+StandardOutput=append:%h/Rasp_Pi/logs/buoy_test.service.log
+StandardError=append:%h/Rasp_Pi/logs/buoy_test.service.log
+
+[Install]
+WantedBy=default.target

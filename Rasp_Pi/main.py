@@ -99,7 +99,10 @@ def main() -> int:
     workers: list[threading.Thread] = [uart, announcer]
     if lidar_model != "none":
         # Clusters, for the potential field: one push per object, not one per ray.
-        max_m, gap_m = float(config["vehicle"]["influence_distance_m"]) + 2.0, float(config["planner"]["cluster_gap_m"])
+        # As far as the LiDAR sees (vehicle.lidar_max_range_m), so the detour ahead (navigation.py) sees obstacles in
+        # time; unset: the field's reach plus 2 m, as before.
+        max_m = float(config["vehicle"].get("lidar_max_range_m", float(config["vehicle"]["influence_distance_m"]) + 2.0))
+        gap_m = float(config["planner"]["cluster_gap_m"])
         # Without lidar_required the boat runs on with no obstacle avoidance: the safety arbiter
         # only asks for a fresh scan when the LiDAR is required.
         workers.append(SerialLidar(lidar_model, config["serial"]["lidar_port"], int(config["serial"]["lidar_baud"]), config["vehicle"], state, stop_event,

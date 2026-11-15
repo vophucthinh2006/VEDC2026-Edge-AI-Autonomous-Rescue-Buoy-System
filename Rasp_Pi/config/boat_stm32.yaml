@@ -12,10 +12,11 @@ serial:
   # between boots. tools/port_probe.py names it after re-plugging.
   lidar_port: /dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-port0
 vehicle:
-  # A swimming pool: slow, and arrive within the GPS's wander (2 to 3 m) of a waypoint.
-  max_speed_mps: 0.30
-  approach_speed_mps: 0.15
-  face_speed_mps: 0.10
+  # A swimming pool: arrive within the GPS's wander (2 to 3 m) of a waypoint. 0.30 m/s (30 % throttle)
+  # proved too slow on the water (2026-11-04): up to the F407's 50 % throttle cap (App/control.c).
+  max_speed_mps: 0.50
+  approach_speed_mps: 0.25
+  face_speed_mps: 0.17
   arrive_radius_m: 3.0
   # The competition room has no GPS fix: with a route the boat still drives, along its bow, the
   # LiDAR avoiding (modules/navigation.py bow_no_gps). Put true back for the water: there a lost

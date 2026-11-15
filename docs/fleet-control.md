@@ -73,7 +73,10 @@ chạy một mình nên vẫn beacon tự do 5 s; mô phỏng đội tàu dùng 
   từ beacon cuối theo hướng và tốc độ; tàu lái tới một điểm phía trước chỗ của mình (chạy song song, không đuổi vòng
   tròn), tốc độ = tốc độ tàu dẫn đầu + phần bị tụt lại (tối đa 1.4 lần tốc độ thường, để bắt kịp). Camera vẫn quét, gặp
   người thì `FOLLOW` như khi tuần tra rồi quay lại chỗ. Không nghe tàu dẫn đầu 15 s: đứng yên chờ.
-- Tàu dẫn đầu chạy lộ trình bình thường, không biết mình đang dẫn.
+- Tàu dẫn đầu chạy lộ trình bình thường, nhưng chậm hơn. Hub gửi cho chính nó `fol = [nó, 0, 0]`; không tàu theo
+  nào có chỗ (0, 0), nên Pi hiểu đó là "mình đang dẫn". Pi giữ `PATROL` và chạy ở `formation.leader_speed_ratio`
+  (0,7) lần tốc độ tối đa, để tàu theo còn dư tốc độ đuổi kịp chỗ của mình (F407 chặn ga ở 50 %, nên tàu theo không
+  chạy nhanh hơn tốc độ tối đa được). F407 và cổng LoRa không đổi.
 - Tàu dẫn đầu mất liên lạc 30 s: Hub cho tàu theo có tên nhỏ nhất lên dẫn đầu, giao phần lộ trình tàu cũ chưa đi
   (từ waypoint nó đang tới trong khung chẩn đoán), xếp lại chỗ các tàu còn lại.
 

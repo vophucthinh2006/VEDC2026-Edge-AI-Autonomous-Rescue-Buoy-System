@@ -15,12 +15,14 @@ float Heading_Error(float target_deg, float current_deg);
 void HeadingController_Init(heading_controller_t *controller);
 void HeadingController_Reset(heading_controller_t *controller);
 /* PID turn command in -1..1, positive turns the bow right. yaw_rate_dps is
-   positive clockwise, like the heading. */
+   positive clockwise, like the heading. throttle 0..1: the rear throttle the
+   command is mixed around, for HEADING_SCALE_REF_THROTTLE. */
 float HeadingController_Update(heading_controller_t *controller,
                                float target_deg,
                                float current_deg,
                                float yaw_rate_dps,
-                               float dt_s);
+                               float dt_s,
+                               float throttle);
 /* Turn command u onto the boat: steer = u * HEADING_RUDDER_GAIN, the two rear
    motors split u * HEADING_DIFF_GAIN around throttle, capped so neither goes
    below 0 or above 1. Positive u with HEADING_DIFF_DIR +1 speeds up the left. */

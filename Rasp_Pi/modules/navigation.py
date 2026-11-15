@@ -48,6 +48,41 @@ ESCAPE_STEP_DEG = 15.0      # stopped by an obstacle, the courses tried for a wa
 # BACK_THROTTLE its throttle astern, while the stern stays clear within the stop distance.
 BACK_THROTTLE = 0.30
 BACK_S = 3.0
+# Speed trim (vehicle.speed_trim): the F407 turns the speed into a throttle open-loop, and the simulated boat ran
+# 0.9 to 1.0 m/s when told 0.5 (2026-11-12). The overspeed cut then had the throttle off about 70 % of the time,
+# and at 0 throttle the F407 cannot steer: the boat drifted off its lane. The Pi learns how much faster than told
+# the boat runs (GPS speed / speed sent, low-passed over TRIM_TAU_S while it runs straight for TRIM_SETTLE_S) and
+# sends the speed divided by that. Never below 1: the trim only takes throttle off, never adds any.
+# The cruise is trimmed (reasons TRIM_REASONS). The creep round an obstacle only with vehicle.min_steer_speed_mps set,
+# and not below it: divided alone it went down to 0.03 and the F407 (its old heading PID) no longer steered, the
+# boat drifted round in circles next to a house (2026-11-13).
+TRIM_REASONS = ("waypoint", "formation")
+TRIM_TAU_S = 5.0
+TRIM_SETTLE_S = 8.0          # long enough for the boat to be up to speed again after a stop
+# Thrust grows with the throttle and the drag with the square of the speed: the simulated boat ran 0.7 m/s at 0.2
+# throttle (2026-11-13), so 0.5 m/s takes about 0.1, a fifth of the speed.
+TRIM_MAX = 5.0
+TRIM_MIN_MPS = 0.05          # sent below this, the GPS speed says nothing about the throttle
+TRIM_STRAIGHT_DEG = 20.0
+# vehicle.min_steer_speed_mps (0 or unset: off): AUTO 0 makes the F407 reset its heading PID and centre the rudders,
+# and the boat drifts. Most seconds the simulated boats were more than 90 deg off the commanded heading were overspeed
+# cuts while creeping round an obstacle (2026-11-13, round 3: 111 of 163 s). So the speed sent never goes below this
+# floor while the boat still has to steer: an overspeed cut with the course STEER_ERROR_DEG or more off the bow, or a
+# creep (CREEP_REASONS); and the trim, which now divides the creep too, stops at it. STOP and BACK stay as they are.
+STEER_ERROR_DEG = 20.0
+CREEP_REASONS = ("leaving_obstacle", "turning_away")
+# vehicle.turn_rate_deg_s (0 or unset: off): the turn rate the boat really reaches. Like ArduPilot Rover's corner
+# speed limit, the boat slows for a sharp turn so that the circle through its bow and the point it steers at,
+# r = D / (2 sin(error)) (D / 2 once the point is abeam or behind), is one it can turn: v <= omega * r. Never below
+# the creep (CREEP of max_speed_mps), where it still steers. The boats looped at the lane ends (2026-11-13, round 4).
+# Avoidance ahead (after ArduPilot's BendyRuler, AP_OABendyRuler): with the course to the aim point blocked within
+# planner.avoid_lookahead_m (plus the braking distance), the boat takes the nearest heading, in DETOUR_STEP_DEG
+# steps up to DETOUR_MAX_DEG either way, that passes clear by planner.avoid_margin_m more than the inflated hull.
+# It used to keep its course until the field turned it (within about 1.5 m) or it stopped at the wall, backed off
+# and swung away: 3 to 7 m off its lane round each house (2026-11-12, wide_obstacles).
+DETOUR_STEP_DEG = 10.0
+DETOUR_MAX_DEG = 90.0
+DETOUR_SWITCH_STEPS = 2      # the side taken last is kept unless the other is this many steps nearer the course
 
 
 class BapfNavigator:
@@ -59,6 +94,11 @@ class BapfNavigator:
         self._bow_blocked = False  # the last plan stopped for an obstacle on the way the boat moves
         self._coasting = False     # the last plan cut the throttle for the boat running too fast
         self._back_until = 0.0     # backing off an obstacle until then (monotonic s)
+        self._gain = 1.0           # GPS speed per speed sent, learnt (TRIM_*)
+        self._sent = 0.0           # the speed last sent in AUTO
+        self._trim_at: float | None = None
+        self._straight_since: float | None = None
+        self._side = 0             # the side of the last detour: 1 starboard, -1 port, 0 none
 
     @property
     def standoff_m(self) -> float:
@@ -103,9 +143,9 @@ class BapfNavigator:
         al. 2022, eq. 16)."""
         return bool(self._blocking(obstacles, heading_body_deg, limit_m))
 
-    def _blocking(self, obstacles: tuple[Obstacle, ...], heading_body_deg: float, limit_m: float) -> list[Obstacle]:
-        """The obstacles _course_blocked finds on the course."""
-        inflated_radius = float(self.v["boat_radius_m"]) + float(self.v["safety_margin_m"])
+    def _blocking(self, obstacles: tuple[Obstacle, ...], heading_body_deg: float, limit_m: float, extra_m: float = 0.0) -> list[Obstacle]:
+        """The obstacles _course_blocked finds on the course (the hull inflated by extra_m more)."""
+        inflated_radius = float(self.v["boat_radius_m"]) + float(self.v["safety_margin_m"]) + extra_m
         v_fwd, v_right = cos(radians(heading_body_deg)), sin(radians(heading_body_deg))
         out = []
         for obstacle in obstacles:
@@ -143,6 +183,59 @@ class BapfNavigator:
                 return turn
         return None
 
+    def _detour(self, obstacles: tuple[Obstacle, ...], heading_deg: float, yaw_deg: float, brake_m: float) -> float:
+        """The compass heading to steer instead of heading_deg when that course is blocked ahead (DETOUR_*)."""
+        lookahead = float(self.p.get("avoid_lookahead_m", 4.0)) + brake_m
+        margin = float(self.p.get("avoid_margin_m", 0.5))
+
+        def clear(turn: float) -> bool:
+            return not self._blocking(obstacles, signed_angle_deg(heading_deg + turn - yaw_deg), lookahead, margin)
+        if not obstacles or float(self.p.get("avoid_lookahead_m", 4.0)) <= 0.0 or clear(0.0):
+            self._side = 0
+            return heading_deg
+        steps = int(DETOUR_MAX_DEG // DETOUR_STEP_DEG)
+        first = {side: next((k for k in range(1, steps + 1) if clear(side * k * DETOUR_STEP_DEG)), None) for side in (1, -1)}
+        if first[1] is None and first[-1] is None:
+            return heading_deg          # boxed in ahead: the field and the stop below deal with it
+        if self._side and first[self._side] is not None and \
+                (first[-self._side] is None or first[-self._side] + DETOUR_SWITCH_STEPS >= first[self._side]):
+            side = self._side
+        elif first[1] is None or (first[-1] is not None and first[-1] < first[1]):
+            side = -1
+        else:
+            side = 1                    # a tie goes to starboard, like the field's bias
+        self._side = side
+        return (heading_deg + side * first[side] * DETOUR_STEP_DEG) % 360.0
+
+    def _learn(self, gps_speed: float, straight: bool, sent: float) -> None:
+        """Learns the trim from the GPS speed and the speed last sent in AUTO (sent; 0 after a STOP or BACK).
+        Through the overspeed cut too: else, cut every few seconds, the boat never ran straight long enough."""
+        now = monotonic()
+        if self.v.get("speed_trim", True) and straight and sent >= TRIM_MIN_MPS:
+            if self._straight_since is None:
+                self._straight_since = now
+            elif now - self._straight_since >= TRIM_SETTLE_S and self._trim_at is not None:
+                alpha = min(1.0, (now - self._trim_at) / TRIM_TAU_S)
+                self._gain = clamp(self._gain + alpha * (gps_speed / sent - self._gain), 1.0, TRIM_MAX)
+        else:
+            self._straight_since = None
+        self._trim_at = now
+
+    def _trimmed(self, speed: float) -> float:
+        """The speed to send for the boat to run speed (TRIM_*)."""
+        self._sent = max(speed, 0.0) / (self._gain if self.v.get("speed_trim", True) else 1.0)
+        return self._sent
+
+    def _corner_speed(self, gps, imu, goal: tuple[float, float], heading_deg: float, desired: float) -> float:
+        """The speed at which the boat can turn onto the point it steers at (turn_rate_deg_s above)."""
+        omega = radians(float(self.v.get("turn_rate_deg_s", 0.0)))
+        error = abs(signed_angle_deg(heading_deg - imu.yaw_deg))
+        if omega <= 0.0 or error < 1.0:
+            return desired
+        d = haversine_m(gps.lat_deg, gps.lon_deg, goal[0], goal[1])
+        radius = d / (2.0 * sin(radians(min(error, 90.0))))
+        return max(omega * radius, min(desired, CREEP * float(self.v["max_speed_mps"])))
+
     def _repulsion_body(self, obstacles: tuple[Obstacle, ...]) -> tuple[float, float, float]:
         """Return forward/right forces and nearest clearance after inflating the hull."""
         forward = right = 0.0
@@ -169,6 +262,10 @@ class BapfNavigator:
         goal = snapshot.waypoint
         target = snapshot.human_target
         brake = self.braking_m(snapshot)
+        sent, self._sent = self._sent, 0.0    # stays 0 unless this plan sends a speed in AUTO
+        # vehicle.lidar_avoidance false (the boat on its stand for the judges, config/stand_demo.yaml):
+        # the LiDAR is read and shown but steers nothing, slows nothing and stops nothing.
+        obstacles = snapshot.obstacles if self.v.get("lidar_avoidance", True) else ()
         if target is not None:
             # A person is approached along the detected bearing, never closer than standoff. The
             # throttle goes off the braking distance early, so the boat coasts to the stand-off.
@@ -206,18 +303,19 @@ class BapfNavigator:
             desired_heading = bearing_deg(gps.lat_deg, gps.lon_deg, goal[0], goal[1])
             remaining = haversine_m(gps.lat_deg, gps.lon_deg, goal[0], goal[1])
             desired_speed = float(self.v["max_speed_mps"])
+            if snapshot.speed_limit is not None:   # leading a formation: slower, so the followers can catch up
+                desired_speed = min(desired_speed, max(snapshot.speed_limit, 0.0))
             reason = "waypoint"
             if remaining <= float(self.v["arrive_radius_m"]):
                 return NavCommand("STOP", 0.0, imu.yaw_deg, "arrived")
         else:
             self._at_standoff = self._blocked = self._bow_blocked = False
             return NavCommand("STOP", 0.0, imu.yaw_deg, "no_goal")
+        if reason in ("waypoint", "formation"):
+            desired_heading = self._detour(obstacles, desired_heading, imu.yaw_deg, brake)  # type: ignore[arg-type]
 
         # Desired global vector, then add obstacle forces transformed from body to world.
         desired_east, desired_north = body_to_world(cos(radians(signed_angle_deg(desired_heading - imu.yaw_deg))), sin(radians(signed_angle_deg(desired_heading - imu.yaw_deg))), imu.yaw_deg)
-        # vehicle.lidar_avoidance false (the boat on its stand for the judges, config/stand_demo.yaml):
-        # the LiDAR is read and shown but steers nothing, slows nothing and stops nothing.
-        obstacles = snapshot.obstacles if self.v.get("lidar_avoidance", True) else ()
         rep_fwd, rep_right, clearance = self._repulsion_body(obstacles)  # type: ignore[arg-type]
         # Bias is a small consistent starboard tangent. It is applied only when avoiding.
         if rep_fwd or rep_right:
@@ -227,6 +325,8 @@ class BapfNavigator:
         heading = world_to_heading(float(self.p["attractive_gain"]) * desired_east + rep_east, float(self.p["attractive_gain"]) * desired_north + rep_north)
         turn_error = abs(signed_angle_deg(heading - imu.yaw_deg))
         speed = desired_speed * clamp(1.0 - turn_error / 120.0, 0.25, 1.0)
+        if reason in TRIM_REASONS and goal is not None:
+            speed = min(speed, self._corner_speed(gps, imu, goal, desired_heading, desired_speed))
         # Near an obstacle the boat slows down, and stops if the course it is given leads onto it.
         # It used to stop for anything inside the stop distance, whatever the course: stopped, it
         # could not turn, so it never left the obstacle again. A course that leads away from it is
@@ -276,8 +376,18 @@ class BapfNavigator:
                 reason = "leaving_obstacle"
         # Speed 0 in AUTO: the F407 rests the motors (and the front one brakes) and the boat coasts
         # down to the speed it was given, then the throttle comes back.
+        cruising = reason in TRIM_REASONS and clearance >= slow_m
+        self._learn(gps.speed_mps, cruising and turn_error < TRIM_STRAIGHT_DEG, sent)
+        floor = float(self.v.get("min_steer_speed_mps", 0.0))
+        steering = floor > 0.0 and (reason in CREEP_REASONS or abs(signed_angle_deg(heading - imu.yaw_deg)) >= STEER_ERROR_DEG)
         if self._governed(speed, gps.speed_mps):
+            self._sent = sent           # cut for a moment: the speed the boat was sent before still drives it
+            if steering:
+                return NavCommand("AUTO", min(floor, speed), heading, "overspeed_steer")
             return NavCommand("AUTO", 0.0, heading, "overspeed")
+        if cruising or (floor > 0.0 and reason in CREEP_REASONS):
+            self._sent = max(self._trimmed(speed), min(speed, floor))
+            return NavCommand("AUTO", self._sent, heading, reason)
         return NavCommand("AUTO", speed, heading, reason)
 
 

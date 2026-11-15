@@ -49,6 +49,7 @@ import tty
 from pathlib import Path
 
 from gz.msgs10.boolean_pb2 import Boolean
+from gz.msgs10.clock_pb2 import Clock
 from gz.msgs10.double_pb2 import Double
 from gz.msgs10.odometry_pb2 import Odometry
 from gz.msgs10.pose_pb2 import Pose
@@ -57,10 +58,14 @@ from gz.transport13 import Node
 # App/app_config.h
 NAV_SPEED_MAX = 2.0
 NAV_TIMEOUT_S, HBT_TIMEOUT_S, IMU_TIMEOUT_S = 0.3, 0.5, 0.1
+# Simulation only: the IMU timeout counts on Gazebo's clock, so a host that stalls Gazebo (the world frozen too)
+# is not an IMU loss; a pose this many wall seconds old still is (gz sim gone).
+SIM_STALL_S = 2.0
 CONTROL_PERIOD_S, TELEMETRY_PERIOD_S = 0.01, 0.1
 MAX_PITCH_DEG = MAX_ROLL_DEG = 35.0
-KP, KI, KD = 0.020, 0.002, 0.008
+KP, KI, KD = 0.10, 0.010, 0.008
 DEADBAND_DEG, INTEGRAL_LIMIT, RATE_LPF_HZ = 2.0, 100.0, 5.0
+INTEGRAL_ZONE_DEG, SCALE_REF_THROTTLE, SCALE_MIN_THROTTLE = 15.0, 0.15, 0.05
 RUDDER_GAIN, DIFF_GAIN, DIFF_DIR = 1.0, 0.30, +1
 RUDDER_SPAN_US, RUDDER_FRONT_GAIN = 250.0, 1.0
 ESC_RAMP_PER_S = 2.0
@@ -82,7 +87,9 @@ CELL_VOLTS = (3.27, 3.61, 3.69, 3.71, 3.73, 3.77, 3.79, 3.84, 3.92, 4.02, 4.20) 
 POD_RAD_PER_US = math.radians(45.0) / 500.0
 EARTH_RADIUS_M = 6378137.0
 TOPIC = "/model/{}/joint/{}/{}"
-TDMA_SLOTS, TDMA_SLOT_S = 4, 2.0   # App/lora_slot.h LORA_SLOT_COUNT, LORA_SLOT_MS
+# App/lora_slot.h LORA_SLOT_COUNT, LORA_SLOT_MS; VEDC_SIM_SLOT_S: shorter slots in the simulation only (fleet_sim.sh
+# --fast-beacon, with a faster spreading factor in lora_radio.py)
+TDMA_SLOTS, TDMA_SLOT_S = 4, float(os.environ.get("VEDC_SIM_SLOT_S", "2.0"))
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -100,27 +107,51 @@ def heading_error(target_deg: float, current_deg: float) -> float:
     return math.fmod(target_deg - current_deg + 540.0, 360.0) - 180.0
 
 
+# VEDC_SIM_HEADING_GAINS: "firmware" (the default) is App/app_config.h as it is, tuned in Gazebo
+# (media/simulation/pid/README.md); "tuned" is the same set, the name round 3 ran with; "legacy" is the
+# firmware before 13/11/2026, to rerun rounds 1-2. i_zone: the integral only runs within it;
+# ref_throttle > 0: the PID output is scaled by ref / max(throttle, min).
+HEADING_GAINS = {
+    "firmware": {"kp": KP, "ki": KI, "kd": KD, "deadband": DEADBAND_DEG, "i_zone": INTEGRAL_ZONE_DEG,
+                 "ref_throttle": SCALE_REF_THROTTLE, "min_throttle": SCALE_MIN_THROTTLE},
+    "legacy": {"kp": 0.020, "ki": 0.002, "kd": 0.008, "deadband": DEADBAND_DEG, "i_zone": math.inf,
+               "ref_throttle": 0.0, "min_throttle": 0.0},
+}
+HEADING_GAINS["tuned"] = HEADING_GAINS["firmware"]
+
+
+def throttle_scale(gains: dict, throttle: float) -> float:
+    """Steering authority comes from thrust: below ref_throttle the same u turns the boat less, so u is
+    scaled up by ref / max(throttle, min_throttle); above it the turn rate barely changes (sysid), u stays."""
+    if gains["ref_throttle"] <= 0.0:
+        return 1.0
+    return max(1.0, gains["ref_throttle"] / max(throttle, gains["min_throttle"]))
+
+
 class HeadingController:
     """App/heading_controller.c, line for line: u in [-1, 1], positive turns the bow right."""
 
-    def __init__(self) -> None:
+    def __init__(self, gains: dict | None = None) -> None:
+        self.g = gains or HEADING_GAINS["firmware"]
         self.reset()
 
     def reset(self) -> None:
         self.integral, self.rate, self.primed = 0.0, 0.0, False
 
-    def update(self, target_deg: float, current_deg: float, yaw_rate_dps: float, dt: float) -> float:
+    def update(self, target_deg: float, current_deg: float, yaw_rate_dps: float, dt: float, throttle: float = 0.0) -> float:
+        g = self.g
         error = heading_error(target_deg, current_deg)
         if not self.primed:
             self.rate, self.primed = yaw_rate_dps, True
         else:
             tau = 1.0 / (2.0 * math.pi * RATE_LPF_HZ)
             self.rate += dt / (tau + dt) * (yaw_rate_dps - self.rate)
-        d = -KD * self.rate
-        if abs(error) <= DEADBAND_DEG:
-            return clamp(KI * self.integral + d, -1.0, 1.0)
-        candidate = clamp(self.integral + error * dt, -INTEGRAL_LIMIT, INTEGRAL_LIMIT)
-        raw = KP * error + KI * candidate + d
+        scale = throttle_scale(g, throttle)
+        d = -g["kd"] * self.rate * scale
+        if abs(error) <= g["deadband"]:
+            return clamp(g["ki"] * self.integral * scale + d, -1.0, 1.0)
+        candidate = clamp(self.integral + error * dt, -INTEGRAL_LIMIT, INTEGRAL_LIMIT) if abs(error) < g["i_zone"] else self.integral
+        raw = (g["kp"] * error + g["ki"] * candidate) * scale + d
         output = clamp(raw, -1.0, 1.0)
         if raw == output or (output >= 1.0 and error < 0.0) or (output <= -1.0 and error > 0.0):
             self.integral = candidate
@@ -186,6 +217,7 @@ class Buoy:
         self.lock = threading.Lock()
         self.wall = 0.0                 # monotonic time of the last pose
         self.stamp: float | None = None
+        self.sim_now: float | None = None   # Gazebo's /clock
         self.x = self.y = 0.0
         self.heading = self.pitch = self.roll = 0.0
         self.yaw_rate = 0.0             # deg/s, clockwise seen from above (BNO055 gyro Z sign)
@@ -208,12 +240,23 @@ class Buoy:
             self.stamp, self.wall = stamp, time.monotonic()
             self.x, self.y, self.heading, self.pitch, self.roll = p.x, p.y, heading, pitch, roll
 
+    def on_clock(self, msg: Clock) -> None:
+        self.sim_now = msg.sim.sec + msg.sim.nsec * 1e-9
+
+    def fresh(self, now: float) -> bool:
+        """IMU_TIMEOUT_S on the sim clock (wall clock until /clock is heard), SIM_STALL_S on the wall clock."""
+        if self.stamp is None or now - self.wall > SIM_STALL_S:
+            return False
+        age = now - self.wall if self.sim_now is None else self.sim_now - self.stamp
+        return age <= IMU_TIMEOUT_S
+
 
 class Board:
     def __init__(self, args: argparse.Namespace, node: Node) -> None:
         self.args = args
         self.buoy = Buoy()
         node.subscribe(Odometry, f"/model/{args.model}/odometry", self.buoy.on_odometry)
+        node.subscribe(Clock, "/clock", self.buoy.on_clock)
         self.pub = {name: node.advertise(TOPIC.format(args.model, joint, kind), Double) for name, joint, kind in (
             ("left", "prop_rear_left_joint", "cmd_thrust"),
             ("right", "prop_rear_right_joint", "cmd_thrust"),
@@ -222,7 +265,11 @@ class Board:
             ("pod_right", "pod_rear_right_joint", "cmd_pos"),
             ("pod_front", "pod_front_joint", "cmd_pos"),
             ("pan", "camera_pan_joint", "cmd_pos"))}
-        self.pid = HeadingController()
+        gains = os.environ.get("VEDC_SIM_HEADING_GAINS", "firmware")
+        if gains not in HEADING_GAINS:
+            raise SystemExit(f"VEDC_SIM_HEADING_GAINS={gains}: not one of {', '.join(HEADING_GAINS)}")
+        self.pid = HeadingController(HEADING_GAINS[gains])
+        print(f"heading gains: {gains} {HEADING_GAINS[gains]}", flush=True)
         # pi_command_t of uart_protocol.h
         self.nav_mode, self.nav_speed, self.nav_heading, self.nav_ttl = "STOP", 0.0, 0.0, 0.0
         self.nav_seq, self.last_nav = 0, 0.0
@@ -332,7 +379,7 @@ class Board:
     def control(self, now: float, dt: float) -> None:
         b = self.buoy
         with b.lock:
-            imu_fresh = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
+            imu_fresh = b.fresh(now)
             heading, rate, pitch, roll = b.heading, b.yaw_rate, b.pitch, b.roll
         confirm = self.args.dir / "confirm"
         confirm_pressed = confirm.exists()
@@ -370,7 +417,7 @@ class Board:
         if state == "A" and throttle > 0.0:
             if self.state != "A":
                 self.pid.reset()
-            u = self.pid.update(self.nav_heading, heading, rate, dt)
+            u = self.pid.update(self.nav_heading, heading, rate, dt, throttle)
             left, right, steer = heading_mix(u, throttle)
         else:
             # Stopped, or AUTO at speed 0: no pivoting, motors rest and the rudders centre.
@@ -434,7 +481,7 @@ class Board:
     def telemetry(self, fd: int, seq: int, now: float) -> None:
         b = self.buoy
         with b.lock:
-            imu_ok = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
+            imu_ok = b.fresh(now)
             x, y, heading, pitch, roll, ve, vn = b.x, b.y, b.heading, b.pitch, b.roll, b.ve, b.vn
         overturned = imu_ok and (abs(pitch) > MAX_PITCH_DEG or abs(roll) > MAX_ROLL_DEG)
         lat0, lon0 = self.args.home
@@ -504,7 +551,7 @@ class Board:
         """App/lora_beacon.c build_frame, with the route field."""
         b = self.buoy
         with b.lock:
-            imu_ok = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
+            imu_ok = b.fresh(now)
             x, y, heading, pitch, roll = b.x, b.y, b.heading, b.pitch, b.roll
             ve, vn = b.ve, b.vn
         lat0, lon0 = self.args.home

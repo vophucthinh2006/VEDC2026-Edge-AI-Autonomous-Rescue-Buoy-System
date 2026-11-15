@@ -1,4 +1,5 @@
 import unittest
+from math import cos, radians
 from time import monotonic
 
 from modules.navigation import BapfNavigator, PaperBapfNavigator, VoNavigator, cpa
@@ -147,8 +148,11 @@ class NavigationTest(unittest.TestCase):
         self.assertEqual(BapfNavigator(self.vehicle, self.planner).braking_m(self._snap([], speed=1.43)), 0.0)  # not configured
         # 6 m dead ahead: nothing to do at rest, the throttle off already at 1.43 m/s.
         self.assertEqual(navigator.plan(self._snap([Obstacle(0, 6.0, 0.2)])).reason, "waypoint")
-        command = BapfNavigator(vehicle, self.planner).plan(self._snap([Obstacle(0, 6.0, 0.2)], speed=1.43))
+        reactive = {**self.planner, "avoid_lookahead_m": 0.0}    # the stop alone, without the detour ahead
+        command = BapfNavigator(vehicle, reactive).plan(self._snap([Obstacle(0, 6.0, 0.2)], speed=1.43))
         self.assertEqual((command.mode, command.reason), ("STOP", "obstacle_too_close"))
+        # With it, the boat still does not drive on at that speed.
+        self.assertEqual(BapfNavigator(vehicle, self.planner).plan(self._snap([Obstacle(0, 6.0, 0.2)], speed=1.43)).mode, "STOP")
 
     def test_the_throttle_goes_off_while_the_boat_runs_faster_than_told(self) -> None:
         navigator = BapfNavigator({**self.vehicle, "overspeed_mps": 0.3}, self.planner)
@@ -243,6 +247,121 @@ class NavigationTest(unittest.TestCase):
         command = BapfNavigator(self.vehicle, self.planner).plan(self._snap([Obstacle(0, 6.0, 0.2)]))
         self.assertEqual((command.mode, command.reason), ("AUTO", "waypoint"))
         self.assertAlmostEqual(command.speed_mps, 0.5)
+
+    def test_an_obstacle_ahead_is_passed_close_by_not_stopped_at(self) -> None:
+        # A house 4 m wide whose near side is 4 m ahead on the course (the waypoint 111 m north): the boat turns
+        # off early, by the least that passes clear (hull 0.75 + margin 0.5 + half the width 2 m: atan(3.25 / 6)
+        # = 28 deg, so the 30 deg step), keeps its speed and does not stop.
+        house = [Obstacle(0, 6.0, 4.0)]
+        navigator = BapfNavigator(self.vehicle, {**self.planner, "bias_gain": 0.0})
+        command = navigator.plan(self._snap(house))
+        self.assertEqual((command.mode, command.reason), ("AUTO", "waypoint"))
+        self.assertGreater(abs(signed(command.heading_deg)), 20.0)
+        self.assertLess(abs(signed(command.heading_deg)), 45.0)
+        self.assertGreater(command.speed_mps, 0.3)
+        # Ties go to starboard; the side taken is kept while the other is no clearly nearer course.
+        self.assertGreater(signed(command.heading_deg), 0.0)
+        offset = [Obstacle(-8.0, 6.0, 4.0)]      # now a little to port of the course: port would be the nearer way out
+        self.assertGreater(signed(navigator.plan(self._snap(offset)).heading_deg), 0.0)
+        # Off to the side by 3 m (clear of the hull and the margin): the course is not bent.
+        aside = [Obstacle(30.0, 6.0, 0.4)]
+        free = BapfNavigator(self.vehicle, {**self.planner, "bias_gain": 0.0}).plan(self._snap(aside))
+        self.assertLess(abs(signed(free.heading_deg)), 5.0)
+
+    def test_the_speed_sent_learns_how_much_faster_the_boat_runs(self) -> None:
+        from unittest import mock
+        clock = [100.0]
+        with mock.patch("modules.navigation.monotonic", lambda: clock[0]):
+            navigator = BapfNavigator({**self.vehicle, "overspeed_mps": 0.3}, self.planner)
+            sent, v = [], 0.0
+            # Running straight on open water towards twice the speed it is sent, as the simulated boat did (lag 2 s).
+            for _ in range(600):                 # 60 s at 10 Hz
+                command = navigator.plan(self._snap([], speed=v))
+                sent.append((command.speed_mps, command.reason))
+                v += (2.0 * command.speed_mps - v) * 0.1 / 2.0
+                clock[0] += 0.1
+            self.assertAlmostEqual(sent[-1][0], 0.25, delta=0.03)          # told half: it then runs the 0.5 wanted
+            self.assertNotIn("overspeed", [r for _, r in sent[-100:]])    # and the throttle is no longer cut
+            # The creep off an obstacle is not divided: lower, the F407 would no longer steer.
+            command = navigator.plan(self._snap([Obstacle(0, 1.4, 0.2)], speed=0.1))
+            self.assertEqual((command.reason, command.speed_mps), ("leaving_obstacle", 0.3 * 0.5))
+            # A boat slower than told gets no more throttle than before.
+            slow = BapfNavigator(self.vehicle, self.planner)
+            for _ in range(400):
+                command = slow.plan(self._snap([], speed=0.3))
+                clock[0] += 0.1
+            self.assertAlmostEqual(command.speed_mps, 0.5)
+            # Off: the speed as before.
+            off = BapfNavigator({**self.vehicle, "speed_trim": False}, self.planner)
+            for _ in range(100):
+                command = off.plan(self._snap([], speed=0.9))
+                clock[0] += 0.1
+            self.assertAlmostEqual(command.speed_mps, 0.5)
+
+    def test_an_overspeed_cut_keeps_a_steering_speed_while_the_boat_must_turn(self) -> None:
+        from dataclasses import replace
+        vehicle = {**self.vehicle, "overspeed_mps": 0.3, "min_steer_speed_mps": 0.06}
+        # Told 0.5 m/s, running 0.9, the waypoint 90 deg to starboard: not 0 (the F407 would reset its heading PID and
+        # centre the rudders) but the floor, so it still turns.
+        east = replace(self._snap([], speed=0.9), waypoint=(10, 106.001))
+        command = BapfNavigator(vehicle, self.planner).plan(east)
+        self.assertEqual((command.mode, command.speed_mps, command.reason), ("AUTO", 0.06, "overspeed_steer"))
+        # On course: the cut goes to 0 as before.
+        command = BapfNavigator(vehicle, self.planner).plan(self._snap([], speed=0.9))
+        self.assertEqual((command.mode, command.speed_mps, command.reason), ("AUTO", 0.0, "overspeed"))
+        # Creeping off an obstacle, running too fast: the floor, whatever the course.
+        command = BapfNavigator(vehicle, self.planner).plan(self._snap([Obstacle(0, 1.4, 0.2)], speed=0.3))
+        self.assertEqual((command.speed_mps, command.reason), (0.06, "overspeed_steer"))
+        # A stop for an obstacle on the course stays a stop.
+        ring = [Obstacle(float(b), 0.8, 0.2) for b in range(-180, 180, 30)]
+        command = BapfNavigator(vehicle, {**self.planner, "bias_gain": 0.0}).plan(self._snap(ring, speed=0.9))
+        self.assertEqual((command.mode, command.speed_mps, command.reason), ("STOP", 0.0, "obstacle_too_close"))
+        # Without the key: the cut goes to 0 as before.
+        command = BapfNavigator({**self.vehicle, "overspeed_mps": 0.3}, self.planner).plan(east)
+        self.assertEqual((command.speed_mps, command.reason), (0.0, "overspeed"))
+
+    def test_the_creep_is_trimmed_down_to_the_steering_floor_only(self) -> None:
+        from unittest import mock
+        clock = [100.0]
+        with mock.patch("modules.navigation.monotonic", lambda: clock[0]):
+            navigator = BapfNavigator({**self.vehicle, "min_steer_speed_mps": 0.06}, self.planner)
+            v = 0.0
+            for _ in range(600):                 # learns the boat runs five times what it is sent, as in the simulator
+                command = navigator.plan(self._snap([], speed=v))
+                v += (5.0 * command.speed_mps - v) * 0.1 / 2.0
+                clock[0] += 0.1
+            self.assertAlmostEqual(navigator._gain, 5.0, delta=0.3)
+            # Creep 0.15 / 5 = 0.03 would not steer: the floor.
+            command = navigator.plan(self._snap([Obstacle(0, 1.4, 0.2)], speed=0.1))
+            self.assertEqual(command.reason, "leaving_obstacle")
+            self.assertAlmostEqual(command.speed_mps, 0.06)
+
+    def test_the_boat_slows_for_a_turn_it_could_not_make_at_speed(self) -> None:
+        from dataclasses import replace
+        vehicle = {**self.vehicle, "turn_rate_deg_s": 5.0}
+        # The aim point 4 m away, 45 deg to starboard: the circle onto it is 4 / (2 sin 45) = 2.83 m round, which
+        # 5 deg/s turns at 0.25 m/s (the turn error alone would allow 0.5 x (1 - 45/120) = 0.31).
+        k_east = 111_320 * cos(radians(10))
+        corner = replace(self._snap([]), waypoint=(10 + 2.83 / 111_320, 106 + 2.83 / k_east))
+        command = BapfNavigator(vehicle, self.planner).plan(corner)
+        self.assertAlmostEqual(command.speed_mps, radians(5.0) * 4 / (2 * 0.7071), places=2)
+        self.assertAlmostEqual(BapfNavigator(self.vehicle, self.planner).plan(corner).speed_mps, 0.5 * (1 - 45 / 120), places=2)
+        # Abeam 1 m away: not below the creep (0.3 x 0.5), where the F407 still steers. Further round, the turn
+        # error already slows the boat more (to a quarter at 90 deg and beyond).
+        near = replace(self._snap([]), waypoint=(10 + 0.71 / 111_320, 106 + 0.71 / k_east))
+        self.assertAlmostEqual(BapfNavigator(vehicle, self.planner).plan(near).speed_mps, 0.15, places=2)
+        # Straight on: unchanged.
+        self.assertAlmostEqual(BapfNavigator(vehicle, self.planner).plan(self._snap([])).speed_mps, 0.5)
+
+    def test_a_formation_leader_sails_at_its_speed_limit(self) -> None:
+        from dataclasses import replace
+        command = BapfNavigator(self.vehicle, self.planner).plan(replace(self._snap([]), speed_limit=0.35))
+        self.assertEqual(command.reason, "waypoint")
+        self.assertAlmostEqual(command.speed_mps, 0.35)
+
+
+def signed(heading_deg: float) -> float:
+    return (heading_deg + 180.0) % 360.0 - 180.0
 
 
 VEHICLE = {"boat_radius_m": 0.55, "max_speed_mps": 1.0, "arrive_radius_m": 2.0}

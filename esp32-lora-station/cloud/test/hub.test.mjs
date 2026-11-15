@@ -416,7 +416,8 @@ test("a formation sends the route to the leader, places to the followers, and a 
     const f = await call(hub, "PUT", "/plan", { mode: "formation", poly: AREA, ids: ["PHAO-01", "PHAO-02", "PHAO-03"], leader: "PHAO-02", shape: "line", spacing: 10 });
     assert.equal(f.leader, "PHAO-02");
     let dl = await call(hub, "GET", "/downlink");
-    assert.deepEqual(dl.fol, { "PHAO-01": ["PHAO-02", 10, 0], "PHAO-03": ["PHAO-02", -10, 0] });
+    // The leader gets its own place 0, 0: its Pi sails the route slower, the followers having speed to spare
+    assert.deepEqual(dl.fol, { "PHAO-01": ["PHAO-02", 10, 0], "PHAO-03": ["PHAO-02", -10, 0], "PHAO-02": ["PHAO-02", 0, 0] });
     const leaderRoute = dl.routes.find(r => r.id === "PHAO-02");
     assert.equal(leaderRoute.pts.length, 4);                     // two lanes 30 m apart over the 60 m
     assert.deepEqual(dl.routes.filter(r => r.id !== "PHAO-02").map(r => r.pts.length), [0, 0]);
@@ -426,7 +427,7 @@ test("a formation sends the route to the leader, places to the followers, and a 
     for (const id of ["PHAO-01", "PHAO-03"]) await call(hub, "POST", "/ingest", { ...beaconOf(id), ...at(0, 0) });
     now += 15_000;
     dl = await call(hub, "GET", "/downlink");
-    assert.deepEqual(dl.fol, { "PHAO-03": ["PHAO-01", 10, 0] });
+    assert.deepEqual(dl.fol, { "PHAO-03": ["PHAO-01", 10, 0], "PHAO-01": ["PHAO-01", 0, 0] });
     const taken = dl.routes.find(r => r.id === "PHAO-01");
     assert.deepEqual(taken.pts, leaderRoute.pts.slice(2));          // what the old leader had not done yet
     assert.ok(sent.some(m => m.type === "alert" && m.alert.type === "E" && m.alert.buoy === "PHAO-01" && m.alert.replaces === "PHAO-02"));

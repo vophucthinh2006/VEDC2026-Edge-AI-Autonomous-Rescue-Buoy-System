@@ -121,6 +121,7 @@ class Snapshot:
     link: LinkState = LinkState()
     leader: LeaderState | None = None            # the formation's leader, when one is heard
     goal_speed: float | None = None              # set by the mission in formation: the speed to go to waypoint at
+    speed_limit: float | None = None             # set by the mission while the boat leads a formation: its top speed
     # $SKP: people another boat looks after or already rescued (docs/victim-claim.md), (lat, lon, when heard)
     skips: tuple[tuple[float, float, float], ...] = ()
 

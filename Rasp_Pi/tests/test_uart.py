@@ -174,6 +174,17 @@ class Stm32ReconnectTest(unittest.TestCase):
         self.assertEqual(uart.drops, 1)
         self.assertEqual(uart._state.snapshot().imu.yaw_deg, 180.0)
 
+    def test_a_packet_split_over_two_reads_is_kept(self):
+        class ChunkPort(FakePort):
+            """pyserial's read(): what came in before the timeout, a line cut anywhere."""
+            def read(self, _size):
+                return self.readline()
+        imu = encode("IMU", 1, "1.00", "2.00", "90.00", 1, 0)
+        port = ChunkPort([b"\x00\xff" + imu[:9], imu[9:]])   # a binary preamble, then the line in two
+        uart, _ = self.run_uart([port], lambda u: u._state.snapshot().imu.yaw_deg == 90.0)
+        self.assertEqual(uart._state.snapshot().imu.yaw_deg, 90.0)
+        self.assertEqual(uart.rx_errors, 0)
+
     def test_a_port_missing_at_start_is_waited_for(self):
         missing = serial.SerialException("could not open port")
         port = FakePort([encode("IMU", 1, "0.00", "0.00", "45.00", 1, 0)])

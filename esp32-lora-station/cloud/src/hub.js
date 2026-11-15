@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { json } from "./util.js";
 import { Geocoder } from "./geocode.js";
 import { Weather, nearestGauge } from "./weather.js";
-import { formationOffsets, planFormation, planSectors } from "./fleetplan.js";
+import { formationOffsets, nedOffsets, planFormation, planSectors } from "./fleetplan.js";
 
 const MAX_BUOYS = 50;
 const MAX_HISTORY = 300;   // số mẫu RSSI/SNR/vị trí giữ cho mỗi phao
@@ -265,7 +265,7 @@ export class Hub extends DurableObject {
 
   // Bắt đầu đội hình: lộ trình cho phao dẫn đầu, lộ trình rỗng cho các phao theo (bỏ dải quét cũ của chúng)
   async startFormation(f, poly, loop, by) {
-    await this.saveFormation({ leader: f.leader, shape: f.shape, spacing: f.spacing, members: f.members, route: f.route, poly, loop, at: Date.now() });
+    await this.saveFormation({ leader: f.leader, shape: f.shape, spacing: f.spacing, members: f.members, route: f.route, offsets: f.offsets, poly, loop, at: Date.now() });
     await this.sendRoute(f.leader, f.route, loop, null, by);
     await this.setTask(f.leader, "formation", { role: "leader", n: f.route.length });
     for (const id of Object.keys(f.members)) {
@@ -602,7 +602,12 @@ export class Hub extends DurableObject {
         // Đội hình: phao theo -> [phao dẫn đầu, sang phải m, lùi sau m]; trạm gửi trong ACK của phao đó
         const f = await this.loadFormation();
         if (f && Object.keys(f.members).length) {
-          out.fol = Object.fromEntries(Object.entries(f.members).map(([id, m]) => [id, [f.leader, m.right, m.back]]));
+          // offsets "ned" (kiểu AP_Follow FOLL_OFS_TYPE 0): hai số là mét về bắc, về đông; Pi đặt formation.offsets: ned
+          const ned = f.offsets === "ned" ? nedOffsets(f.route, f.members) : null;
+          out.fol = Object.fromEntries(Object.entries(f.members).map(([id, m]) => [id, ned ? [f.leader, ned[id].north, ned[id].east] : [f.leader, m.right, m.back]]));
+          // Phao dẫn đầu nhận chỗ 0, 0 của chính nó (không phao theo nào có chỗ đó): Pi chạy lộ trình chậm hơn
+          // (formation.leader_speed_ratio) để phao theo còn dư tốc độ đuổi kịp chỗ của mình. F407 và cổng LoRa không đổi.
+          out.fol[f.leader] = [f.leader, 0, 0];
         }
         // Nhận nạn nhân: lời của Hub (và của admin) về từng người; trạm sửa bảng phân xử của nó theo đó
         const claims = await this.claimsForStation(now);
@@ -632,6 +637,7 @@ export class Hub extends DurableObject {
         const leader = boats.find(b => b.id === leaderId);
         const followers = boats.filter(b => b.id !== leaderId);
         const f = planFormation(req.poly, leader, followers, req.shape, req.spacing, req.angle);
+        if (req.offsets === "ned") f.offsets = "ned";
         if (req.dry) return json({ mode: "formation", ...f });
         await this.startFormation(f, req.poly, !!req.loop, req.by);
         return json({ mode: "formation", ...f });

@@ -18,6 +18,12 @@
 #                 station_sim.log, air_station.json
 #   --duration=   stop after this many seconds (default: run until Ctrl+C)
 #   --hold=       seconds a boat stays with a person before it goes on (follow.max_hold_s; default the boat's, 180)
+#   --formation-offsets=ned  the Pis read a formation place as metres north, east (formation.offsets; a plan
+#                 sent with offsets "ned")
+#   --fast-beacon simulation only: SF7 and 0.6 s slots (a beacon every 2.4 s instead of 8 s), to see what more
+#                 frequent positions do for a formation. The firmware is unchanged; SF7 reaches less far than SF9.
+#   --heading-gains=firmware|tuned|legacy  the simulated F407's heading PID (stm32_board_sim.py HEADING_GAINS; default
+#                 firmware = App/app_config.h = tuned (media/simulation/pid/README.md); legacy: the gains before 13/11)
 #   VEDC_CLOUD_URL   the Worker, default http://127.0.0.1:8787
 #   VEDC_STATION_POS the shore station, lat,lon; default 30 m west of the world origin, on the bank
 #   FLEET_STARTS     "east,north,heading" per boat, space separated; default side by side west of the origin
@@ -28,7 +34,7 @@ export GZ_PARTITION=vedc_fleet
 [ -n "$VEDC_INGEST_TOKEN" ] || { echo "set VEDC_INGEST_TOKEN to the Worker's INGEST_TOKEN" >&2; exit 2; }
 CLOUD="${VEDC_CLOUD_URL:-http://127.0.0.1:8787}"
 
-BOATS=3 WORLD=central HEADLESS=0 TDMA=1 CLAIMS=1 VISION=all VIEWER=0 RUN="$SIM_DIR/fleet_run" DURATION="" HOLD=""
+BOATS=3 WORLD=central HEADLESS=0 TDMA=1 CLAIMS=1 VISION=all VIEWER=0 RUN="$SIM_DIR/fleet_run" DURATION="" HOLD="" OFFSETS=""
 for arg in "$@"; do
     case "$arg" in
         --boats=*)    BOATS="${arg#--boats=}" ;;
@@ -41,6 +47,9 @@ for arg in "$@"; do
         --run=*)      RUN="${arg#--run=}" ;;
         --duration=*) DURATION="${arg#--duration=}" ;;
         --hold=*)     HOLD="${arg#--hold=}" ;;
+        --formation-offsets=*) OFFSETS="${arg#--formation-offsets=}" ;;
+        --fast-beacon) export VEDC_SIM_SF=7 VEDC_SIM_SLOT_S=0.6 ;;
+        --heading-gains=*) export VEDC_SIM_HEADING_GAINS="${arg#--heading-gains=}" ;;
         *) echo "unknown option $arg" >&2; exit 2 ;;
     esac
 done
@@ -146,6 +155,7 @@ for n in $(seq 1 "$BOATS"); do
     printf 'serial:\n  stm32_port: %s\n  lidar_port: %s\n  lidar_model: ld14\ncamera:\n  gazebo_topic: /%s/camera\n  pan_topic: /model/%s/joint/camera_pan_joint/cmd_pos\nlidar:\n  gazebo_topic: /%s/lidar\nvehicle:\n  lidar_yaw_offset_deg: 0.0\n  lidar_mask: []\n  gps_required: true\nlogging:\n  directory: %s\n' \
         "$dir/stm32_pty" "$dir/lidar_pty" "$m" "$m" "$m" "$dir/logs" > "$dir/boat.yaml"
     [ -n "$HOLD" ] && printf 'follow:\n  max_hold_s: %s\n' "$HOLD" >> "$dir/boat.yaml"
+    [ -n "$OFFSETS" ] && printf 'formation:\n  offsets: %s\n' "$OFFSETS" >> "$dir/boat.yaml"
 done
 for n in $(seq 1 "$BOATS"); do
     for _ in $(seq 40); do [ -e "$RUN/boat_$n/lidar_pty" ] && [ -e "$RUN/boat_$n/stm32_pty" ] && break; sleep 0.5; done

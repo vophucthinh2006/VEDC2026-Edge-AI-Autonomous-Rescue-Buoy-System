@@ -4,13 +4,11 @@
 #include <stdint.h>
 #include "stm32f4xx_hal.h"
 
-/* I2C1 (PB8 SCL, PB9 SDA) is shared by the BNO055 and the INA226. A slave cut off mid-byte (a
- * brown-out, noise from the motors) can hold SDA low, and the F4's I2C then keeps its BUSY flag set
- * for good: every HAL call on it waited I2C_TIMEOUT_BUSY_FLAG (25 ms) and failed, the IMU was lost
- * until reset, and the INA226 search alone blocked the loop for ~0.4 s every 5 s.
+/* I2C3 (PA8 SCL, PC9 SDA) is the BNO055 bus; I2C1 (PB8 SCL, PB9 SDA) is the INA226 battery bus.
+ * A slave cut off mid-byte (a brown-out or motor noise) can hold SDA low and leave the F4's I2C BUSY.
  *
  * I2cBus_Ready, before the tick's transfers: true when the bus is idle. When it is not, the bus is
- * recovered (at most every I2C_RECOVER_PERIOD_MS) and the tick skips its transfers. */
+ * recovered independently (at most every I2C_RECOVER_PERIOD_MS) and the tick skips its transfers. */
 
 typedef struct {
     uint16_t busy_ticks;       /* ticks that found the bus busy */

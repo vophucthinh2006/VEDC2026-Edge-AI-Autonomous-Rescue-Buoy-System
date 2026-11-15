@@ -25,6 +25,7 @@ vehicle:
   stop_distance_m: 0.02
   slow_distance_m: 0.05
   influence_distance_m: 0.05
+  lidar_max_range_m: 2.05     # as before settings.yaml set 8 m (influence + 2 m): the room round the stand only
   # The BNO055 drops out on the stand: drive on the last heading it read. Needs the STM32F407
   # built with BENCH_IGNORE_IMU 1 (App/app_config.h). Never on the water.
   imu_required: false

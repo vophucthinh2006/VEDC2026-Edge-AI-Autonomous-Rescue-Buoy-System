@@ -70,7 +70,7 @@ def load_firmware(path: Path) -> ctypes.CDLL:
     lib = ctypes.CDLL(str(path))
     f, pf = ctypes.c_float, ctypes.POINTER(ctypes.c_float)
     lib.HeadingController_Update.restype = f
-    lib.HeadingController_Update.argtypes = [ctypes.POINTER(HeadingControllerT), f, f, f, f]
+    lib.HeadingController_Update.argtypes = [ctypes.POINTER(HeadingControllerT), f, f, f, f, f]
     lib.HeadingController_Reset.argtypes = [ctypes.POINTER(HeadingControllerT)]
     lib.Heading_Mix.argtypes = [f, f, pf, pf, pf]
     lib.Heading_Wrap360.restype = f
@@ -243,7 +243,7 @@ def main() -> int:
                 if throttle <= 0.0:
                     fw.HeadingController_Reset(ctypes.byref(heading))
                 else:
-                    u = fw.HeadingController_Update(ctypes.byref(heading), fw.Heading_Wrap360(pi.heading_deg), yaw, rate, dt)
+                    u = fw.HeadingController_Update(ctypes.byref(heading), fw.Heading_Wrap360(pi.heading_deg), yaw, rate, dt, throttle)
                     left, right, mixed = ctypes.c_float(), ctypes.c_float(), ctypes.c_float()
                     fw.Heading_Mix(u, throttle, ctypes.byref(left), ctypes.byref(right), ctypes.byref(mixed))
                     target = (left.value, right.value, mixed.value)

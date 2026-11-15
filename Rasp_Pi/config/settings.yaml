@@ -14,6 +14,9 @@ vehicle:
   # next to the LD14 show at 0.10 m), and in each [from_deg, to_deg, max_m] of lidar_mask any return
   # up to max_m. Find them with the boat in open space: python3 tools/lidar_near.py PORT
   lidar_min_range_m: 0.30
+  # main.py: obstacles are taken out to this range (unset: influence_distance_m + 2 m, which was 5 m and let the
+  # detour ahead see obstacles late). The LD14 reaches 8 m (datasheet; the team: 8-10 m); check it on the boat.
+  lidar_max_range_m: 8.0
   lidar_mask:                # measured on the bench 2026-10-18, a margin added to each
     - [226, 251, 0.95]       # boat part toward the stern: 0.59..0.87 m at 228..249 deg
     - [175, 180, 0.80]       # boat part astern: 0.69 m at 177..178 deg
@@ -34,6 +37,26 @@ vehicle:
   # The throttle goes off while the GPS speed is more than overspeed_mps above the speed given, and
   # comes back below half of that margin (reason overspeed). 0: off.
   overspeed_mps: 0.30
+  # modules/navigation.py TRIM_*: the Pi learns how much faster than told the boat runs (GPS speed over the speed
+  # sent, while it runs straight) and sends the speed divided by that, so the throttle is not cut on and off
+  # (the F407 does not steer at 0 throttle). It only ever takes throttle off, never adds any. false: off.
+  speed_trim: true
+  # modules/navigation.py STEER_*: the speed sent never goes below this while the boat still has to steer (an
+  # overspeed cut with the course 20 deg or more off the bow, a creep round an obstacle, the trim): at speed 0 the
+  # F407 resets its heading PID and centres the rudders. 0.06 m/s is 0.06 throttle (App/control.c speed / 1 m/s),
+  # where the heading PID scales its output up 2.5 times (HEADING_SCALE_REF_THROTTLE). 0: off, the cut goes to 0.
+  # Off for now: in the simulator 0.06 still runs the boat 0.5 m/s at only ~5 deg/s of turn, so it looped round its
+  # lanes (largest deviation 2.7 -> 10 m, media/simulation/fleet/bao_cao.html round 4). Try 0.06 on the water,
+  # where the boat is much slower at low throttle.
+  min_steer_speed_mps: 0.0
+  # modules/navigation.py _corner_speed: the turn rate the boat really reaches (0: off). The boat slows for a sharp
+  # turn so that the circle onto its aim point is one it can turn. Simulator sysid (media/simulation/pid/README.md):
+  # about 5 deg/s at throttle 0.05-0.08, 8-12 at 0.15-0.5. Measure it on the water.
+  turn_rate_deg_s: 5.0
+  # modules/mission.py: the boat's smallest turn radius (0: off). The aim point stays at least 1.5 times this far
+  # ahead, so pure pursuit does not orbit a point inside the circle the boat can turn. Simulator: about 6 m at every
+  # throttle (the turn rate grows with the speed). Measure it on the water.
+  turn_radius_m: 6.0
   # main.py: the boat cannot turn on the spot; swinging away from an obstacle it first goes on along
   # its bow. An obstacle on the bow (or on the course over the ground) less than turn_room_m plus the
   # braking distance clear of the hull keeps it stopped (bow_blocked) instead of driving onto it.
@@ -70,6 +93,11 @@ planner:
   repulsive_gain: 0.75
   bias_gain: 0.22
   preferred_side: starboard
+  # modules/navigation.py DETOUR_* (after ArduPilot's BendyRuler): the course to the aim point blocked within
+  # avoid_lookahead_m (plus the braking distance), the boat takes the nearest heading that passes avoid_margin_m
+  # clear of its inflated hull, instead of keeping on until the field turns it or it stops at the obstacle. 0: off.
+  avoid_lookahead_m: 4.0
+  avoid_margin_m: 0.5
   front_fov_deg: 110.0
   cluster_gap_m: 0.25
 camera:
@@ -239,6 +267,9 @@ mission:
   # false: only the file's geofence is used; the waypoints come from the dashboard alone
   # (docs/lora-route-downlink.md). config/boat_stm32.yaml sets it.
   waypoints_from_file: true
+  # Steer at a point this many metres along the leg from the last waypoint, not straight at the next
+  # one: the boat keeps to the lane instead of drifting off it (modules/waypoints.py Route.aim). 0: off.
+  lookahead_m: 5.0
 # STM32 boat (main.py) only: PATROL the route, FOLLOW a person, back (modules/mission.py, follow.py).
 follow:
   confirm_frames: 3           # seen in this many detector passes
