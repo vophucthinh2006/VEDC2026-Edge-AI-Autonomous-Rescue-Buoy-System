@@ -86,7 +86,8 @@ def run(args: argparse.Namespace) -> int:
     for i in ids:
         api("/api/mission/send", {"id": i, "clear": True})
     cmd = ["bash", str(REPO / "sim/tools/fleet_sim.sh"), f"--boats={args.boats}", f"--world={args.world}",
-           f"--run={out}", f"--duration={args.duration + args.warmup + 60}", f"--vision={args.vision}", f"--hold={args.hold}"]
+           # fleet_sim.sh stops on the wall clock: room for the sim-time run on a slow host (SimClock.wall_limit)
+           f"--run={out}", f"--duration={6 * args.duration + args.warmup + 60}", f"--vision={args.vision}", f"--hold={args.hold}"]
     if not args.gui:
         cmd.append("--headless")
     if args.offsets:
@@ -99,6 +100,7 @@ def run(args: argparse.Namespace) -> int:
     if args.no_claims:
         cmd.append("--no-claims")
     print(" ".join(cmd), flush=True)
+    clock = SimClock(args.duration)
     sim = subprocess.Popen(cmd, start_new_session=True)
     try:
         # Up once every boat's track is being written and the station has heard every boat
@@ -133,14 +135,22 @@ def run(args: argparse.Namespace) -> int:
                                                        "kill_leader_at": args.kill_leader_at, "plan": plan, "world": args.world,
                                                        "vision": args.vision, "spacing": args.spacing, "shape": args.shape, "offsets": args.offsets,
                                                        "fast_beacon": args.fast_beacon, "heading_gains": args.heading_gains}, indent=1))
+        sim_at = clock.now
         if args.kill_leader_at:
-            time.sleep(args.kill_leader_at)
+            clock.sleep(args.kill_leader_at)
             # The leader's F407 dies: no more beacons, its boat stops
             subprocess.run(["pkill", "-f", f"stm32_board_sim.py .*--buoy-id {ids[0]}"])
             print(f"{ids[0]}'s board killed at {args.kill_leader_at} s", flush=True)
-            time.sleep(max(0, args.duration - args.kill_leader_at))
+            clock.sleep(max(0, args.duration - args.kill_leader_at))
         else:
-            time.sleep(args.duration)
+            clock.sleep(args.duration)
+        # The tracks are on the wall clock: report() reads plan_at .. plan_at + wall_s
+        wall_s = time.time() - plan_at
+        sim_s = clock.now - sim_at if clock.now is not None and sim_at is not None else None
+        sc = json.loads((out / "scenario.json").read_text())
+        sc |= {"wall_s": round(wall_s, 1), "sim_s": sim_s and round(sim_s, 1), "rtf": sim_s and round(sim_s / wall_s, 3)}
+        (out / "scenario.json").write_text(json.dumps(sc, indent=1))
+        print(f"ran {sim_s and round(sim_s)} sim s in {wall_s:.0f} wall s, RTF {sc['rtf']}", flush=True)
     finally:
         try:
             os.killpg(sim.pid, signal.SIGINT)
@@ -152,6 +162,35 @@ def run(args: argparse.Namespace) -> int:
                 pass
     print(f"done: {out}", flush=True)
     return 0
+
+
+class SimClock:
+    """Gazebo's /clock on the fleet's partition (fleet_sim.sh): a run lasts its duration in simulated seconds, the same
+    stretch of the world whatever the host's load (a loaded host ran the world at a third of real time, 2026-11-14)."""
+    PARTITION = "vedc_fleet"
+
+    def __init__(self, duration_s: float) -> None:
+        os.environ.setdefault("GZ_IP", "127.0.0.1")
+        os.environ["GZ_PARTITION"] = self.PARTITION
+        from gz.msgs10.clock_pb2 import Clock
+        from gz.transport13 import Node
+        self.now: float | None = None
+        self.wall_limit = 6.0 * duration_s     # never wait for ever on a world that stopped
+        self.node = Node()
+        self.node.subscribe(Clock, "/clock", self._on_clock)
+
+    def _on_clock(self, msg) -> None:
+        self.now = msg.sim.sec + msg.sim.nsec * 1e-9
+
+    def sleep(self, seconds: float) -> None:
+        """Until `seconds` of simulated time have passed; on the wall clock while no /clock is heard."""
+        start, sim_start = time.time(), self.now
+        while time.time() - start < self.wall_limit:
+            if sim_start is None and self.now is not None:
+                sim_start = self.now - (time.time() - start)
+            if (self.now - sim_start if sim_start is not None else time.time() - start) >= seconds:
+                return
+            time.sleep(0.2)
 
 
 # ---- report -----------------------------------------------------------------------------------------------
@@ -302,7 +341,7 @@ def analyse(d: Path) -> dict | None:
         sc = json.loads((d / "scenario.json").read_text())
     except (OSError, ValueError):
         return None
-    t0, t1 = sc["plan_at"], sc["plan_at"] + sc["duration"]
+    t0, t1 = sc["plan_at"], sc["plan_at"] + sc.get("wall_s", sc["duration"])
     world = d / "worlds" / f"vedc_{sc['world']}.sdf"
     people = victims(world)
     tracks = {}
@@ -401,6 +440,7 @@ def analyse(d: Path) -> dict | None:
     return {
         "name": sc["name"], "world": sc["world"], "area_xy": area, "mode": sc["mode"], "boats": sc["boats"], "tdma": sc["tdma"],
         "claims": sc.get("claims", False), "duration_s": sc["duration"], "dup_stop_s": dup_stop, "follow_s": follow_s,
+        "wall_s": sc.get("wall_s"), "rtf": sc.get("rtf"),
         "kill_leader_at": sc.get("kill_leader_at"),
         "people": len(people), "found": len(first),
         "found_by": {k: {"after_s": round(v[0]), "boat": v[1], "boats": sorted(reporters.get(k, []))} for k, v in sorted(first.items())},
@@ -454,7 +494,7 @@ def plot(args: argparse.Namespace) -> int:
     if args.bg:
         return plot_on_view(args, d, sc, r, plan)
     text = (d / "worlds" / f"vedc_{sc['world']}.sdf").read_text()
-    t0, t1 = sc["plan_at"], sc["plan_at"] + sc["duration"]
+    t0, t1 = sc["plan_at"], sc["plan_at"] + sc.get("wall_s", sc["duration"])
     fig, ax = plt.subplots(figsize=(12, 7.8), dpi=150)
     area = r["area_xy"] + r["area_xy"][:1]
     ax.plot([p[0] for p in area], [p[1] for p in area], color="#333", lw=1.2, ls="--", label="vùng tìm kiếm")
@@ -527,7 +567,7 @@ def plot_on_view(args: argparse.Namespace, d: Path, sc: dict, r: dict, plan: dic
     if image is None or image.shape[:2] != (VIEW_H, VIEW_W):
         print(f"{args.bg}: not a {VIEW_W}x{VIEW_H} frame of the overview camera", file=sys.stderr)
         return 1
-    t0, t1 = sc["plan_at"], sc["plan_at"] + sc["duration"]
+    t0, t1 = sc["plan_at"], sc["plan_at"] + sc.get("wall_s", sc["duration"])
     routes = [(route["id"], route["pts"]) for route in plan.get("routes", [])] + ([(plan["leader"], plan["route"])] if plan.get("route") else [])
     for boat, pts in routes:
         px = [view_px(*to_xy(*p)) for p in pts]

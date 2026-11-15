@@ -49,6 +49,7 @@ import tty
 from pathlib import Path
 
 from gz.msgs10.boolean_pb2 import Boolean
+from gz.msgs10.clock_pb2 import Clock
 from gz.msgs10.double_pb2 import Double
 from gz.msgs10.odometry_pb2 import Odometry
 from gz.msgs10.pose_pb2 import Pose
@@ -57,6 +58,9 @@ from gz.transport13 import Node
 # App/app_config.h
 NAV_SPEED_MAX = 2.0
 NAV_TIMEOUT_S, HBT_TIMEOUT_S, IMU_TIMEOUT_S = 0.3, 0.5, 0.1
+# Simulation only: the IMU timeout counts on Gazebo's clock, so a host that stalls Gazebo (the world frozen too)
+# is not an IMU loss; a pose this many wall seconds old still is (gz sim gone).
+SIM_STALL_S = 2.0
 CONTROL_PERIOD_S, TELEMETRY_PERIOD_S = 0.01, 0.1
 MAX_PITCH_DEG = MAX_ROLL_DEG = 35.0
 KP, KI, KD = 0.10, 0.010, 0.008
@@ -213,6 +217,7 @@ class Buoy:
         self.lock = threading.Lock()
         self.wall = 0.0                 # monotonic time of the last pose
         self.stamp: float | None = None
+        self.sim_now: float | None = None   # Gazebo's /clock
         self.x = self.y = 0.0
         self.heading = self.pitch = self.roll = 0.0
         self.yaw_rate = 0.0             # deg/s, clockwise seen from above (BNO055 gyro Z sign)
@@ -235,12 +240,23 @@ class Buoy:
             self.stamp, self.wall = stamp, time.monotonic()
             self.x, self.y, self.heading, self.pitch, self.roll = p.x, p.y, heading, pitch, roll
 
+    def on_clock(self, msg: Clock) -> None:
+        self.sim_now = msg.sim.sec + msg.sim.nsec * 1e-9
+
+    def fresh(self, now: float) -> bool:
+        """IMU_TIMEOUT_S on the sim clock (wall clock until /clock is heard), SIM_STALL_S on the wall clock."""
+        if self.stamp is None or now - self.wall > SIM_STALL_S:
+            return False
+        age = now - self.wall if self.sim_now is None else self.sim_now - self.stamp
+        return age <= IMU_TIMEOUT_S
+
 
 class Board:
     def __init__(self, args: argparse.Namespace, node: Node) -> None:
         self.args = args
         self.buoy = Buoy()
         node.subscribe(Odometry, f"/model/{args.model}/odometry", self.buoy.on_odometry)
+        node.subscribe(Clock, "/clock", self.buoy.on_clock)
         self.pub = {name: node.advertise(TOPIC.format(args.model, joint, kind), Double) for name, joint, kind in (
             ("left", "prop_rear_left_joint", "cmd_thrust"),
             ("right", "prop_rear_right_joint", "cmd_thrust"),
@@ -363,7 +379,7 @@ class Board:
     def control(self, now: float, dt: float) -> None:
         b = self.buoy
         with b.lock:
-            imu_fresh = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
+            imu_fresh = b.fresh(now)
             heading, rate, pitch, roll = b.heading, b.yaw_rate, b.pitch, b.roll
         confirm = self.args.dir / "confirm"
         confirm_pressed = confirm.exists()
@@ -465,7 +481,7 @@ class Board:
     def telemetry(self, fd: int, seq: int, now: float) -> None:
         b = self.buoy
         with b.lock:
-            imu_ok = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
+            imu_ok = b.fresh(now)
             x, y, heading, pitch, roll, ve, vn = b.x, b.y, b.heading, b.pitch, b.roll, b.ve, b.vn
         overturned = imu_ok and (abs(pitch) > MAX_PITCH_DEG or abs(roll) > MAX_ROLL_DEG)
         lat0, lon0 = self.args.home
@@ -535,7 +551,7 @@ class Board:
         """App/lora_beacon.c build_frame, with the route field."""
         b = self.buoy
         with b.lock:
-            imu_ok = b.stamp is not None and now - b.wall <= IMU_TIMEOUT_S
+            imu_ok = b.fresh(now)
             x, y, heading, pitch, roll = b.x, b.y, b.heading, b.pitch, b.roll
             ve, vn = b.ve, b.vn
         lat0, lon0 = self.args.home
