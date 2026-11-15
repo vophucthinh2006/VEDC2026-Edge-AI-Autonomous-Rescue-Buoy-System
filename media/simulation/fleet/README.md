@@ -1,8 +1,23 @@
-# Mô phỏng đội 3 phao: Chia vùng và Đội hình (2026-11-12)
+# Mô phỏng đội 3 phao: Chia vùng và Đội hình (2026-11-12 … 15)
 
 Gazebo, mặt nước 60 × 36 m (`sim/worlds/vedc_wide_*.sdf`). Mỗi phao có Pi (`Rasp_Pi/main.py`), STM32F407 mô phỏng
 và LoRa chung một kênh. Kế hoạch được gửi từ Worker như admin bấm trên web (`sim/tools/fleet_compare.py`).
-Khoảng cách làn 6 m. Mỗi lần chạy 600 s sau khi gửi kế hoạch. Phao giữ người 20 s rồi đi tiếp.
+Khoảng cách làn 6 m. Mỗi lần chạy 600 s sau khi gửi kế hoạch (từ vòng 6: 600 s theo thời gian mô phỏng, có ghi RTF).
+Phao giữ người 20 s rồi đi tiếp.
+
+## Báo cáo (`bao_cao.html`)
+
+1. **Tệ nhất và tốt nhất từng tình huống.** Có 6 tình huống: chia vùng / đội hình × nước trống / có vật cản / hoàn
+   chỉnh. Mỗi tình huống đặt hai ảnh cạnh nhau, kèm bảng số và hệ số cải thiện. Chỉ xếp hạng các lần chạy dùng cấu
+   hình mặc định của vòng đó. Không tính các lần có cửa sổ Gazebo, loạt vòng 6 bị tranh CPU, và các lần thử nghiệm.
+2. **Chuỗi thay đổi từ vòng 1 tới vòng 6.** Mỗi mục ghi nguyên nhân, chỗ sửa (file, khóa cấu hình) và tác dụng đo
+   được. Các thay đổi không giúp được (mức ga sàn ở vòng 4) hoặc kết quả lẫn lộn được ghi rõ.
+3. **Còn chưa tốt, cần đo trên tàu thật:** tốc độ theo % ga, bán kính quay, PID trên nước, tầm LD14. Kèm lưu ý vòng 6
+   chạy ở RTF 0,38–0,63.
+4. **Phụ lục thu gọn "Chi tiết từng vòng":** nội dung cũ của từng vòng.
+
+Ảnh tệ nhất / tốt nhất mới vẽ: `img/bw_*.jpg`. Các ảnh khác theo vòng: `v2_*` … `v6_*`.
+Số liệu cả 58 lần chạy: `so_lieu_cac_lan_chay.json` (trường `round` là 1 … 6).
 
 ## Ảnh (`img/`)
 | File | Nội dung |

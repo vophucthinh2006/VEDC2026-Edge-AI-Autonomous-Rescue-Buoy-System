@@ -66,16 +66,181 @@ td .good { color: var(--good); font-weight: 600; } td .bad { color: var(--bad); 
 .fix .where { font: 0.82rem var(--font-data); color: var(--muted); overflow-wrap: anywhere; }
 .files { columns: 2 300px; column-gap: 28px; font: 0.86rem/1.9 var(--font-data); list-style: none; padding: 0; }
 .files li { break-inside: avoid; overflow-wrap: anywhere; }
+.scen { display: grid; gap: 12px; padding-top: 6px; }
+.scen .metric { font: 0.82rem var(--font-data); color: var(--muted); }
+.scen .sum { font-weight: 600; }
+.chain { counter-reset: step; list-style: none; padding: 0; display: grid; gap: 12px; }
+.chain > li { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 12px 16px; display: grid; gap: 6px; }
+.chain > li.no { border-left-color: var(--warn); }
+.chain .r { font: 600 0.75rem var(--font-data); color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; }
+.chain .where { font: 0.8rem var(--font-data); color: var(--muted); overflow-wrap: anywhere; }
+details.appendix { border-top: 2px solid var(--fg); padding-top: 18px; }
+details.appendix > summary { cursor: pointer; font: 700 1.45rem/1.25 var(--font-display); }
+details.appendix[open] > summary { margin-bottom: 40px; }
+details.appendix > section { margin-bottom: 56px; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 </style>
 
 <main>
   <header style="display:grid;gap:14px">
-    <span class="eyebrow">VEDC 2026 · Mô phỏng Gazebo · 12–13/11/2026</span>
-    <h1>Mô phỏng đội ba phao: chia vùng và đội hình</h1>
-    <p class="lede">Ba phao PHAO-01..03 chạy trên mặt nước 60 × 36 m ở ba mức: nước trống, có vật cản, có vật cản và 8 người gặp nạn. Lần chạy trên nước trống tìm ra ba lỗi; cả ba đã được sửa và chạy lại để đối chiếu. Ảnh và video cho slide nằm trong <code>media/simulation/fleet/</code>.</p>
-    <div class="meta"><span>vòng 1: 9 · vòng 2: 10 · vòng 3: 7 lần chạy, mỗi lần 600 s</span><span>khoảng cách làn 6 m</span><span>giữ người 20 s</span><span>chưa commit</span></div>
+    <span class="eyebrow">VEDC 2026 · Mô phỏng Gazebo · 12–15/11/2026</span>
+    <h1>Đội ba phao: từ lần chạy tệ nhất tới tốt nhất</h1>
+    <p class="lede">Ba phao chạy chia vùng hoặc đội hình trên mặt nước 60 × 36 m, ở ba mức: nước trống, có vật cản, có vật cản và 8 người. Qua 6 vòng sửa và 58 lần chạy, mỗi tình huống dưới đây đặt lần tệ nhất cạnh lần tốt nhất, rồi kể lần lượt các thay đổi đã dẫn tới kết quả đó.</p>
+    <div class="meta"><span>58 lần chạy, mỗi lần 600 s</span><span>3 phao · làn cách 6 m · giữ người 20 s</span><span>nhánh feature/fleet-sim-tuning</span></div>
   </header>
+
+  <section>
+    <h2>Tệ nhất và tốt nhất, từng tình huống</h2>
+    <p class="prose" style="font-size:0.9rem;color:var(--muted)">Chỉ xếp hạng các lần chạy dùng cấu hình mặc định của vòng đó. Không tính: các lần có cửa sổ Gazebo (mô phỏng chậm còn khoảng 0,35 lần thời gian thực), loạt đầu của vòng 6 (tranh CPU với một Gazebo khác), và các lần thử nghiệm (mức ga sàn ở vòng 4, tắt chỉnh ga ở vòng 2, các bước đo riêng ở vòng 5, LiDAR 5 m ở vòng 6, beacon 2,4 s). Thời gian ở vòng 6 đã đổi sang giây mô phỏng.</p>
+
+    <div class="scen">
+      <h3>1. Chia vùng, nước trống</h3>
+      <span class="metric">Chỉ số chính: lệch làn trung vị / xa nhất</span>
+      <div class="figs">
+        <figure><img src="img/bw_01_trong_chia_vung_te.jpg" alt="Chia vùng nước trống, vòng 1" loading="lazy"><figcaption><b>Tệ nhất: vòng 1, code ban đầu</b> (A0). Lái thẳng tới waypoint cách 60 m: sóng đẩy lệch làn, có phao chạy ra ngoài vùng.</figcaption></figure>
+        <figure><img src="img/v3_01_trong_chia_vung.jpg" alt="Chia vùng nước trống, vòng 3" loading="lazy"><figcaption><b>Tốt nhất: vòng 3</b> (A1v3). Thẳng trên làn; chỉ lệch ở khúc quay đầu.</figcaption></figure>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Lệch làn trung vị</th><th>Lệch xa nhất</th><th>Phủ vùng</th><th>Hai tàu &lt; 3 m</th><th>Ga = 0</th></tr></thead>
+        <tbody>
+          <tr><td>Tệ nhất (vòng 1)</td><td class="n">0,79 m</td><td class="n">6,1 m</td><td class="n">93,4 %</td><td class="n">9 s</td><td class="n">75 %</td></tr>
+          <tr><td>Tốt nhất (vòng 3)</td><td class="n"><span class="good">0,10 m</span></td><td class="n"><span class="good">2,7 m</span></td><td class="n">100 %</td><td class="n">0 s</td><td class="n">22 %</td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose sum">Lệch làn trung vị giảm 8 lần, lệch xa nhất giảm 2,3 lần, phủ đủ 100 %.</p>
+    </div>
+
+    <div class="scen">
+      <h3>2. Đội hình, nước trống</h3>
+      <span class="metric">Chỉ số chính: sai số chỗ của tàu theo (trung vị)</span>
+      <div class="figs">
+        <figure><img src="img/v2_02_trong_doi_hinh_a_truoc.jpg" alt="Đội hình nước trống, vòng 1" loading="lazy"><figcaption><b>Tệ nhất: vòng 1</b> (A3, chỗ tính theo Bắc/Đông). Tàu theo không đuổi kịp tàu dẫn đầu.</figcaption></figure>
+        <figure><img src="img/v5_02_trong_doi_hinh.jpg" alt="Đội hình nước trống, vòng 5" loading="lazy"><figcaption><b>Tốt nhất: vòng 5</b> (A3r5). Tàu dẫn đầu chạy chậm hơn, tàu theo giữ được chỗ, không lần nào sát nhau.</figcaption></figure>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Sai số chỗ</th><th>Hai tàu &lt; 3 m</th><th>Lệch xa nhất (dẫn đầu)</th><th>Phủ vùng</th></tr></thead>
+        <tbody>
+          <tr><td>Tệ nhất (vòng 1)</td><td class="n">9,0 m</td><td class="n">39 s</td><td class="n">4,1 m</td><td class="n">99,9 %</td></tr>
+          <tr><td>Tốt nhất (vòng 5)</td><td class="n"><span class="good">2,0 m</span></td><td class="n"><span class="good">0 s</span></td><td class="n">4,3 m</td><td class="n">100 %</td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose sum">Sai số chỗ giảm 4,5 lần. Còn code gốc trước khi sửa (vòng 1, A0) thì sai số 6,2 m nhưng tàu theo cắt ngang tàu dẫn đầu, hai tàu sát nhau 112 s.</p>
+    </div>
+
+    <div class="scen">
+      <h3>3. Chia vùng, có vật cản</h3>
+      <span class="metric">Chỉ số chính: lệch xa nhất quanh vật cản, số lần dừng/lùi, phủ vùng</span>
+      <div class="figs">
+        <figure><img src="img/v3_03_vatcan_chia_vung.jpg" alt="Chia vùng có vật cản, vòng 3" loading="lazy"><figcaption><b>Tệ nhất: vòng 3</b> (B1v4). LiDAR chỉ nhìn 5 m, tàu tới sát nhà ngập rồi mới né: lệch 7,3 m quanh nhà.</figcaption></figure>
+        <figure><img src="img/bw_03_vatcan_chia_vung_tot.jpg" alt="Chia vùng có vật cản, vòng 6" loading="lazy"><figcaption><b>Tốt nhất: vòng 6</b> (B1r6b, lần lặp). LiDAR 8 m: tàu thấy nhà từ sớm, vòng gọn qua.</figcaption></figure>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Lệch xa nhất</th><th>Quanh nhà ngập (22, 9)</th><th>Dừng / lùi</th><th>Phủ vùng</th><th>Hai tàu &lt; 3 m</th></tr></thead>
+        <tbody>
+          <tr><td>Tệ nhất (vòng 3)</td><td class="n">8,6 m</td><td class="n">7,3 m</td><td class="n">31 / 15</td><td class="n">96,9 %</td><td class="n">43 s</td></tr>
+          <tr><td>Tốt nhất (vòng 6)</td><td class="n"><span class="good">4,8 m</span></td><td class="n"><span class="good">2,9 m</span></td><td class="n">19 / 11</td><td class="n">100 %</td><td class="n">0 s</td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose sum">Lệch quanh nhà giảm 2,5 lần, lệch xa nhất 1,8 lần, dừng/lùi giảm khoảng một phần ba. Thử nghiệm mức ga sàn ở vòng 4 còn tệ hơn mức "tệ nhất" ở đây: lệch 11,5 m, dừng/lùi 72/23.</p>
+    </div>
+
+    <div class="scen">
+      <h3>4. Đội hình, có vật cản</h3>
+      <span class="metric">Chỉ số chính: lệch xa nhất, số lần dừng/lùi, phủ vùng</span>
+      <div class="figs">
+        <figure><img src="img/v2_04_vatcan_doi_hinh_a_truoc.jpg" alt="Đội hình có vật cản, vòng 1" loading="lazy"><figcaption><b>Tệ nhất: vòng 1</b> (B2). Nhà nằm trên làn đầu: cả đội dồn lại, PHAO-02 tụt lại rồi dừng.</figcaption></figure>
+        <figure><img src="img/v6_04_vatcan_doi_hinh.jpg" alt="Đội hình có vật cản, vòng 6" loading="lazy"><figcaption><b>Tốt nhất: vòng 6</b> (B2r6). Phủ hết vùng, không lần nào hai tàu sát nhau.</figcaption></figure>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Lệch xa nhất (dẫn đầu)</th><th>Dừng / lùi</th><th>Phủ vùng</th><th>Sai số chỗ</th><th>Hai tàu &lt; 3 m</th></tr></thead>
+        <tbody>
+          <tr><td>Tệ nhất (vòng 1)</td><td class="n">8,9 m</td><td class="n">96 / 33</td><td class="n">88,4 %</td><td class="n">10,9 m</td><td class="n">80 s</td></tr>
+          <tr><td>Tốt nhất (vòng 6)</td><td class="n"><span class="good">6,2 m</span></td><td class="n"><span class="good">17 / 8</span></td><td class="n"><span class="good">100 %</span></td><td class="n"><span class="good">4,4 m</span></td><td class="n"><span class="good">0 s</span></td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose sum">Dừng/lùi giảm 5 lần, sai số chỗ 2,5 lần, phủ đủ 100 %. Riêng lệch xa nhất thì vòng 2 thấp hơn (2,0 m) nhưng chỉ phủ 83 %.</p>
+    </div>
+
+    <div class="scen">
+      <h3>5. Chia vùng, hoàn chỉnh (vật cản + 8 người)</h3>
+      <span class="metric">Chỉ số chính: số người tìm thấy và lúc tìm được người cuối, rồi tới phủ vùng</span>
+      <div class="figs">
+        <figure><img src="img/v4_05_hoanchinh_chia_vung_khong_san.jpg" alt="Chia vùng hoàn chỉnh, tệ nhất" loading="lazy"><figcaption><b>Tệ nhất: vòng 4, lần lặp không mức sàn</b> (C1r4b, tức cấu hình vòng 3). Chỉ tìm 7/8 người, phủ 81 %, dừng/lùi 75/70.</figcaption></figure>
+        <figure><img src="img/bw_05_hoanchinh_chia_vung_tot.jpg" alt="Chia vùng hoàn chỉnh, vòng 6" loading="lazy"><figcaption><b>Tốt nhất: vòng 6, lần lặp</b> (C1r6b). Tìm đủ 8/8 người, người cuối sau 241 s mô phỏng.</figcaption></figure>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Người</th><th>Người cuối</th><th>Nửa số người</th><th>Phủ vùng</th><th>Dừng / lùi</th></tr></thead>
+        <tbody>
+          <tr><td>Tệ nhất (vòng 4 lặp)</td><td class="n">7/8</td><td class="n">—</td><td class="n">199 s</td><td class="n">81,3 %</td><td class="n">75 / 70</td></tr>
+          <tr><td>Tốt nhất (vòng 6)</td><td class="n"><span class="good">8/8</span></td><td class="n"><span class="good">241 s</span></td><td class="n"><span class="good">127 s</span></td><td class="n"><span class="good">100 %</span></td><td class="n">31 / 27</td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose sum">Từ 7/8 lên 8/8 người, phủ thêm 19 điểm phần trăm. Với 8/8, người cuối được tìm thấy sau 241 s, so với 344–427 s ở vòng 3 và vòng 5.</p>
+    </div>
+
+    <div class="scen">
+      <h3>6. Đội hình, hoàn chỉnh (vật cản + 8 người)</h3>
+      <span class="metric">Chỉ số chính: số người tìm thấy và lúc tìm được người cuối, rồi tới phủ vùng</span>
+      <div class="figs">
+        <figure><img src="img/v2_06_hoanchinh_doi_hinh_b_sau.jpg" alt="Đội hình hoàn chỉnh, vòng 2" loading="lazy"><figcaption><b>Tệ nhất: vòng 2</b> (C2v3). Chỉ tìm 5/8 người, phủ 59 %.</figcaption></figure>
+        <figure><img src="img/v6_06_hoanchinh_doi_hinh.jpg" alt="Đội hình hoàn chỉnh, vòng 6" loading="lazy"><figcaption><b>Tốt nhất: vòng 6</b> (C2r6). Tìm đủ 8/8 người, phủ 96,5 %.</figcaption></figure>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Người</th><th>Người cuối</th><th>Nửa số người</th><th>Phủ vùng</th><th>Sai số chỗ</th><th>Hai tàu &lt; 3 m</th></tr></thead>
+        <tbody>
+          <tr><td>Tệ nhất (vòng 2)</td><td class="n">5/8</td><td class="n">—</td><td class="n">472 s</td><td class="n">58,8 %</td><td class="n">2,8 m</td><td class="n">54 s</td></tr>
+          <tr><td>Tốt nhất (vòng 6)</td><td class="n"><span class="good">8/8</span></td><td class="n"><span class="good">447 s</span></td><td class="n"><span class="good">214 s</span></td><td class="n"><span class="good">96,5 %</span></td><td class="n"><span class="bad">4,9 m</span></td><td class="n"><span class="bad">77 s</span></td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose sum">Từ 5/8 lên 8/8 người, phủ vùng gấp 1,6 lần. Đổi lại, đội hình giữ chỗ kém hơn và hai tàu sát nhau lâu hơn.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Các thay đổi đã dẫn tới kết quả đó</h2>
+    <p class="prose">Theo thứ tự từng vòng. Mỗi mục ghi: nguyên nhân đo được, chỗ sửa, và tác dụng trên chỉ số mà nó nhắm tới. Các mục viền vàng là những thay đổi không giúp được hoặc kết quả lẫn lộn.</p>
+    <ol class="chain">
+      <li><span class="r">Vòng 1</span><b>Bám làn kiểu pure pursuit</b><span>Nguyên nhân: Pi lái thẳng tới waypoint cách 60 m nên sóng đẩy lệch làn 3–5 m. Sửa: Pi lái tới một điểm cách 5 m phía trước trên đoạn làn. Tác dụng: chia vùng nước trống phủ 93,4 → 100 %.</span><span class="where">Rasp_Pi/modules/waypoints.py Route.aim · mission.lookahead_m</span></li>
+      <li><span class="r">Vòng 1</span><b>Gán dải cho tàu theo tổng quãng đường nhỏ nhất</b><span>Nguyên nhân: gán kiểu "gần nhất trước" bắt tàu ở giữa sang dải xa, cắt ngang tàu bên cạnh. Sửa: thử mọi cách gán, chọn cách có tổng quãng đường nhỏ nhất. Tác dụng: hai tàu sát nhau 9 → 0 s.</span><span class="where">esp32-lora-station/cloud/src/fleetplan.js planSectors</span></li>
+      <li><span class="r">Vòng 1</span><b>Chỗ trong đội hình theo Bắc/Đông (kiểu AP_Follow)</b><span>Nguyên nhân: khi tàu dẫn đầu quay đầu, "bên phải" đổi phía, nên tàu theo cắt ngang tàu dẫn đầu. Sửa: trạm gửi chỗ bằng mét về Bắc/Đông. Tác dụng: hai tàu sát nhau 112 → 39 s. Sai số chỗ thì chưa giảm (9,0 m).</span><span class="where">fleetplan.js nedOffsets · hub.js · Rasp_Pi/modules/formation.py</span></li>
+      <li><span class="r">Vòng 2</span><b>Chỉnh ga mượt thay cho cắt ga</b><span>Nguyên nhân: ở 50 % ga, tàu mô phỏng chạy gấp đôi lệnh, nên bộ chống vượt tốc cắt ga về 0 tới 76–80 % thời gian; lúc đó F407 không bẻ lái được. Sửa: Pi học tỉ số tốc độ GPS / tốc độ lệnh rồi chỉ giảm ga. Tác dụng: thời gian ga = 0 giảm 76 → 25 %, lệch làn trung vị 0,80 → 0,33 m.</span><span class="where">Rasp_Pi/modules/navigation.py TRIM_* · vehicle.speed_trim</span></li>
+      <li><span class="r">Vòng 2</span><b>Tàu dẫn đầu chạy chậm lại (0,7 lần tốc độ tối đa)</b><span>Nguyên nhân: tàu theo không chạy nhanh hơn tốc độ tối đa được, nên đã tụt lại thì không bao giờ đuổi kịp. Sửa: trạm gửi cho chính tàu dẫn đầu chỗ (0, 0); không phải sửa firmware. Tác dụng: sai số chỗ 9,0 → 2,6 m (nước trống), 10,9 → 6,6 m (có vật cản).</span><span class="where">hub.js · mission.py · formation.leader_speed_ratio</span></li>
+      <li class="no"><span class="r">Vòng 2</span><b>Né sớm kiểu BendyRuler</b><span>Chọn hướng gần nhất mà vẫn qua vật cản cách thân 0,5 m. Gần như không đo ra tác dụng (lệch xa nhất 7,0 → 6,4 m), vì LiDAR chỉ được nhìn 5 m. Mãi tới vòng 6 mới có hiệu lực.</span><span class="where">navigation.py _detour · planner.avoid_lookahead_m, avoid_margin_m</span></li>
+      <li class="no"><span class="r">Vòng 2</span><b>Beacon 2,4 s (chỉ mô phỏng)</b><span>Sai số chỗ 2,6 → 2,0 m, không lần nào hai tàu sát nhau. Nhưng phải dùng SF7, tầm phát ngắn hơn, nên chưa đưa lên tàu thật.</span><span class="where">sim/tools/lora_radio.py · fleet_sim.sh --fast-beacon</span></li>
+      <li><span class="r">Vòng 3</span><b>PID hướng mới của F407</b><span>Nguyên nhân: với Kp 0,02, tàu tiến về hướng đích rất chậm (hằng số thời gian khoảng 10 s) và đứng lệch 6–11°. Sửa: Kp 0,10, Ki 0,010, tích phân chỉ chạy khi lệch dưới 15°, nhân lệnh lái khi ga thấp. Tác dụng: vào dải ±5° ở 24/25 ca thử bước (trước 8/25); lệch làn trung vị 0,33 → 0,10 m; chia vùng hoàn chỉnh tìm 8/8 người sau 344 s. Đã đưa vào firmware, chưa nạp lên bo.</span><span class="where">STM32F4/App/app_config.h · heading_controller.c · media/simulation/pid/</span></li>
+      <li class="no"><span class="r">Vòng 4</span><b>Mức ga sàn khi phải bẻ lái (đã tắt)</b><span>Thời gian ga = 0 giảm 60–78 → 12–42 %, nhưng ở ga 0,06 tàu mô phỏng vẫn chạy 0,5 m/s mà chỉ quay được 5°/s, nên đi thành vòng tròn: lệch xa nhất 2,7 → 10 m. Đã tắt (<code>min_steer_speed_mps: 0</code>), giữ code để thử trên tàu thật.</span><span class="where">navigation.py STEER_* · vehicle.min_steer_speed_mps</span></li>
+      <li><span class="r">Vòng 5</span><b>Điểm ngắm theo bán kính quay (9 m)</b><span>Nguyên nhân: điểm ngắm 5 m nằm trong vòng quay khoảng 6 m của tàu, nên pure pursuit đi vòng quanh nó. Sửa: điểm ngắm ít nhất 1,5 × <code>turn_radius_m</code>. Tác dụng: không còn vòng tròn; tàu dẫn đầu quay đầu cuối làn 140–175 → 102–121 s; đội hình hoàn chỉnh tìm 7/8 người. Giới hạn tốc độ theo độ cong (cùng vòng) không đo ra tác dụng.</span><span class="where">mission.py AIM_PER_TURN_RADIUS · navigation.py _corner_speed · vehicle.turn_radius_m, turn_rate_deg_s</span></li>
+      <li class="no"><span class="r">Vòng 6</span><b>Điểm ngắm chỉ dài ra khi quay</b><span>Chạy thẳng 5 m, dài dần tới 9 m khi mũi lệch chặng 30–90°. Kết quả lẫn lộn: đội hình nước trống lệch xa nhất 4,3 → 1,8 m, nhưng chia vùng nước trống 2,5 → 3,6 m.</span><span class="where">mission.py aim_m</span></li>
+      <li><span class="r">Vòng 6</span><b>LiDAR nhìn xa 8 m</b><span>Nguyên nhân: Pi chỉ gom cụm LiDAR trong <code>influence_distance_m + 2</code> = 5 m, nên phần né sớm thấy vật cản muộn. Sửa: khóa riêng <code>lidar_max_range_m: 8.0</code>. Tác dụng: quanh nhà ngập lệch 5,5–7,3 → 2,9 m; cả ba lần mô phỏng hoàn chỉnh tìm đủ 8/8 người.</span><span class="where">Rasp_Pi/main.py · vehicle.lidar_max_range_m</span></li>
+      <li><span class="r">Vòng 6</span><b>Sửa cách đo: đồng hồ của bo mô phỏng, chạy theo thời gian mô phỏng</b><span>Khi máy chậm, bo F407 mô phỏng tưởng mất IMU (hàng trăm, hàng nghìn lần mỗi lần chạy). Bo giờ xét theo <code>/clock</code> của Gazebo, còn 3–9 lần. Mỗi lần chạy đủ 600 s mô phỏng và ghi RTF.</span><span class="where">sim/tools/stm32_board_sim.py · fleet_compare.py SimClock</span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Còn chưa tốt và cần đo trên tàu thật</h2>
+    <ul class="prose">
+      <li><b>Còn chưa tốt:</b>
+        <ul>
+          <li>Đội hình ở world hoàn chỉnh giữ chỗ kém (4,9 m) và hai tàu sát nhau tới 77 s.</li>
+          <li>Ở world hoàn chỉnh, quanh nhà ngập vẫn lệch khoảng 6 m: khi đi theo người, tàu vào vùng nhà theo hướng khác.</li>
+          <li>Ở world có người, ga = 0 vẫn chiếm khoảng 75 % thời gian, vì tốc độ khi tiến lại gần người chưa được chỉnh ga.</li>
+          <li>Kết quả giữa hai lần chạy cùng cấu hình chênh nhau khá nhiều.</li>
+        </ul>
+      </li>
+      <li><b>Cần đo trên tàu thật:</b>
+        <ul>
+          <li>tốc độ theo % ga trên nước lặng (lực đẩy trong mô hình chỉ là đoán);</li>
+          <li>bán kính quay ở ga 0,15 và 0,25 (để đặt <code>turn_radius_m</code>);</li>
+          <li>PID hướng mới, bằng các bước ±30° và ±90° (mục 6 của <code>pid/README.md</code>);</li>
+          <li>tầm thật của LD14 trên mặt nước (theo datasheet 8–10 m).</li>
+        </ul>
+      </li>
+      <li><b>Lưu ý về số liệu vòng 6:</b> chạy ở RTF 0,38–0,63, trong khi Pi vẫn tính theo đồng hồ thật. Thời gian giữ người, cửa sổ học chỉnh ga… vì vậy ngắn hơn so với thế giới mô phỏng, nên so với các vòng trước chỉ nên xem xu hướng.</li>
+    </ul>
+  </section>
+
+  <details class="appendix">
+    <summary>Chi tiết từng vòng</summary>
 
   <section>
     <h2>Vòng 6 (14–15/11): nhìn trước theo khúc quay, LiDAR 8 m</h2>
@@ -569,4 +734,5 @@ td .good { color: var(--good); font-weight: 600; } td .bad { color: var(--bad); 
     <p class="prose">Test: Pi 272 passed, 2 skipped; cloud <code>npm test</code> 82/82.</p>
     <p class="prose">Vòng 3 thêm: <code>sim/tools/fleet_sim.sh --heading-gains</code>, <code>fleet_compare.py run --heading-gains</code> (ghi vào <code>scenario.json</code>), dòng log "heading gains" của <code>stm32_board_sim.py</code>. Hệ số PID và các script thử bước của phiên PID: <code>media/simulation/pid/</code>.</p>
   </section>
+  </details>
 </main>
