@@ -78,6 +78,62 @@ td .good { color: var(--good); font-weight: 600; } td .bad { color: var(--bad); 
   </header>
 
   <section>
+    <h2>Vòng 6 (14–15/11): nhìn trước theo khúc quay, LiDAR 8 m</h2>
+    <p class="prose">Hai thay đổi ở Pi (nhánh <code>feature/fleet-sim-tuning</code>, chưa commit):</p>
+    <div class="fix">
+      <b>1. Điểm ngắm chỉ dài ra khi quay</b>
+      <span>Chạy thẳng: 5 m (<code>mission.lookahead_m</code>). Khi mũi lệch hướng chặng từ 30° tới 90°, điểm ngắm dài dần tới 1,5 × <code>turn_radius_m</code> = 9 m. Dài ra ngay khi cần, ngắn lại từ từ trong khoảng 5 s để không nhảy qua lại. Ở vòng 5, điểm ngắm cố định 9 m làm tàu về làn chậm.</span>
+      <span class="where">Rasp_Pi/modules/mission.py aim_m · test_mission.py</span>
+    </div>
+    <div class="fix">
+      <b>2. Tầm LiDAR tách khỏi trường đẩy</b>
+      <span>Trước đây Pi chỉ gom cụm LiDAR trong <code>influence_distance_m + 2</code> = 5 m, nên phần né sớm thấy vật cản muộn. Khóa mới <code>vehicle.lidar_max_range_m: 8.0</code>; LD14 mô phỏng cũng báo tới 8 m. <code>influence_distance_m</code> (trường đẩy) giữ nguyên. Bản demo trên giá (bench) giữ 2,05 m như cũ. <b>Cần đo tầm thật của LD14 trên tàu</b>: theo datasheet và đội là 8–10 m, nhưng mặt nước và nắng có thể làm ngắn đi.</span>
+      <span class="where">Rasp_Pi/main.py · settings.yaml vehicle.lidar_max_range_m · bench_demo.yaml</span>
+    </div>
+    <p class="prose"><b>Về cách đo:</b></p>
+    <ul class="prose">
+      <li><b>Loạt đầu bị loại:</b> chạy song song với một Gazebo khác, hai mô phỏng tranh CPU và bo F407 mô phỏng báo mất IMU gấp 5–15 lần bình thường.</li>
+      <li><b>Bo F407 mô phỏng</b> giờ xét IMU theo đồng hồ của Gazebo (<code>/clock</code>), nên máy chậm không còn bị tính là mất IMU. Ở loạt sạch, mỗi lần chỉ còn 3–9 lần <code>imu_stale</code>.</li>
+      <li><b>Thời gian chạy:</b> <code>fleet_compare.py run</code> giờ chạy đủ 600 s theo thời gian mô phỏng và ghi RTF. Máy hiện chỉ đạt RTF 0,38–0,63 (vòng 5 chạy ban đêm, không ghi RTF, có lẽ gần 1).</li>
+      <li><b>Quy đổi:</b> các số đo theo thời gian dưới đây đã đổi sang giây mô phỏng (giây thật × RTF).</li>
+      <li><b>Giới hạn còn lại:</b> Pi vẫn tính theo đồng hồ thật, nên ở RTF thấp thời gian giữ người, cửa sổ học chỉnh ga… ngắn hơn so với thế giới mô phỏng. So với vòng 5 chỉ nên xem xu hướng.</li>
+    </ul>
+
+    <div class="table-wrap"><table>
+      <thead><tr><th>Tình huống</th><th>Chỉ số</th><th>Vòng 5</th><th>Vòng 6 (RTF)</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="2">Chia vùng, nước trống</td><td>Lệch làn p90 / xa nhất · vòng tròn</td><td class="n">2,3 / 2,5 m · 0</td><td class="n">1,7 / <span class="bad">3,6 m</span> · 0 (0,52)</td></tr>
+        <tr><td>Quay đầu trung vị (giây mô phỏng) · quãng đường/lộ trình</td><td class="n">60 s · 1,12</td><td class="n">55 s · 1,20</td></tr>
+        <tr><td rowspan="2">Đội hình, nước trống</td><td>Lệch làn tàu dẫn đầu p90 / xa nhất</td><td class="n">1,4 / 4,3 m</td><td class="n"><span class="good">0,4 / 1,8 m</span> (0,55)</td></tr>
+        <tr><td>Quay đầu (s mô phỏng) · sai số chỗ · &lt; 3 m</td><td class="n">102 s · 2,0 m · 0 s</td><td class="n"><span class="good">65 s</span> · 2,5 m · 27 s</td></tr>
+        <tr><td>Đội hình, beacon 2,4 s</td><td>Lệch xa nhất · sai số chỗ · &lt; 3 m</td><td class="n">3,6 m · 3,5 m · 24 s</td><td class="n"><span class="bad">5,4 m</span> · 2,2 m · <span class="bad">66 s</span> (0,59)</td></tr>
+        <tr><td rowspan="3">Chia vùng, có vật cản</td><td>Lệch quanh nhà ngập (22, 9)</td><td class="n">6,1 m</td><td class="n">LiDAR 5 m: 5,5 m · <span class="good">LiDAR 8 m: 2,9 / 2,9 m (lặp)</span></td></tr>
+        <tr><td>Lệch làn p90 / xa nhất</td><td class="n">5,1 / 6,1 m</td><td class="n">5 m: 4,3 / 9,2 m · <span class="good">8 m: 2,4 / 4,9 m (2,2 / 4,8)</span></td></tr>
+        <tr><td>Phủ vùng · dừng · hai tàu &lt; 3 m</td><td class="n">100 % · 27 · 0 s</td><td class="n">5 m: 100 % · 35 · 64 s · 8 m: 100 % · 22 / 19 · 40 / 0 s</td></tr>
+        <tr><td rowspan="2">Đội hình, có vật cản</td><td>Sai số chỗ · lệch xa nhất · &lt; 3 m</td><td class="n">5,8 m · 7,7 m · 36 s</td><td class="n"><span class="good">4,4 m · 6,2 m · 0 s</span> (0,58)</td></tr>
+        <tr><td>Phủ vùng · quay đầu (s mô phỏng)</td><td class="n">80,6 % · 121 s</td><td class="n"><span class="good">100 % · 54 s</span></td></tr>
+        <tr><td rowspan="3">Chia vùng, hoàn chỉnh</td><td>Người · người cuối (s mô phỏng)</td><td class="n">8/8 · 374 / 427 s</td><td class="n"><span class="good">8/8 · 259 / 241 s</span> (0,59 / 0,61)</td></tr>
+        <tr><td>Phủ vùng · lệch làn xa nhất</td><td class="n">98,1 / 98,8 % · 4,0 / 6,0 m</td><td class="n">100 / 100 % · 6,4 / 6,2 m</td></tr>
+        <tr><td>Vòng tròn · lệch quanh nhà ngập</td><td class="n">0 / 0 · 2,9 / 6,0 m</td><td class="n">1 / 0 · 6,3 / 6,2 m</td></tr>
+        <tr><td rowspan="2">Đội hình, hoàn chỉnh</td><td>Người · phủ vùng</td><td class="n">7/8 · 82,8 %</td><td class="n"><span class="good">8/8 (447 s mô phỏng) · 96,5 %</span> (0,58)</td></tr>
+        <tr><td>Sai số chỗ · &lt; 3 m · lệch xa nhất</td><td class="n">4,8 m · 13 s · 2,7 m</td><td class="n">4,9 m · <span class="bad">77 s · 6,3 m</span></td></tr>
+      </tbody>
+    </table></div>
+    <p class="prose" style="font-size:0.88rem;color:var(--muted)">Số sau dấu "/" là lần lặp. Lần B1 dùng LiDAR 5 m chạy ở RTF 0,376, các lần B1 dùng 8 m ở 0,61–0,63. Bộ đếm vòng tròn chỉ bắt vòng ≥ 270° trong 90 s, nên bỏ sót các vòng bò rất chậm (ảnh bên dưới).</p>
+
+    <div class="verdicts">
+      <div class="verdict"><span class="pill good">Rõ ràng</span><b>LiDAR 8 m: né gọn hơn</b><span>Quanh nhà ngập, lệch giảm 5,5–6,1 m → 2,9 m ở cả hai lần chạy. Tàu thấy nhà từ sớm và vòng qua một lần; với 5 m thì tàu quay vòng tại chỗ trước tường. Chia vùng có vật cản: lệch xa nhất 9,2 → 4,8–4,9 m. Đội hình có vật cản: phủ 100 %, không lần nào hai tàu sát nhau.</span></div>
+      <div class="verdict"><span class="pill good">Tốt</span><b>Mô phỏng hoàn chỉnh</b><span>Cả ba lần đều tìm đủ 8/8 người, kể cả đội hình (vòng 5: 7/8). Chia vùng tìm người cuối sau khoảng 240–260 s mô phỏng (vòng 5: 374–427 s).</span></div>
+      <div class="verdict"><span class="pill warn">Lẫn lộn</span><b>Điểm ngắm chỉ dài khi quay</b><span>Đội hình nước trống bám làn sát hơn hẳn (lệch xa nhất 4,3 → 1,8 m), quay đầu nhanh hơn (102 → 65 s). Nhưng chia vùng nước trống và beacon 2,4 s lệch xa nhất lại tăng (2,5 → 3,6 m; 3,6 → 5,4 m). Ở world hoàn chỉnh, quanh nhà ngập vẫn lệch 6,2–6,3 m: khi có người, tàu đi theo người nên vào vùng nhà theo hướng khác.</span></div>
+    </div>
+    <p class="prose"><b>Cấu hình để lại:</b> <code>lidar_max_range_m: 8.0</code> và điểm ngắm theo khúc quay (5 → 9 m). Kết quả đáng tin hơn vòng 4–5 nhờ không còn bị tranh CPU và đã quy đổi sang giây mô phỏng. Muốn so sát với vòng 5 thì nên chạy lại vào lúc máy rảnh để RTF gần 1.</p>
+    <div class="figs">
+      <figure><img src="img/v6_nha_ngap_lidar.jpg" alt="Quanh nhà ngập với LiDAR 5 m và 8 m" loading="lazy"><figcaption><b>Quanh nhà ngập, chia vùng có vật cản.</b> Vòng 5 và vòng 6 với 5 m: tàu tới sát tường, quay vòng tại chỗ rồi mới vòng xuống phía nam. Với 8 m: tàu thấy nhà từ sớm và vòng gọn lên phía bắc.</figcaption></figure>
+      <figure><img src="img/v6_06_hoanchinh_doi_hinh.jpg" alt="Đội hình hoàn chỉnh, vòng 6" loading="lazy"><figcaption><b>Đội hình hoàn chỉnh, vòng 6.</b> 8/8 người, phủ 96,5 %. Các ảnh khác: <code>img/v6_*.jpg</code>.</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
     <h2>Vòng 5 (13–14/11): quay đầu</h2>
     <p class="prose">Mục tiêu: tàu không còn đi vòng tròn ở cuối làn và khi về làn. Chỉ sửa phía Pi, firmware không đổi. Phân tích trước khi sửa:</p>
     <ul class="prose">
