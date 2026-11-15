@@ -1,0 +1,5 @@
+## Thành phần tải tự động khi build (ESP-IDF Component Manager)
+dependencies:
+  idf: ">=5.0"
+  # Modem 4G Cat.1 (Ai-Thinker Ca-01) qua PPPoS: cellular.c
+  espressif/esp_modem: "^1.4.0"   # 1.x (2.x đổi API C)
