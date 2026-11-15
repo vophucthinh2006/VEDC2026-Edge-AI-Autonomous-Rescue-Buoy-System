@@ -45,10 +45,16 @@ from modules.follow import FOLLOW as FOLLOWING, Follow
 from modules.formation import FormationGoal, FormationKeeper
 from modules.state_store import RISK_NAMES, SAFE, HumanTarget, Snapshot
 from modules.waypoints import Route
-from utils.geometry import haversine_m, offset_latlon, signed_angle_deg
+from utils.geometry import bearing_deg, clamp, haversine_m, offset_latlon, signed_angle_deg
 
 IDLE, PATROL, FOLLOW, RETURN, HOME_HOLD, FORMATION = "IDLE", "PATROL", "FOLLOW", "RETURN", "HOME_HOLD", "FORMATION"
-AIM_PER_TURN_RADIUS = 1.5   # the aim point at least this many turn radii ahead (mission.lookahead_m)
+# In a turn the aim point grows from mission.lookahead_m to AIM_PER_TURN_RADIUS turn radii (vehicle.turn_radius_m): a
+# point nearer than the radius cannot be reached, and pure pursuit orbits it (the loops at the lane ends, round 4).
+# Only in a turn: a fixed 9 m made the boats rejoin their lanes slowly (formation, open water, 2.2 -> 4.3 m off, round
+# 5). It grows as the bow is AIM_TURN_FROM_DEG to AIM_TURN_TO_DEG off the leg, at once; it shrinks over AIM_SHRINK_S.
+AIM_PER_TURN_RADIUS = 1.5
+AIM_TURN_FROM_DEG, AIM_TURN_TO_DEG = 30.0, 90.0
+AIM_SHRINK_S = 5.0
 HOLD_FORGET_S = 30.0   # the same person found again within this long goes on with the time already spent there
 
 
@@ -154,11 +160,10 @@ class Mission:
         self.only_on_route = only_on_route
         # Steer at a point this far along the leg, not at the waypoint (modules/waypoints.py Route.aim); 0: at the waypoint
         self.lookahead_m = float((config.get("mission", {}) or {}).get("lookahead_m", 5.0))
-        # ... and at least AIM_PER_TURN_RADIUS times the boat's turn radius (vehicle.turn_radius_m): a point nearer than
-        # the radius cannot be reached, and pure pursuit orbits it (the loops at the lane ends, 2026-11-13, round 4).
-        if self.lookahead_m > 0.0:
-            radius = float((config.get("vehicle", {}) or {}).get("turn_radius_m", 0.0))
-            self.lookahead_m = max(self.lookahead_m, AIM_PER_TURN_RADIUS * radius)
+        # ... and in a turn up to AIM_PER_TURN_RADIUS turn radii (aim_m)
+        radius = float((config.get("vehicle", {}) or {}).get("turn_radius_m", 0.0))
+        self.turn_lookahead_m = max(self.lookahead_m, AIM_PER_TURN_RADIUS * radius) if self.lookahead_m > 0.0 else 0.0
+        self._aim_m, self._aim_at = self.lookahead_m, None
         self.report_every_s = float(follow.get("report_every_s", 20.0))
         self.report_moved_m = float(follow.get("report_moved_m", 3.0))
         self.risk_frames = int(follow.get("risk_frames", 2))
@@ -212,6 +217,20 @@ class Mission:
         home when no shore station position was ever heard."""
         self.route = route
         self._start_pending = True
+
+    def aim_m(self, snap: Snapshot, now: float) -> float:
+        """How far along the leg the boat steers (AIM_* above)."""
+        r = self.route
+        want = self.lookahead_m
+        if self.turn_lookahead_m > self.lookahead_m and r.current is not None and (r.index > 0 or r.laps):
+            last = r.waypoints[r.index - 1]
+            off = abs(signed_angle_deg(bearing_deg(*last, *r.current) - snap.imu.yaw_deg))
+            share = clamp((off - AIM_TURN_FROM_DEG) / (AIM_TURN_TO_DEG - AIM_TURN_FROM_DEG), 0.0, 1.0)
+            want += share * (self.turn_lookahead_m - self.lookahead_m)
+        dt = 0.0 if self._aim_at is None else max(now - self._aim_at, 0.0)
+        self._aim_m = want if want >= self._aim_m else self._aim_m + (want - self._aim_m) * min(1.0, dt / AIM_SHRINK_S)
+        self._aim_at = now
+        return self._aim_m
 
     def home_goal(self) -> tuple[float, float] | None:
         home = self.home or self.route_start
@@ -305,7 +324,7 @@ class Mission:
             self.formation_goal = None
             if fix and self.route.update(snap.gps.lat_deg, snap.gps.lon_deg):
                 self.log.info("waypoint reached, now %s", self.route.describe())
-            waypoint = self.route.aim(snap.gps.lat_deg, snap.gps.lon_deg, self.lookahead_m) if fix else self.route.current
+            waypoint = self.route.aim(snap.gps.lat_deg, snap.gps.lon_deg, self.aim_m(snap, now)) if fix else self.route.current
         if supplies and self.state == FOLLOW:
             self._ignored.append((now + self.ignore_s, self.follow.position(snap), self.follow.world_deg))
             self.follow.stand_by(snap)
