@@ -313,6 +313,14 @@ class BatteryHomeTest(unittest.TestCase):
         self.assertEqual(mission.state, RETURN)
         self.assertEqual(step.planned.waypoint, HOME)
 
+    def test_no_fix_going_home_stands_still(self):
+        # The stand, Pi 5, 2026-11-15: the pack read 0 % and no GPS indoors; with the home as its goal,
+        # gps_required: false drove the boat along its bow at full speed. Without a fix it has no goal.
+        mission = Mission(CONFIG, Route([], 3.0, False, FENCE), only_on_route=True)
+        step = mission.step(snap(0.0, home=HOME, battery=0, fix=0), 0.0)
+        self.assertEqual(mission.state, RETURN)
+        self.assertIsNone(step.planned.waypoint)
+
     def test_the_shore_link_coming_back_does_not_end_a_battery_return(self):
         self.mission.step(snap(0.0, home=HOME, battery=10, shore_ok=False), 0.0)
         self.assertEqual((self.mission.state, self.mission.code), (RETURN, "B"))

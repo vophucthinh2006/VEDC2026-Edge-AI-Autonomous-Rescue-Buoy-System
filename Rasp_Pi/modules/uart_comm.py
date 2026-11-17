@@ -56,7 +56,8 @@ class Stm32Uart(threading.Thread):
         except queue.Full:
             self.log.warning("UART transmit queue full; dropping %s", command)
 
-    def _handle(self, packet: Packet) -> None:
+    # Not _handle: from Python 3.13 threading.Thread sets self._handle, which hid this method (Pi 5).
+    def _handle_packet(self, packet: Packet) -> None:
         try:
             if packet.command == "IMU" and len(packet.fields) >= 6:
                 _, pitch, roll, yaw, ok, overturned = packet.fields[:6]
@@ -144,7 +145,7 @@ class Stm32Uart(threading.Thread):
                     if packet is None:
                         self.rx_errors += 1
                     else:
-                        self._handle(packet)
+                        self._handle_packet(packet)
                 # A device sending binary data without a newline must not make
                 # this buffer unbounded. Preserve a possible partial NMEA frame.
                 if len(rx_buffer) > 2 * 256:

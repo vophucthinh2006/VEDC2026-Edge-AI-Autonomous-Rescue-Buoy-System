@@ -33,6 +33,11 @@ case "$CONTROLLER" in
     *) echo ".boat_profile: unknown controller '$CONTROLLER'" >&2; exit 2 ;;
 esac
 OVERLAY="config/boat_$CONTROLLER.yaml"
+OVERLAYS=(--overlay "$OVERLAY")
+# A Raspberry Pi 5 has its own USB port names (config/pi5_system.yaml), on top of the boat's settings.
+if [ "$CONTROLLER" = stm32 ] && tr -d '\0' < /proc/device-tree/model 2>/dev/null | grep -q "Raspberry Pi 5"; then
+    OVERLAYS+=(--overlay config/pi5_system.yaml)
+fi
 
 if [ -f .venv/bin/activate ]; then
     # shellcheck disable=SC1091
@@ -41,16 +46,16 @@ fi
 
 # Port and baud of this controller's config, to show them and to catch a missing UART early.
 # A --config or --overlay given on the command line may point elsewhere; the program then decides.
-read -r PORT BAUD < <(python3 - "$OVERLAY" $KEYS <<'EOF'
+read -r PORT BAUD < <(python3 - $KEYS "${OVERLAYS[@]}" <<'EOF'
 import sys
 from pathlib import Path
 from utils.config import load_config
-overlay, section, port, baud = sys.argv[1:5]
-config = load_config(Path("config/settings.yaml"), [Path(overlay)])[section]
+section, port, baud = sys.argv[1:4]
+config = load_config(Path("config/settings.yaml"), [Path(p) for p in sys.argv[5::2]])[section]
 print(config[port], config[baud])
 EOF
 )
-echo "controller: $CONTROLLER ($PROGRAM), link: $PORT @ $BAUD"
+echo "controller: $CONTROLLER ($PROGRAM), link: $PORT @ $BAUD, settings: ${OVERLAYS[*]}"
 case " $* " in
     *" --config "*|*" --overlay "*|*" --mavlink "*) ;;
     *) if [[ "$PORT" == /dev/* && ! -e "$PORT" ]]; then
@@ -60,4 +65,4 @@ case " $* " in
 esac
 
 # Options given here come after the controller's overlay, so an --overlay of yours wins over it.
-exec python3 -u "$PROGRAM" --overlay "$OVERLAY" "$@"
+exec python3 -u "$PROGRAM" "${OVERLAYS[@]}" "$@"

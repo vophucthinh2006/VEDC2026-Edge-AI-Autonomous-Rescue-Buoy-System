@@ -164,12 +164,12 @@ class HelperBoardTest(unittest.TestCase):
     def test_the_board_report_is_read_and_goes_stale(self):
         board = HelperBoard("none", 115200, threading.Event())
         self.assertFalse(board.online(monotonic()))
-        board._handle(encode("AUX", 4, 12340, -250, 1, 1, 0))
+        board._handle_line(encode("AUX", 4, 12340, -250, 1, 1, 0))
         self.assertEqual((board.state.battery_v, board.state.current_a, board.state.estop, board.state.lora_ok, board.state.alarm),
                          (12.34, -0.25, True, True, False))
         self.assertTrue(board.online(monotonic()))
         self.assertFalse(board.online(monotonic() + 10.0))
-        board._handle(b"$AUX,5,x,0,0,0,0*00\n")                   # bad checksum: ignored
+        board._handle_line(b"$AUX,5,x,0,0,0,0*00\n")                   # bad checksum: ignored
         self.assertTrue(board.state.estop)
 
 
