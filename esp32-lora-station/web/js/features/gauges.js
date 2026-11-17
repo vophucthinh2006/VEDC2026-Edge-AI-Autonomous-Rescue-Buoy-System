@@ -2,7 +2,7 @@
 // numbers and pictures instead of sentences. Only what the boats and the Worker really send:
 //   - rain over the next 24 hours at the station (Open-Meteo through /api/weather, features/weather.js)
 //   - roll and pitch (IMU), the bow now (yaw) against the heading the Pi asks for (target_yaw, -1 = none)
-//   - battery % (beacon) with volts and amps (INA226, diagnostics frame), LoRa bars and the distance to the station
+//   - battery % (beacon) with volts (INA226, diagnostics frame; the current is not shown, the shunt reading is not trusted), LoRa bars and the distance to the station
 // Also the status pill in the top bar, the station's satellites, and the picked-buoy control at the bottom.
 import { state, buoyStatus, STATUS, signalOf, SIGNAL, batteryOf, speedOf, attitudeAgeSec, ATTITUDE_STALE_SEC,
   isStale } from '../state.js';
@@ -126,7 +126,7 @@ function renderBattery(id, b) {
   tone(card, p === null ? 'idle' : p < BATT_BAD ? 'bad' : p < BATT_WARN ? 'warn' : 'ok');
   $('gb-ring').style.strokeDashoffset = String(100 - (p ?? 0));
   const d = state.diag.get(id);
-  text($('gb-pack'), d && Number.isFinite(d.volts) ? `${num(d.volts, 2)} V · ${num(d.amps, 2)} A` : '');
+  text($('gb-pack'), d && Number.isFinite(d.volts) ? `${num(d.volts, 2)} V` : '');
 }
 
 function renderLink(b) {

@@ -7,6 +7,7 @@ volatile battery_debug_t battery_debug;
 
 #define FILTER_TAU_S     5.0f          /* the charge follows the pack, not each throttle step */
 #define RETRY_INIT_MS    5000U         /* a module plugged in late is found again */
+#define SAG_DROOP_V_PER_S 0.003f       /* a 0.3 V throttle sag shows only after ~100 s of full load; real discharge is ~10x slower */
 
 #if INA226_ENABLED
 static ina226_t ina;
@@ -14,6 +15,7 @@ static I2C_HandleTypeDef *bus;
 static uint32_t last_read_ms;
 static uint32_t last_init_ms;
 static bool filtered;
+static float rest_volts;       /* peak of the filtered voltage, drooping at SAG_DROOP_V_PER_S */
 static bool searching;         /* looking for the module, one address a call */
 static uint8_t probe;          /* how many addresses this search has tried */
 static uint8_t first_address = INA226_ADDRESS;   /* where it answered last, tried first */
@@ -105,8 +107,11 @@ void Battery_Tick(uint32_t now_ms)
         battery_debug.volts += k * (volts - battery_debug.volts);
         battery_debug.amps += k * (amps - battery_debug.amps);
     }
+    /* The charge reads the resting voltage: the highest recent one, let down slowly, so a throttle
+       sag does not show (the shunt does not carry the motor current, so it cannot tell load apart). */
+    rest_volts = battery_debug.volts > rest_volts - SAG_DROOP_V_PER_S * dt ? battery_debug.volts : rest_volts - SAG_DROOP_V_PER_S * dt;
     /* Below 1 V per cell the INA226 is reading something other than the pack. */
-    float per_cell = battery_debug.volts / (float)BATTERY_CELLS;
+    float per_cell = rest_volts / (float)BATTERY_CELLS;
     battery_debug.percent = per_cell < 1.0f ? -1 : (int8_t)Battery_CellPercent(per_cell);
 #else
     (void)now_ms;
