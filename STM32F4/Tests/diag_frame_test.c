@@ -38,11 +38,17 @@ int main(void)
     assert(DiagFrame_Build(buf, sizeof(buf), "PHAO-01", &p) > 0U);
     assert(strcmp(buf, "dg=PHAO-01,n=pi_silent,s=-,w=0/0,a=0,d=2,k=0:0,f=13") == 0);
 
+    /* The LoRa timing once the station has answered: last. */
+    p.has_link = true; p.air_ms = 640U; p.rtt_ms = 1185U;
+    assert(DiagFrame_Build(buf, sizeof(buf), "PHAO-01", &p) > 0U);
+    assert(strcmp(buf, "dg=PHAO-01,n=pi_silent,s=-,w=0/0,a=0,d=2,k=0:0,f=13,l=640:1185") == 0);
+
     /* The longest reason and every field at its widest still fit the 120-byte LoRa payload. */
     Diag_SetReason(&d, "stm32_fault_or_estop_and_more_text");
     assert(strlen(d.reason) == DIAG_REASON_MAX - 1U);
     d.wp = 300; d.wp_total = 300; d.volts = 25.2f; d.amps = -80.0f; d.i2c_recoveries = 65535; d.imu_reinits = 65535;
     d.has_fps = true; d.fps_x10 = 999U;
+    d.has_link = true; d.air_ms = 65535U; d.rtt_ms = 65535U;
     assert(DiagFrame_Build(buf, sizeof(buf), "PHAO-01", &d) > 0U && strlen(buf) < 120U);
 
     /* Only [a-z0-9_] reaches the frame: no comma or '=' can break the fields. */

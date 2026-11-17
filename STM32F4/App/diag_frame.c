@@ -52,5 +52,10 @@ size_t DiagFrame_Build(char *buf, size_t size, const char *buoy_id, const diag_t
         if (m < 0 || (size_t)(n + m) >= size) { buf[0] = '\0'; return 0U; }
         n += m;
     }
+    if (diag->has_link) {
+        m = snprintf(buf + n, size - (size_t)n, ",l=%u:%u", (unsigned)diag->air_ms, (unsigned)diag->rtt_ms);
+        if (m < 0 || (size_t)(n + m) >= size) { buf[0] = '\0'; return 0U; }
+        n += m;
+    }
     return (size_t)n;
 }

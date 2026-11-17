@@ -130,6 +130,9 @@
         }
         // Trạm bờ có GPS, báo vị trí cố định
         send({ type: 'station', fix: 1, lat: 10.7626, lon: 106.6602, sats: 9, hdop: 0.9, age_s: 3 });
+        // Chẩn đoán của PHAO-01, có thời gian phát và khứ hồi LoRa (l=air:rtt)
+        send({ type: 'diag', id: 'PHAO-01', reason: 'waypoint', wp: 2, wp_total: 4, arm: 0, drive: 0, i2c: 0, imu: 0,
+               mission: 'P', volts: 12.31, air_ms: 640, rtt_ms: 1185, age_s: 4 });
         send({
           type: 'mission', rev: 1, by: 'mliotredgescue@gmail.com', spacing: 10, angle: null, speed: 1.5, poly: [],
           waypoints: [{ lat: 10.7640, lon: 106.6620 }, { lat: 10.7665, lon: 106.6635 }, { lat: 10.7680, lon: 106.6655 }, { lat: 10.7672, lon: 106.6680 }],

@@ -300,6 +300,11 @@ bool lora_diag_parse(const char *message, lora_diag_t *out) {
             out->fps = (float)v / 10.0f;
             out->has_fps = true;
             break;
+        case 'l':
+            if (!parse_pair(value, ':', 0xFFFFU, &a, &b)) return false;
+            out->air_ms = (uint16_t)a; out->rtt_ms = (uint16_t)b;
+            out->has_link = true;
+            break;
         default:
             break;   /* a field of newer firmware: skipped */
         }

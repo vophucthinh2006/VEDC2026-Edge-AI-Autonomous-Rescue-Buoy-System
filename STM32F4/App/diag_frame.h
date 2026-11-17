@@ -22,6 +22,8 @@
  *   u  pack voltage x100, j current x100 (A), both left out while the INA226 is not found
  *   k  I2C bus recoveries : BNO055 re-inits since boot
  *   f  the Pi's detector frames a second x10 (its $HBT), left out while the detector is off or the Pi silent
+ *   l  LoRa timing, ms: air:round_trip, the last answered frame's time on air and the station's answer
+ *      after its start (App/lora_beacon.c); left out until the station has answered once
  *
  * Plain C, no HAL: host test in Tests/. */
 
@@ -41,6 +43,9 @@ typedef struct {
     uint16_t imu_reinits;
     bool has_fps;                   /* false: field f left out */
     uint16_t fps_x10;               /* the Pi's detector frames a second x10 */
+    bool has_link;                  /* false: field l left out */
+    uint16_t air_ms;
+    uint16_t rtt_ms;
 } diag_t;
 
 #define DIAG_PI_SILENT_MS  2000U   /* $HBT comes every 100 ms */

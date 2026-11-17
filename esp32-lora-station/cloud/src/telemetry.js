@@ -101,6 +101,13 @@ export function sanitizeDiag(d) {
     if (!inRange(fps, 0, 100)) return null;
     out.fps = round(fps, 1);
   }
+  // The buoy's LoRa timing, ms (l=air:rtt): its last answered frame's time on air, and the station's
+  // answer after that frame's start. Both or none; absent until the station has answered once.
+  if (d.air_ms !== undefined || d.rtt_ms !== undefined) {
+    if (!intIn(d.air_ms, 0, 65535) || !intIn(d.rtt_ms, 0, 65535)) return null;
+    out.air_ms = d.air_ms;
+    out.rtt_ms = d.rtt_ms;
+  }
   return out;
 }
 

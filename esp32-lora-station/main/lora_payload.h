@@ -80,6 +80,9 @@ typedef struct {
     uint16_t imu_reinits;
     bool has_fps;
     float fps;                /* the Pi's detector frames a second */
+    bool has_link;            /* l=air:rtt (optional): the buoy's LoRa timing, ms */
+    uint16_t air_ms;          /* its last answered frame's time on air */
+    uint16_t rtt_ms;          /* from that frame's start to this station's answer read */
 } lora_diag_t;
 
 /* True only for a complete, in-range diagnostics frame. */
