@@ -270,6 +270,12 @@ mission:
   # Steer at a point this many metres along the leg from the last waypoint, not straight at the next
   # one: the boat keeps to the lane instead of drifting off it (modules/waypoints.py Route.aim). 0: off.
   lookahead_m: 5.0
+# STM32 boat (main.py) only: manual control from an Android phone over Bluetooth SPP (modules/bt_manual.py).
+# V into MANUAL, v back to AUTO; config/boat_stm32.yaml turns it on.
+manual:
+  enabled: false
+  channel: 1                  # RFCOMM channel of the SPP record (sdptool add --channel=1 SP)
+  silence_s: 1.0              # MANUAL: the phone silent this long stops the motors (stays MANUAL)
 # STM32 boat (main.py) only: PATROL the route, FOLLOW a person, back (modules/mission.py, follow.py).
 follow:
   confirm_frames: 3           # seen in this many detector passes

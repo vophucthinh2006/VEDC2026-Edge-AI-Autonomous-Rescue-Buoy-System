@@ -39,7 +39,7 @@ install_unit() {
     sudo tee "$UNIT" > /dev/null <<EOF
 [Unit]
 Description=VEDC boat program on the Pi (run.sh $RUN_ARGS, controller from .boat_profile)
-After=network-online.target sound.target
+After=network-online.target sound.target bluetooth.service
 Wants=network-online.target
 # Keep restarting however often it fails: a USB adapter late at boot, the F407 off for a while.
 StartLimitIntervalSec=0
@@ -48,6 +48,9 @@ StartLimitIntervalSec=0
 Type=simple
 User=$USER_NAME
 WorkingDirectory=$DIR
+# The phone's SPP record (tools/setup_bluetooth.sh), lost at every boot: as root (+), and a failure
+# (-) still starts main.py, which then runs without manual control.
+ExecStartPre=-+/bin/bash $DIR/tools/setup_bluetooth.sh sdp
 ExecStart=$DIR/run.sh $RUN_ARGS
 Restart=always
 RestartSec=3
