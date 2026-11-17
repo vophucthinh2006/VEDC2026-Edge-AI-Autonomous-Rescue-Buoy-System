@@ -103,7 +103,7 @@ Chi tiết khung LoRa: [STM32F4/README.md](../STM32F4/README.md) mục 14, [lora
 ## 5. Chỉ kiểm được trên phần cứng
 
 - Trục BNO055: heading fusion có thể lấy theo trục Y của module; lệch 90° thì đặt `IMU_MOUNTING_OFFSET_DEG`.
-- Shunt INA226: module phổ biến là 0.1 Ω (đo tới 0.8 A); % pin chỉ cần điện áp.
+- Shunt INA226: module trên phao là 0.001 Ω (R001, đo tới ~80 A); module khác thì đặt lại `INA226_SHUNT_OHM`. % pin chỉ cần điện áp.
 - Mức relay: đèn sáng lúc khởi động thì module đóng ở mức thấp, đặt `RELAY_ON_LEVEL 0`.
 - Airtime thật của khung sự kiện + ACK (giả lập: khoảng 1 s mỗi lượt, trong cửa sổ 1.5 s).
 - Firmware trạm ESP32 chưa build trên máy này (chưa cài ESP-IDF): `test_station.bat build` là lần biên dịch đầu.

@@ -311,7 +311,9 @@ class Mission:
             goal = self.home_goal()
             if self.state == RETURN and goal is not None and fix and haversine_m(snap.gps.lat_deg, snap.gps.lon_deg, *goal) <= self.arrive_m:
                 self._enter(HOME_HOLD, "home reached: holding")
-            planned = replace(snap, waypoint=goal if self.state == RETURN else None, human_target=None)
+            # No fix, no way home: stand still. Given the goal, gps_required: false drove along the bow
+            # at full speed (navigation.py bow_no_gps): a battery reading 0 % on the stand started the motors.
+            planned = replace(snap, waypoint=goal if self.state == RETURN and fix else None, human_target=None)
             return Step(planned, reports, supplies)
 
         goal_speed = None

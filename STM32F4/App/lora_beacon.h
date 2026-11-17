@@ -48,6 +48,15 @@ typedef struct {
     uint8_t home_valid;
     uint8_t hold;              /* 1: STOP from the dashboard, motors off */
     uint32_t diag_tx;          /* diagnostics frames sent (App/diag_frame.h); appended last */
+    /* Link timing, for Tools/lora_monitor.py; appended so the fields above keep their offsets.
+       Times are rounded up to TX_POLL_PERIOD_MS (5 ms), the rate the radio is polled at. */
+    uint16_t airtime_ms;       /* last beacon or event (the frames answered): StartTx to TX_DONE */
+    uint16_t rtt_ms;           /* last answer of the station: StartTx of our frame to its ACK/RTE read */
+    uint16_t rtt_max_ms;
+    int16_t rssi_dbm;          /* of that answer */
+    uint32_t rtt_sum_ms;       /* average = rtt_sum_ms / rtt_count */
+    uint32_t rtt_count;
+    int8_t snr_x4;             /* of that answer, in 0.25 dB */
 } lora_debug_t;
 
 extern volatile lora_debug_t lora_debug;

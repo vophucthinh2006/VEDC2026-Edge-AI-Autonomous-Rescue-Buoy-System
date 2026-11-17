@@ -127,9 +127,23 @@ void Control_Tick(controller_t *control, const pi_command_t *pi, const bno055_eu
 
     /* STOP from the dashboard wins over the Pi: the boat stays where it is, the route is kept. */
     if (control->hold) { stop_braking(control, now_ms); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_HOLD); return; }
-    bool nav_fresh = (pi->mode == NAV_AUTO || pi->mode == NAV_BACK) && pi->ttl_ms > 0U && fresh(now_ms, pi->last_nav_ms, pi->ttl_ms);
+    bool nav_fresh = (pi->mode == NAV_AUTO || pi->mode == NAV_BACK || pi->mode == NAV_MANUAL) && pi->ttl_ms > 0U
+                     && fresh(now_ms, pi->last_nav_ms, pi->ttl_ms);
     bool hbt_fresh = pi->pi_link_ok && fresh(now_ms, pi->last_hbt_ms, HBT_TIMEOUT_MS);
     if (!nav_fresh || !hbt_fresh) { stop_braking(control, now_ms); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_PI); return; }
+    if (pi->mode == NAV_MANUAL) {
+        /* The phone drives ($MAN): its throttles and rudder straight to the actuators, full range (no
+           0.5 cap as in AUTO), no heading held. Still ramped (Actuators_Apply), still stopped by the
+           checks above: disarmed (overturned, IMU lost), STOP from the dashboard, the Pi silent. */
+        heading_off(control);
+        FrontMotor_Reset(&control->front);
+        control->operating_mode = 'M';
+        float rear = clamp(pi->man_rear, 0.0f, 1.0f);
+        actuator_cmd_t man = { rear, rear, clamp(pi->man_front, -1.0f, 1.0f), clamp(pi->man_steer, -1.0f, 1.0f) };
+        Actuators_Apply(&man, now_ms);
+        publish_debug(control, imu, imu_fresh, &man, DRIVE_BLOCK_NONE);
+        return;
+    }
     /* A stale heading must never drive a motor on the water. Only BENCH_IGNORE_IMU, for the boat
        on its stand, lets it run on the held one. */
     if (!imu_fresh && !BENCH_IGNORE_IMU) { stop_heading(control); publish_debug(control, imu, imu_fresh, NULL, DRIVE_BLOCK_IMU); return; }

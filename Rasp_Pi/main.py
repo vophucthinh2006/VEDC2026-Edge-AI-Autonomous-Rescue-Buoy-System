@@ -17,11 +17,12 @@ from time import monotonic, sleep
 
 from modules.ai_vision import VisionWorker
 from modules.announcer import Announcer
+from modules.bt_manual import BluetoothManual
 from modules.drive_log import DriveLog
 from modules.lidar_serial import SerialLidar
 from modules.mission import Mission
 from modules.navigation import BapfNavigator, NavCommand
-from modules.perception import cluster_scan
+from modules.perception import SweepPattern, cluster_scan
 from modules.safety import SafetyArbiter
 from modules.state_store import RISK_NAMES, HumanTarget, StateStore
 from modules.uart_comm import Stm32Uart
@@ -97,6 +98,38 @@ def main() -> int:
 
     announcer = Announcer(config.get("audio", {}), stop_event)
     workers: list[threading.Thread] = [uart, announcer]
+    # Manual control from the phone over Bluetooth (modules/bt_manual.py): V into MANUAL, v back.
+    manual: BluetoothManual | None = None
+    if config.get("manual", {}).get("enabled", False):
+        manual = BluetoothManual(config["manual"], stop_event)
+        workers.append(manual)
+    scan = config["camera"].get("scan", {})
+    manual_sweep = SweepPattern(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15))
+    manual_pan = {"deg": 0.0}
+    cam_sequence = 0
+
+    def send_cam(pan_deg: float) -> None:
+        nonlocal cam_sequence
+        cam_sequence = (cam_sequence + 1) & 0xFFFF
+        uart.send("CAM", cam_sequence, f"{pan_deg:.1f}")
+
+    def manual_pan_loop() -> None:
+        # The phone's W sweep at camera.pan_rate_hz from a thread of its own, as the AUTO sweep
+        # (ai_vision.py _pan_loop): from the 10 Hz main loop the servo moved in visible steps.
+        period = 1.0 / float(config["camera"].get("pan_rate_hz", 20.0) or 20.0)
+        sweeping = False
+        while not stop_event.wait(period):
+            phone = manual.state()
+            on = phone.active and phone.sweep
+            if on:
+                now = monotonic()
+                if not sweeping:
+                    manual_sweep.start(now, manual_pan["deg"])
+                manual_pan["deg"] = manual_sweep.frame_done(now)
+                send_cam(manual_pan["deg"])
+            sweeping = on
+    if manual is not None:
+        workers.append(threading.Thread(target=manual_pan_loop, name="manual-pan", daemon=True))
     if lidar_model != "none":
         # Clusters, for the potential field: one push per object, not one per ray.
         # As far as the LiDAR sees (vehicle.lidar_max_range_m), so the detour ahead (navigation.py) sees obstacles in
@@ -111,12 +144,11 @@ def main() -> int:
         log.warning("no LiDAR but vehicle.lidar_required is set: AUTO will stay stopped")
     vision: VisionWorker | None = None
     if config["camera"]["enabled"] and not args.no_camera:
-        cam_sequence = 0
-
         def send_pan(pan_deg: float) -> None:
-            nonlocal cam_sequence
-            cam_sequence = (cam_sequence + 1) & 0xFFFF
-            uart.send("CAM", cam_sequence, f"{pan_deg:.1f}")
+            # In MANUAL the phone owns the camera servo (W/w): the detector keeps looking, its pan is dropped.
+            if manual is None or not manual.state().active:
+                manual_pan["deg"] = pan_deg
+                send_cam(pan_deg)
 
         vision = VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, navigator.standoff_m,
                               lambda: mission.sweeping, lambda: mission.detecting)
@@ -175,6 +207,26 @@ def main() -> int:
                 uart.send("TXD", txd_sequence, kind, f"{report.lat:.6f}", f"{report.lon:.6f}", f"{report.confidence:.2f}", report.risk)
                 log.warning("report (%s): %s person %s", report.why, RISK_NAMES[report.risk],
                             f"at {report.lat:.6f} {report.lon:.6f}" if (report.lat, report.lon) != (0.0, 0.0) else "with no position (no GPS fix)")
+            phone = manual.state(now) if manual else None
+            if phone is not None and phone.active:
+                # MANUAL: the phone's motors, rudders and lights go straight to the F407 ($MAN), in place of
+                # the navigator's $NAV; the mission and the detector carry on, so v resumes where it was.
+                hold = snapshot.link.hold
+                rear, front = (0.0, 0.0) if hold else (phone.rear, phone.front)
+                uart.send("MAN", sequence, f"{rear:.2f}", f"{front:.2f}", f"{phone.steer:.2f}", phone.lights,
+                          config["vehicle"]["nav_ttl_ms"])
+                fps = vision.fps if vision else None
+                uart.send("HBT", sequence, "dashboard_hold" if hold else "manual", lora_rev, mission.code,
+                          mission.waypoint_field, "-" if fps is None else round(fps * 10))
+                status["phase"] = "MANUAL"
+                status["lines"] = [f"MANUAL rear {rear:.2f} front {front:+.2f} steer {phone.steer:+.1f}",
+                                   f"level {phone.level}/9, lights {phone.lights}, camera {'sweep' if phone.sweep else 'held'}"]
+                text = f"MANUAL {phone.motion} {phone.level} {phone.steer:+.1f}{' hold' if hold else ''}"
+                if text != last_text:
+                    log.info("%s", text)
+                    last_text = text
+                sleep(0.10)
+                continue
             planned = step.planned
             proposed = navigator.plan(planned)
             command = safety.check(planned, proposed)

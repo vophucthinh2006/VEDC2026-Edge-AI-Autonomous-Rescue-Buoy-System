@@ -23,6 +23,8 @@ python3 run_pi5.py                       # cả hệ thống: boat_stm32.yaml + 
 python3 run_pi5.py --buoy-test           # một phao, không lộ trình, không LiDAR: + config/pi5_buoy_test.yaml
 ```
 
+- **Từ PC như Pi 4:** `scripts\stm32\run_all.bat`, `demo_stand.bat`... vẫn dùng được: trên Pi 5, `run.sh stm32` tự thêm
+  `config/pi5_system.yaml` sau `boat_stm32.yaml`. Lần đầu tạo `.venv` trên Pi bằng `requirements-pi5.txt` (bước trên).
 - **Cổng:** STM32F407 và LD14 qua USB-to-TTL, gọi theo ổ cắm (`/dev/serial/by-path/...`) trong
   `config/pi5_system.yaml`. Cắm sang ổ khác thì tên đổi: `tools/port_probe.py` in ra tên mới, đặt vào một
   `--overlay` của mình (`--overlay` sau cùng thắng).

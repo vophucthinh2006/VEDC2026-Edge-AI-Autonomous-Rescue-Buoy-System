@@ -236,6 +236,7 @@ int main(void)
 #else
       control.hold = LoraBeacon_Hold();
       Control_Tick(&control, &pi_command, &imu, now);
+      Lights_Manual(pi_command.mode == NAV_MANUAL, pi_command.man_lights);
       Camera_Tick(&pi_command, now);
       Buzzer_Tick(now);
       report_events(now);

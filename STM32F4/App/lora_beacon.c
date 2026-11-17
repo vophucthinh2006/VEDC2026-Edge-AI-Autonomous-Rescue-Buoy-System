@@ -245,6 +245,23 @@ void LoraBeacon_ReportConfirm(uint16_t presses, uint32_t now_ms)
 #endif
 }
 
+#if LORA_ENABLED
+/* Round trip and signal of the station's answer just read. SX1276 datasheet 5.5.5, low-frequency
+   port (433 MHz): RSSI = -164 + PacketRssi, with the SNR added when it is negative, else scaled 16/15. */
+static void measure_answer(uint32_t now_ms)
+{
+    uint16_t rtt = (uint16_t)(now_ms - tx_start_ms);
+    lora_debug.rtt_ms = rtt;
+    if (rtt > lora_debug.rtt_max_ms) lora_debug.rtt_max_ms = rtt;
+    lora_debug.rtt_sum_ms += rtt;
+    lora_debug.rtt_count++;
+    int8_t snr_x4 = (int8_t)SX127x_ReadReg(&radio, 0x19U);         /* REG_PKT_SNR_VALUE */
+    int16_t packet_rssi = (int16_t)SX127x_ReadReg(&radio, 0x1AU);  /* REG_PKT_RSSI_VALUE */
+    lora_debug.snr_x4 = snr_x4;
+    lora_debug.rssi_dbm = (int16_t)(snr_x4 < 0 ? -164 + packet_rssi + snr_x4 / 4 : -164 + packet_rssi * 16 / 15);
+}
+#endif
+
 void LoraBeacon_Tick(uint32_t now_ms)
 {
 #if LORA_ENABLED
@@ -265,7 +282,11 @@ void LoraBeacon_Tick(uint32_t now_ms)
             lora_debug.seq++;
         } else if (len == 0U && diag_set && (int32_t)(now_ms - next_diag_ms) >= 0 && !RouteLink_Receiving(&route)) {
             /* Diagnostics between two beacons, not while a route comes in; nobody answers them. */
-            len = (uint16_t)DiagFrame_Build(frame, sizeof(frame), LORA_BUOY_ID, &diag);
+            diag_t d = diag;
+            d.has_link = lora_debug.rtt_count > 0U;
+            d.air_ms = lora_debug.airtime_ms;
+            d.rtt_ms = lora_debug.rtt_ms;
+            len = (uint16_t)DiagFrame_Build(frame, sizeof(frame), LORA_BUOY_ID, &d);
             next_diag_ms = now_ms + LORA_DIAG_PERIOD_MS;
             listen_after_tx = false;
             if (len > 0U) lora_debug.diag_tx++;
@@ -286,6 +307,7 @@ void LoraBeacon_Tick(uint32_t now_ms)
         if (SX127x_TxDone(&radio)) {
             lora_debug.tx_count++;
             lora_debug.last_tx_ms = now_ms;
+            if (listen_after_tx) lora_debug.airtime_ms = (uint16_t)(now_ms - tx_start_ms);   /* the frames answered */
             /* Listen for the station's answer; without it the radio rests until the next frame. */
             rx_start_ms = now_ms;
             if (!listen_after_tx) { SX127x_Standby(&radio); lora_debug.state = LORA_STATE_IDLE; }
@@ -318,6 +340,7 @@ void LoraBeacon_Tick(uint32_t now_ms)
                 if (EventQueue_Ack(&events, eseq) && EventQueue_Pending(&events))
                     event_due_ms = now_ms;   /* the next event at once */
             }
+            if (ours) measure_answer(now_ms);
             publish_link();
         }
         /* One answer per frame: stop listening once ours is in, or when the window closes. The

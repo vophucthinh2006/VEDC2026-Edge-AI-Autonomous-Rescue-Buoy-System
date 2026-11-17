@@ -2,7 +2,7 @@
 // numbers and pictures instead of sentences. Only what the boats and the Worker really send:
 //   - rain over the next 24 hours at the station (Open-Meteo through /api/weather, features/weather.js)
 //   - roll and pitch (IMU), the bow now (yaw) against the heading the Pi asks for (target_yaw, -1 = none)
-//   - battery % (beacon) with volts and amps (INA226, diagnostics frame), LoRa bars and the distance to the station
+//   - battery % (beacon) with volts (INA226, diagnostics frame; the current is not shown, the shunt reading is not trusted), LoRa bars and the distance to the station
 // Also the status pill in the top bar, the station's satellites, and the picked-buoy control at the bottom.
 import { state, buoyStatus, STATUS, signalOf, SIGNAL, batteryOf, speedOf, attitudeAgeSec, ATTITUDE_STALE_SEC,
   isStale } from '../state.js';
@@ -126,10 +126,10 @@ function renderBattery(id, b) {
   tone(card, p === null ? 'idle' : p < BATT_BAD ? 'bad' : p < BATT_WARN ? 'warn' : 'ok');
   $('gb-ring').style.strokeDashoffset = String(100 - (p ?? 0));
   const d = state.diag.get(id);
-  text($('gb-pack'), d && Number.isFinite(d.volts) ? `${num(d.volts, 2)} V · ${num(d.amps, 2)} A` : '');
+  text($('gb-pack'), d && Number.isFinite(d.volts) ? `${num(d.volts, 2)} V` : '');
 }
 
-function renderLink(b) {
+function renderLink(id, b) {
   const card = $('g-link');
   const sig = signalOf(b);
   $('gk-bars').dataset.level = sig;
@@ -137,7 +137,13 @@ function renderLink(b) {
   const s = state.station;
   const km = s && s.hasPos && b.hasPos ? distM(s, b) / 1000 : null;
   text($('gk-km'), km === null ? '--' : num(km, km < 10 ? 1 : 0));
-  card.title = `Tín hiệu ${SIGNAL[sig].text.toLowerCase()}${km === null ? '' : `, cách trạm bờ ${num(km)} km`}`;
+  // The buoy's own timing (diag l=air:rtt): its beacon's time on air, and the station's answer after it
+  const d = state.diag.get(id);
+  const timed = d && Number.isFinite(d.air_ms) && Number.isFinite(d.rtt_ms);
+  card.dataset.timed = String(Boolean(timed));
+  text($('gk-sub'), timed ? `phát ${num(d.air_ms / 1000, 2)} s\nkhứ hồi ${num(d.rtt_ms / 1000, 2)} s` : 'tới trạm bờ');
+  card.title = `Tín hiệu ${SIGNAL[sig].text.toLowerCase()}${km === null ? '' : `, cách trạm bờ ${num(km)} km`}`
+    + (timed ? `; gói tin mất ${d.air_ms} ms trên sóng, trạm trả lời sau ${d.rtt_ms} ms` : '');
 }
 
 function renderPill(id, b, st) {
@@ -201,7 +207,7 @@ export function renderGauges() {
   $('gauges').dataset.lost = String(isStale(b));
   renderAttitude(b);
   renderBattery(id, b);
-  renderLink(b);
+  renderLink(id, b);
   renderPill(id, b, st);
   renderCtl(id, b, st);
   renderDock(b);

@@ -291,6 +291,8 @@ static void xu_ly_chan_doan(const lora_diag_t *dg, int rssi, float snr) {
     if (dg->mission) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"mission\":\"%c\"", dg->mission);
     if (dg->has_battery) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"volts\":%.2f,\"amps\":%.2f", dg->volts, dg->amps);
     if (dg->has_fps) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"fps\":%.1f", dg->fps);
+    if (dg->has_link) json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, ",\"air_ms\":%u,\"rtt_ms\":%u",
+                                                       (unsigned)dg->air_ms, (unsigned)dg->rtt_ms);
     json_ok = json_ok && json_append(m.json, sizeof(m.json), &used, "}}");
     if (!json_ok) { ESP_LOGE(TAG, "JSON chan doan vuot qua %u byte", (unsigned int)sizeof(m.json)); return; }
     ESP_LOGI(TAG, "[CHAN DOAN] id=%s ly do=%s nhiem vu=%c lai=%u", id_sach, dg->reason[0] ? dg->reason : "-",

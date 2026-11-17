@@ -167,8 +167,13 @@ test("keeps a well-formed diagnostics group, flags a broken one", () => {
   assert.deepEqual(sanitizeBuoy({ ...base, diag: noPack }).diag, noPack);
   // The Pi's detector frames a second, when it runs
   assert.equal(sanitizeBuoy({ ...base, diag: { ...noPack, fps: 1.34 } }).diag.fps, 1.3);
+  // The buoy's LoRa timing, ms: both or none
+  const link = sanitizeBuoy({ ...base, diag: { ...noPack, air_ms: 640, rtt_ms: 1185 } }).diag;
+  assert.equal(link.air_ms, 640);
+  assert.equal(link.rtt_ms, 1185);
   for (const bad of [{ ...diag, reason: "Bad reason" }, { ...diag, mission: "X" }, { ...diag, drive: 5 },
-    { ...diag, wp: 301 }, { ...diag, amps: undefined }, { ...diag, i2c: -1 }, { ...diag, fps: -1 }, { ...diag, fps: "fast" }, "diag"]) {
+    { ...diag, wp: 301 }, { ...diag, amps: undefined }, { ...diag, i2c: -1 }, { ...diag, fps: -1 }, { ...diag, fps: "fast" },
+    { ...diag, air_ms: 640 }, { ...diag, air_ms: 640, rtt_ms: -1 }, { ...diag, air_ms: 1.5, rtt_ms: 9 }, "diag"]) {
     const out = sanitizeBuoy({ ...base, diag: bad });
     assert.equal(Object.hasOwn(out, "diag"), false, JSON.stringify(bad));
     assert.equal(out.diag_bad, 1);

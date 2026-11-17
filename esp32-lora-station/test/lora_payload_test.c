@@ -117,6 +117,11 @@ int main(void) {
     assert(lora_diag_parse("dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0,k=0:0,f=13", &dg));
     assert(dg.has_fps && fabsf(dg.fps - 1.3f) < 1e-4f);
     assert(!lora_diag_parse("dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0,k=0:0,f=1000", &dg));   /* out of range */
+    /* The buoy's LoRa timing, ms: air:round trip; optional. */
+    assert(lora_diag_parse("dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0,k=0:0,f=13,l=640:1185", &dg));
+    assert(dg.has_link && dg.air_ms == 640U && dg.rtt_ms == 1185U && dg.has_fps);
+    assert(lora_diag_parse("dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0,k=0:0", &dg) && !dg.has_link);
+    assert(!lora_diag_parse("dg=PHAO-01,n=waypoint,s=P,w=1/3,a=0,d=0,k=0:0,l=640", &dg));
     /* A field of newer firmware is skipped */
     assert(lora_diag_parse("dg=PHAO-01,n=waypoint,s=B,w=1/3,a=0,d=0,k=0:0,z=7", &dg) && dg.mission == 'B');
     const char *bad_diag[] = {

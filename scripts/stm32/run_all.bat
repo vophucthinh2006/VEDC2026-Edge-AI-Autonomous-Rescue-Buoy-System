@@ -83,6 +83,9 @@ rem 3 s after it stops. One main.py only: the script also stops one started by h
 rem follows the service's output; closing it leaves main.py running. End the ssh of an earlier
 rem run's window first ([s]/[v]: the patterns must not match the shell that runs them).
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'ssh.*(run\.sh [s]tm32|journalctl -u [v]edc-boat)' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+rem Bluetooth for the phone's manual control (Rasp_Pi\tools\setup_bluetooth.sh): skips what is done;
+rem a failure only leaves the boat without manual control. Pair a phone once: setup_bluetooth.sh pair.
+ssh %PI_HOST% "cd %PI_DIR% && bash tools/setup_bluetooth.sh" || echo [RUN_ALL] Bluetooth setup failed: no manual control from the phone
 ssh %PI_HOST% "cd %PI_DIR% && bash tools/install_service.sh --restart %SVC_ARGS%" || goto :fail
 start "Pi main.py" cmd /k ssh -t %PI_HOST% "journalctl -u vedc-boat -f -n 40 -o cat"
 ping -n 10 127.0.0.1 >nul

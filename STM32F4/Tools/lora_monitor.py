@@ -20,7 +20,7 @@ import time
 from openocd_probe import OpenOcd, ROOT, find_tool
 
 STATES = {0: "DISABLED", 1: "INIT_FAIL", 2: "IDLE", 3: "TX", 4: "RX"}
-LORA_DEBUG_SIZE = 53
+LORA_DEBUG_SIZE = 77
 ERRORS = {0: "ok", 1: "SPI error", 2: "chip not found (REG_VERSION != 0x12)", 3: "bad argument"}
 
 
@@ -46,6 +46,9 @@ def snapshot(ocd, sym):
     last_len, gps_valid = struct.unpack("<2H", lora[20:24])
     acks, event_tx, dropped, last_heard, home_lat, home_lon = struct.unpack("<4I2i", lora[24:48])
     pending, shore_ok, lights, home_valid, hold = lora[48:53]
+    airtime, rtt, rtt_max, rssi = struct.unpack("<3Hh", lora[60:68])
+    rtt_sum, rtt_count = struct.unpack("<2I", lora[68:76])
+    snr_x4 = struct.unpack("<b", lora[76:77])[0]
     lat, lon, hdop = struct.unpack("<3f", g[:12])
     fix = g[20]
     last_rx = struct.unpack("<I", g[24:28])[0]
@@ -62,6 +65,8 @@ def snapshot(ocd, sym):
         "uptime_ms": now,
         "acks": acks, "event_tx": event_tx, "dropped": dropped, "pending": pending, "shore_ok": shore_ok,
         "heard_ago": None if acks == 0 and last_heard == 0 else ((now - last_heard) & 0xFFFFFFFF) / 1000.0,
+        "airtime": airtime, "rtt": rtt, "rtt_max": rtt_max, "rtt_count": rtt_count,
+        "rtt_avg": rtt_sum / rtt_count if rtt_count else None, "rssi": rssi, "snr": snr_x4 / 4.0,
         "lights": lights, "hold": hold, "home": (home_lat / 1e6, home_lon / 1e6) if home_valid else None,
     }
 
@@ -72,7 +77,10 @@ def fmt(s):
     gps_age = "never" if s["gps_age"] is None else f"{s['gps_age']:.1f} s ago"
     heard = "never" if s["heard_ago"] is None else f"{s['heard_ago']:.1f} s ago"
     home = "none" if s["home"] is None else f"{s['home'][0]:.6f},{s['home'][1]:.6f}"
-    return (f"LoRa {chip} | {s['state']:9s} | tx {s['tx']} ok / {s['fail']} fail | next seq {s['seq']} | "
+    link = (f"air {s['airtime']} ms | round trip {s['rtt']} ms (avg {s['rtt_avg']:.0f}, max {s['rtt_max']}, "
+            f"{s['rtt_count']} answers) | RSSI {s['rssi']} dBm SNR {s['snr']:+.1f} dB" if s["rtt_count"]
+            else f"air {s['airtime']} ms | no answer yet")
+    return (f"LoRa {chip} | {s['state']:9s} | {link} | tx {s['tx']} ok / {s['fail']} fail | next seq {s['seq']} | "
             f"last tx {tx_ago} ({s['len']} B, {'with fix' if s['frame_fix'] else 'NO_FIX'}) | "
             f"GPS fix {s['fix']} {s['lat']:.6f},{s['lon']:.6f} hdop {s['hdop']:.1f} {s['speed']:.2f} m/s course {s['course']:.0f} "
             f"last GGA {gps_age} ({s['gps_bytes']} B, {s['gps_sentences']} sentences, {s['gps_bad']} bad) | "

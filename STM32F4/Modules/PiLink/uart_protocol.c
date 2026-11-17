@@ -34,6 +34,18 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
         uint16_t ttl = (uint16_t)strtoul(fields[5], NULL, 10);
         if (speed < 0.0f || speed > 2.0f || heading < 0.0f || heading >= 360.0f || ttl == 0U || ttl > 1000U) return;
         command->mode = mode; command->speed_mps = speed; command->heading_deg = heading; command->ttl_ms = ttl; command->sequence = seq; command->last_nav_ms = now_ms;
+        command->man_rear = command->man_front = command->man_steer = 0.0f;   /* a NAV MANUAL drives nothing */
+    } else if (strcmp(fields[0], "MAN") == 0 && count >= 7U) {
+        uint16_t seq = (uint16_t)strtoul(fields[1], NULL, 10);
+        bool stream_live = command->last_nav_ms != 0U && (uint32_t)(now_ms - command->last_nav_ms) <= NAV_TIMEOUT_MS;
+        if (stream_live && !sequence_is_newer(seq, command->sequence)) return;
+        float rear = strtof(fields[2], NULL), front = strtof(fields[3], NULL), steer = strtof(fields[4], NULL);
+        unsigned long lights = strtoul(fields[5], NULL, 10);
+        uint16_t ttl = (uint16_t)strtoul(fields[6], NULL, 10);
+        if (!(rear >= 0.0f && rear <= 1.0f) || !(front >= -1.0f && front <= 1.0f) || !(steer >= -1.0f && steer <= 1.0f)
+            || lights > 3UL || ttl == 0U || ttl > 1000U) return;
+        command->mode = NAV_MANUAL; command->man_rear = rear; command->man_front = front; command->man_steer = steer;
+        command->man_lights = (uint8_t)lights; command->ttl_ms = ttl; command->sequence = seq; command->last_nav_ms = now_ms;
     } else if (strcmp(fields[0], "HBT") == 0 && count >= 3U) {
         command->last_hbt_ms = now_ms; command->pi_link_ok = true;
         /* Optional 4th field: revision of the LoRa route the Pi runs (docs/lora-route-downlink.md). */

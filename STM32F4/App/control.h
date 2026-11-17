@@ -27,7 +27,7 @@ typedef struct {
     float heading_cmd;            /* PID output u, -1..1, positive turns the bow right */
     bool heading_target_valid;
     uint8_t heading_state;        /* heading_state_t */
-    char operating_mode;          /* 'S' stopped, 'A' the Pi is driving */
+    char operating_mode;          /* 'S' stopped, 'A' the Pi is driving, 'M' the phone is ($MAN) */
     bool hold;                    /* STOP from the dashboard, set by main.c from the LoRa ACK */
     front_motor_t front;          /* the front motor: pushes with the rear ones, brakes (App/front_motor.c) */
     uint32_t last_imu_ms;

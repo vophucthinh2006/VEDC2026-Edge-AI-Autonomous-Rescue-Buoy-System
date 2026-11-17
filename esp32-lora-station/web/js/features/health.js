@@ -73,8 +73,7 @@ function renderBody(id, b) {
     put('h-imu', 'Chưa có dữ liệu');
     for (const k of ['h-roll', 'h-pitch', 'h-head']) put(k, '-');
   } else {
-    put('h-imu', b.imuOk ? `Hoạt động, hiệu chuẩn ${b.calib}/3${stale}` : `Mất IMU${stale}`,
-      !b.imuOk ? 'bad' : b.calib < 2 ? 'warn' : 'ok');
+    put('h-imu', b.imuOk ? `Hoạt động${stale}` : `Mất IMU${stale}`, b.imuOk ? 'ok' : 'bad');
     put('h-roll', tiltText(b.roll) + stale, tiltTone(b.roll));
     put('h-pitch', tiltText(b.pitch) + stale, tiltTone(b.pitch));
     if (b.targetYaw === null) put('h-head', `${b.yaw.toFixed(0)}°, Pi chưa yêu cầu hướng${stale}`, 'idle');
@@ -134,7 +133,7 @@ function renderDiag(id) {
   // The Pi's detector: frames a second over its last 10 s (Rasp_Pi/modules/ai_vision.py VisionWorker.fps)
   put('g-fps', Number.isFinite(d.fps) ? `${d.fps.toFixed(1)} khung/giây` : d.mission === 'I' ? 'Tắt (chưa có lộ trình)' : 'Pi chưa báo',
       !Number.isFinite(d.fps) ? 'idle' : d.fps < FPS_LOW ? 'warn' : 'ok');
-  put('g-pack', Number.isFinite(d.volts) ? `${d.volts.toFixed(2)} V, ${d.amps.toFixed(2)} A` : 'Chưa đọc được INA226', 'idle');
+  put('g-pack', Number.isFinite(d.volts) ? `${d.volts.toFixed(2)} V` : 'Chưa đọc được INA226', 'idle');
   put('g-recov', `Bus I2C ${d.i2c} lần, IMU ${d.imu} lần`, d.i2c || d.imu ? 'warn' : 'ok');
 }
 

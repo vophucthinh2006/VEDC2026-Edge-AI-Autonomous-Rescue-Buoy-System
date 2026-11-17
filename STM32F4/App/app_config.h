@@ -198,12 +198,12 @@
 #define TILT_REPEAT_MS             30000U
 
 /* Battery: INA226 on I2C1 (PB8/PB9; 0x44 on this boat; any of 0x40..0x4F is found), IN+/IN- in series with the pack.
-   Many INA226 modules carry a 0.1 ohm shunt (R100), which reads up to 0.8 A only: measure the shunt on
-   yours and set it here before trusting the current. The charge needs the voltage only. */
+   This boat's module carries a 1 mOhm shunt (R001): the 81.92 mV shunt range is ~80 A. A module with
+   another shunt needs it set here before trusting the current. The charge needs the voltage only. */
 #define INA226_ENABLED             1
 #define INA226_ADDRESS             0x44U   /* this boat's module: A0 or A1 strapped (found by the scan, 2026-10-20) */
-#define INA226_SHUNT_OHM           0.1f
-#define INA226_MAX_A               0.8f
+#define INA226_SHUNT_OHM           0.001f
+#define INA226_MAX_A               80.0f       /* the shunt ADC's full scale; 2.4 mA a bit */
 #define BATTERY_CELLS              3U          /* LiPo cells in series: 3S = 12.6 V full */
 #define BATTERY_READ_PERIOD_MS     500U
 

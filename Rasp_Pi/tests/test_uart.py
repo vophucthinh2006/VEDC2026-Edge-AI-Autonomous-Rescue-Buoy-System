@@ -21,7 +21,7 @@ class Stm32LinesTest(unittest.TestCase):
         self.uart = Stm32Uart("unused", 115200, self.state, threading.Event())   # never started: no port opened
 
     def feed(self, command, *fields):
-        self.uart._handle(decode(encode(command, *fields)))
+        self.uart._handle_packet(decode(encode(command, *fields)))
 
     def test_without_lnk_the_shore_link_counts_as_up_with_no_home(self):
         link = self.state.snapshot().link
@@ -222,11 +222,11 @@ class Stm32ReconnectTest(unittest.TestCase):
         class Flaky(Stm32Uart):
             calls = 0
 
-            def _handle(self, packet):
+            def _handle_packet(self, packet):
                 Flaky.calls += 1
                 if Flaky.calls == 1:
                     raise RuntimeError("bug")
-                super()._handle(packet)
+                super()._handle_packet(packet)
         stop = threading.Event()
         ports = [FakePort([encode("IMU", 1, "1.00", "2.00", "90.00", 1, 0)]), FakePort([encode("IMU", 2, "1.00", "2.00", "270.00", 1, 0)])]
         uart = Flaky("fake", 115200, StateStore(), stop, open_port=lambda: ports.pop(0) if ports else FakePort([]), reopen_s=0.01)

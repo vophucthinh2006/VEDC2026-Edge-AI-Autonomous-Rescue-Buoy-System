@@ -88,7 +88,7 @@ class HelperBoard(threading.Thread):
         self._send("VIC", max(0, min(255, victims)))
         self._send("POS", *position_fields(snap, now))
 
-    def _handle(self, raw: bytes) -> None:
+    def _handle_line(self, raw: bytes) -> None:
         packet = decode(raw)
         if packet is None or packet.command != "AUX" or len(packet.fields) < 6:
             return
@@ -109,7 +109,7 @@ class HelperBoard(threading.Thread):
                     while not self._stop_event.is_set():
                         raw = ser.readline()
                         if raw:
-                            self._handle(raw)
+                            self._handle_line(raw)
                         while True:
                             try:
                                 ser.write(self._outbound.get_nowait())
