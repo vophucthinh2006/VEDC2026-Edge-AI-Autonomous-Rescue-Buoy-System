@@ -63,6 +63,19 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to compile diag_frame_test' }
 & $diagExe
 if ($LASTEXITCODE -ne 0) { throw 'diag_frame_test failed' }
 
+$protocolExe = Join-Path $testDir 'uart_protocol_test.exe'
+& gcc -std=c11 -Wall -Wextra -Werror `
+  -I (Join-Path $repo 'STM32F4/Tests/stub') `
+  -I (Join-Path $repo 'STM32F4/App') `
+  -I (Join-Path $repo 'STM32F4/Modules/PiLink') `
+  (Join-Path $repo 'STM32F4/Tests/uart_protocol_test.c') `
+  (Join-Path $repo 'STM32F4/Modules/PiLink/uart_protocol.c') `
+  (Join-Path $repo 'STM32F4/App/txd_queue.c') `
+  -lm -o $protocolExe
+if ($LASTEXITCODE -ne 0) { throw 'Failed to compile uart_protocol_test' }
+& $protocolExe
+if ($LASTEXITCODE -ne 0) { throw 'uart_protocol_test failed' }
+
 $parserExe = Join-Path $testDir 'lora_payload_test.exe'
 & gcc -std=c11 -Wall -Wextra -Werror `
   -I (Join-Path $repo 'esp32-lora-station/main') `

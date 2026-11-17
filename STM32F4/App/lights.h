@@ -5,8 +5,12 @@
  * station's ACK (App/shore_link.h) and nothing on the boat turns them on by itself. Off at boot
  * until the first ACK; kept as they are while the station is silent. */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 void Lights_Init(void);
 void Lights_Set(uint8_t mask);
+/* MANUAL from the phone ($MAN): its mask wins over the station's until on is false, then the
+   station's last mask is back. Called every loop; writes the relays only on a change. */
+void Lights_Manual(bool on, uint8_t mask);
 uint8_t Lights_Get(void);          /* what the relays are driven to, for the beacon's L= */

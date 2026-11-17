@@ -24,6 +24,13 @@ typedef struct {
        $TXD,seq,VICTIM_FOUND|VICTIM_UPDATE,lat,lon,confidence[,risk]. lat = lon = 0 is "no
        position" (the Pi had no GPS fix). risk 0 safe .. 3 critical; an older Pi sends none: 2 (high). */
     txd_queue_t txd;
+    /* NAV_MANUAL: $MAN,seq,rear,front,steer,lights,ttl from the phone through the Pi (Rasp_Pi/modules/bt_manual.py):
+       rear 0..1 both rear motors, front -1..1, steer -1..1 (positive right), lights the relay mask.
+       Applied straight, no heading hold; a $NAV clears them. */
+    float man_rear;
+    float man_front;
+    float man_steer;
+    uint8_t man_lights;
     float cam_pan_deg;            /* camera servo angle from the bow, positive right */
     uint32_t last_cam_ms;         /* 0 until the first CAM packet */
     uint16_t route_rev;           /* LoRa route the Pi reports in $HBT, 0 = none (App/route_link.h) */
