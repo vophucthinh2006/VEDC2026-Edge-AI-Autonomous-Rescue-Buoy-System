@@ -9,17 +9,17 @@ from datetime import datetime
 from pathlib import Path
 
 
-def run_log_path(directory: Path, prefix: str, keep_runs: int, now: datetime | None = None) -> Path:
-    """The file for this run, <prefix>_YYYYmmdd_HHMMSS.log; older runs beyond keep_runs - 1 are
+def run_log_path(directory: Path, prefix: str, keep_runs: int, now: datetime | None = None, suffix: str = ".log") -> Path:
+    """The file for this run, <prefix>_YYYYmmdd_HHMMSS<suffix>; older runs beyond keep_runs - 1 are
     deleted first, oldest first, so that this one makes keep_runs."""
     directory.mkdir(parents=True, exist_ok=True)
-    runs = sorted(directory.glob(f"{prefix}_*.log"))
+    runs = sorted(directory.glob(f"{prefix}_*{suffix}"))
     for old in runs[:max(0, len(runs) - max(0, keep_runs - 1))]:
         old.unlink(missing_ok=True)
     stamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
-    path = directory / f"{prefix}_{stamp}.log"
+    path = directory / f"{prefix}_{stamp}{suffix}"
     count = 2
     while path.exists():   # two runs within the same second
-        path = directory / f"{prefix}_{stamp}_{count}.log"
+        path = directory / f"{prefix}_{stamp}_{count}{suffix}"
         count += 1
     return path

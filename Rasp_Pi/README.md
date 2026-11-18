@@ -111,6 +111,9 @@ Cấu hình chung nằm ở `config/settings.yaml`; phần riêng của từng p
 
 Thêm `--log` để ghi mỗi giây một dòng CSV vào `logs/run_<ngày>_<giờ>.csv` (chế độ, vị trí, hướng, pha cứu hộ,
 người đang thấy, vật cản gần nhất, tuổi vòng quét LiDAR, pin và trạng thái bo phụ): `./run.sh pixhawk --viewer --log`.
+`main.py` (phao STM32) luôn ghi, không cần cờ: mỗi vòng AUTO (10 lần/s) một dòng vào `logs/nav_<ngày>_<giờ>.csv`
+(thêm lệnh `$NAV` và waypoint đang tới), giữ `logging.keep_runs` lần chạy; `tools/lake_report.py` đọc nó ra báo cáo
+lái ([docs/lake-test.md](../docs/lake-test.md)).
 
 Trình tự đầy đủ khi đưa lên phao nằm ở `docs/porting-checklist.md`. Tóm tắt, **tháo chân vịt**:
 
