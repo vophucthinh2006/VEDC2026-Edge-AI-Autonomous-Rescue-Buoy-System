@@ -71,6 +71,7 @@ khớp thân dưới → **Trung bình** (vàng); dưới nước → **Cao** (c
 | 11b | servo camera quét như khi chạy lộ trình | `test_cam_servo.bat [độ giây [độ/s]]`, vd. `test_cam_servo.bat 45 10` | F407 + servo camera; tắt `main.py` trên Pi trước | camera quét qua lại ±độ, 30°/s, sang trái trước, qua chính đường lệnh `CAM` của firmware thường (không motor nào quay); script in biên độ xung đọc lại trên PA6. Board đang chạy firmware khác (vd. HwTest) thì script tự nạp lại bản Debug. Xung đủ biên độ mà camera không quay: nguồn 5 V của servo, dây PA6, hoặc servo hỏng |
 | 11c | 3 servo bánh lái (trước, sau phải, sau trái) | `test_rudder.bat [phần trăm giây [chu kỳ]] [-Keep]`, vd. `test_rudder.bat 100 10` | F407 + 3 servo (firmware HwTest, không motor nào quay) | đánh lái qua lại như bộ giữ hướng: phải tới phần trăm góc lái tối đa (±250 µs), qua giữa, sang trái, mỗi chu kỳ 4 s; servo trước quay ngược hai servo sau. Script in biên độ xung đọc lại từng chân (PA7, PB1, PB0) rồi tự nạp lại firmware thường (`-Keep`: giữ HwTest) |
 | — | **toàn bộ** | `run_all.bat [noflash] [nostation] [notest] [sim]` | tất cả | xem cuối file |
+| — | đo lái ở hồ (giữ hướng, bám waypoint, tốc độ) | `run_all.bat`, sau buổi `lake_report.bat` | phao trên nước | báo cáo HTML PASS/FAIL từng chỉ số; quy trình: [lake-test.md](lake-test.md) |
 
 **`run_all.bat`**: test trên máy tính → nạp F407 → nạp trạm (cửa sổ log riêng) → `boat stm32 deploy` → `main.py`
 trên Pi (cửa sổ riêng, `--viewer`) → mở dashboard và viewer. Sau đó:
