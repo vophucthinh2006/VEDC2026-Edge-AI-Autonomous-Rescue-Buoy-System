@@ -27,6 +27,8 @@ class RunLogPathTest(unittest.TestCase):
             second = run_log_path(Path(tmp), "main", 30, now)
             self.assertNotEqual(first, second)
             self.assertEqual(second.name, "main_20261021_080000_2.log")
+            # main.py's CSV beside it, rotated on its own (the .log above is not counted)
+            self.assertEqual(run_log_path(Path(tmp), "nav", 1, now, suffix=".csv").name, "nav_20261021_080000.csv")
 
     def test_other_files_are_left_alone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

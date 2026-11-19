@@ -15,3 +15,6 @@ Rasp_Pi/.boat_profile
 
 # Run logs main.py writes on every start (Rasp_Pi/logs/main_*.log)
 Rasp_Pi/logs/
+
+# Lake test logs copied from the Pi and their reports (scripts/stm32/lake_report.bat)
+lake_logs/

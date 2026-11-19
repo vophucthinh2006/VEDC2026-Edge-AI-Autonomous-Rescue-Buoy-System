@@ -30,6 +30,7 @@ from modules.waypoints import Route, start_route
 from utils.config import load_config
 from utils.geometry import bearing_deg, heading_tenths
 from utils.log_files import run_log_path
+from utils.run_log import RunLog
 
 
 def configure_logging(config: dict) -> Path:
@@ -62,6 +63,10 @@ def main() -> int:
     log_path = configure_logging(config)
     log = logging.getLogger("main")
     log.info("log file: %s", log_path)
+    # Every AUTO loop as CSV beside it, for the lake test's report (tools/lake_report.py, docs/lake-test.md)
+    log_dir = Path(config["logging"]["directory"])
+    run_log = RunLog(log_dir, run_log_path(log_dir, "nav", int(config["logging"].get("keep_runs", 30)), suffix=".csv"))
+    log.info("nav log: %s", run_log.path)
     stop_event = threading.Event()
     state = StateStore()
     uart = Stm32Uart(config["serial"]["stm32_port"], int(config["serial"]["stm32_baud"]), state, stop_event)
@@ -241,6 +246,10 @@ def main() -> int:
             fps = vision.fps if vision else None
             uart.send("HBT", sequence, command.reason, lora_rev, mission.code, mission.waypoint_field,
                       "-" if fps is None else round(fps * 10))
+            wp = mission.route.current   # the waypoint itself; planned.waypoint is the aim point along the leg
+            run_log.write(snapshot, now, mission.state, 0, cmd_mode=command.mode, cmd_speed_mps=f"{command.speed_mps:.2f}",
+                          cmd_heading_deg=f"{command.heading_deg:.1f}", reason=command.reason, wp_index=mission.waypoint_field,
+                          wp_lat=f"{wp[0]:.7f}" if wp else "", wp_lon=f"{wp[1]:.7f}" if wp else "")
             goal = planned.waypoint
             target_bearing = bearing_deg(snapshot.gps.lat_deg, snapshot.gps.lon_deg, *goal) if goal else command.heading_deg
             state.update_steering(command.heading_deg, target_bearing)
@@ -269,6 +278,7 @@ def main() -> int:
         stop_event.set()
         for worker in workers:
             worker.join(timeout=1.0)
+        run_log.close()
         log.info("RedgeSCUE stopped")
     return 0
 

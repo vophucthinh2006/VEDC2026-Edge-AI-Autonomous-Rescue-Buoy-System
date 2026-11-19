@@ -184,7 +184,7 @@ class RunLogTest(unittest.TestCase):
             snap = HelperBoardTest.snap(now)
             run.write(snap, now, "search", 0)
             run.write(snap, now + 1.0, "approach", 1, BoardState(12.34, 1.5, True, True, True, now), True)
-            run.write(snap, now + 2.0, "approach", 1, BoardState(12.34, 1.5, True, True, True, now), False)
+            run.write(snap, now + 2.0, "approach", 1, BoardState(12.34, 1.5, True, True, True, now), False, cmd_mode="AUTO", wp_index="2/4")
             run.close()
             with run.path.open(encoding="utf-8") as written:
                 rows = list(csv.DictReader(written))
@@ -192,3 +192,4 @@ class RunLogTest(unittest.TestCase):
         self.assertEqual((rows[0]["mode"], rows[0]["phase"], rows[0]["lat"], rows[0]["board"], rows[0]["battery_v"]), ("GUIDED", "search", "10.7626220", "", ""))
         self.assertEqual((rows[1]["people_found"], rows[1]["board"], rows[1]["battery_v"], rows[1]["estop"]), ("1", "1", "12.34", "1"))
         self.assertEqual((rows[2]["board"], rows[2]["battery_v"]), ("0", ""))
+        self.assertEqual((rows[1]["cmd_mode"], rows[2]["cmd_mode"], rows[2]["wp_index"]), ("", "AUTO", "2/4"))   # main.py's extra columns
