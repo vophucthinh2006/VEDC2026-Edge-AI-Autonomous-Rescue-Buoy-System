@@ -113,6 +113,8 @@ def camera_meta(view: dict | None) -> tuple[str, tuple[int, int, int]]:
     if not view:
         return "", MUTED
     pan = f"pan {view.get('pan_deg', 0.0):+.0f}°"
+    if view.get("tilt_deg") is not None:   # the pan-tilt gimbal (main.py)
+        pan += f"  tilt {view['tilt_deg']:+.0f}°"
     if view.get("scanning"):
         return f"{pan}  ·  searching", YELLOW
     if view.get("box") is not None and view.get("age_s", 9) < 1.0:

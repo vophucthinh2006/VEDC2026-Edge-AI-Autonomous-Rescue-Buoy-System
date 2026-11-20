@@ -9,6 +9,10 @@ camera:
   source: gazebo
   gazebo_topic: /vedc_buoy/camera
   pan_topic: /model/vedc_buoy/joint/camera_pan_joint/cmd_pos
+  # The simulated camera has a pan joint only: no gimbal tilt, no raster sweep (config/boat_stm32.yaml).
+  tilt_enabled: false
+  scan:
+    mode: sweep
   # Calibrated on the simulated person with the YOLOv8n boxes: the water is translucent there, so
   # the box also covers part of the submerged body, 0.45 to 0.65 m from 3 to 12 m away, 0.57 typical
   # (0.65 to 0.75 m with the earlier SSD boxes). Somebody standing measures 1.9 to 2.1 m, the box

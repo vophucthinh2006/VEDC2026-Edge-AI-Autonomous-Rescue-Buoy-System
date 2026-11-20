@@ -75,7 +75,7 @@ class Follow:
         if self.phase == SEARCH or self._last is None:
             return replace(snap, human_target=None), events
         held = HumanTarget(signed_angle_deg(self._last_world_deg - snap.imu.yaw_deg), self._last.distance_m,
-                           self._last.confidence, self._last.timestamp, self._last.risk)
+                           self._last.confidence, self._last.timestamp, self._last.risk, self._last.on_roof)
         return replace(snap, human_target=held), events
 
     @property

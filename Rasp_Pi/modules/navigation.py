@@ -269,8 +269,11 @@ class BapfNavigator:
         if target is not None:
             # A person is approached along the detected bearing, never closer than standoff. The
             # throttle goes off the braking distance early, so the boat coasts to the stand-off.
+            # Somebody on a roof: held off at vehicle.roof_standoff_m, never up against the house;
+            # the camera keeps following and their position goes to the shore as for anybody.
+            standoff = max(self.standoff_m, float(self.v.get("roof_standoff_m", 8.0))) if target.on_roof else self.standoff_m
             desired_body = target.bearing_body_deg
-            remaining = target.distance_m - self.standoff_m - brake
+            remaining = target.distance_m - standoff - brake
             desired_heading = (imu.yaw_deg + desired_body) % 360.0
             self._at_standoff = remaining <= (STANDOFF_RELEASE_M if self._at_standoff else STANDOFF_ARRIVE_M)
             desired_speed = 0.0 if self._at_standoff else float(self.v["approach_speed_mps"])

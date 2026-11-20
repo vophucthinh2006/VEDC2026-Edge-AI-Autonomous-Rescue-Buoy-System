@@ -103,6 +103,7 @@ class HumanTarget:
     confidence: float
     timestamp: float
     risk: int = MEDIUM   # SAFE (on a boat), MEDIUM, HIGH (in the water), CRITICAL (drowning)
+    on_roof: bool = False   # feet above the horizon (ai_vision._on_roof): the boat keeps vehicle.roof_standoff_m off
 
 
 @dataclass(frozen=True)

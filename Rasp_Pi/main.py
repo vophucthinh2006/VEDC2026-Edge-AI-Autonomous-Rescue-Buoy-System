@@ -22,7 +22,7 @@ from modules.drive_log import DriveLog
 from modules.lidar_serial import SerialLidar
 from modules.mission import Mission
 from modules.navigation import BapfNavigator, NavCommand
-from modules.perception import SweepPattern, cluster_scan
+from modules.perception import RasterSweep, SweepPattern, cluster_scan
 from modules.safety import SafetyArbiter
 from modules.state_store import RISK_NAMES, HumanTarget, StateStore
 from modules.uart_comm import Stm32Uart
@@ -109,14 +109,21 @@ def main() -> int:
         manual = BluetoothManual(config["manual"], stop_event)
         workers.append(manual)
     scan = config["camera"].get("scan", {})
-    manual_sweep = SweepPattern(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15))
-    manual_pan = {"deg": 0.0}
+    # camera.tilt_enabled: the pan-tilt gimbal. The phone's W sweep is then the AUTO one, over the rows too.
+    tilt_on = bool(config["camera"].get("tilt_enabled", False))
+    manual_sweep = (RasterSweep(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15), scan.get("tilt_rows_deg", [0, 30]))
+                    if tilt_on and str(scan.get("mode", "")).lower() == "raster"
+                    else SweepPattern(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15)))
+    manual_pan: dict[str, float | None] = {"deg": 0.0, "tilt": float(config["camera"].get("tilt_home_deg", 10.0)) if tilt_on else None}
     cam_sequence = 0
 
-    def send_cam(pan_deg: float) -> None:
+    def send_cam(pan_deg: float, tilt_deg: float | None = None) -> None:
+        # $CAM,seq,pan[,tilt]: the F407 glides the gimbal there and clamps the tilt to 0..60 deg; without
+        # a tilt it keeps its own (10 deg).
         nonlocal cam_sequence
         cam_sequence = (cam_sequence + 1) & 0xFFFF
-        uart.send("CAM", cam_sequence, f"{pan_deg:.1f}")
+        tilt = () if tilt_deg is None else (f"{tilt_deg:.1f}",)
+        uart.send("CAM", cam_sequence, f"{pan_deg:.1f}", *tilt)
 
     def manual_pan_loop() -> None:
         # The phone's W sweep at camera.pan_rate_hz from a thread of its own, as the AUTO sweep
@@ -131,7 +138,8 @@ def main() -> int:
                 if not sweeping:
                     manual_sweep.start(now, manual_pan["deg"])
                 manual_pan["deg"] = manual_sweep.frame_done(now)
-                send_cam(manual_pan["deg"])
+                manual_pan["tilt"] = getattr(manual_sweep, "tilt_deg", manual_pan["tilt"])
+                send_cam(manual_pan["deg"], manual_pan["tilt"])
             sweeping = on
     if manual is not None:
         workers.append(threading.Thread(target=manual_pan_loop, name="manual-pan", daemon=True))
@@ -149,14 +157,14 @@ def main() -> int:
         log.warning("no LiDAR but vehicle.lidar_required is set: AUTO will stay stopped")
     vision: VisionWorker | None = None
     if config["camera"]["enabled"] and not args.no_camera:
-        def send_pan(pan_deg: float) -> None:
+        def send_pan(pan_deg: float, tilt_deg: float | None = None) -> None:
             # In MANUAL the phone owns the camera servo (W/w): the detector keeps looking, its pan is dropped.
             if manual is None or not manual.state().active:
-                manual_pan["deg"] = pan_deg
-                send_cam(pan_deg)
+                manual_pan["deg"], manual_pan["tilt"] = pan_deg, tilt_deg
+                send_cam(pan_deg, tilt_deg)
 
         vision = VisionWorker(config["camera"], state, stop_event, person_confirmed, send_pan, navigator.standoff_m,
-                              lambda: mission.sweeping, lambda: mission.detecting)
+                              lambda: mission.sweeping, lambda: mission.detecting, tilt=tilt_on)
         workers.append(vision)
     status = {"text": "", "lines": [], "phase": ""}
     if args.viewer:
