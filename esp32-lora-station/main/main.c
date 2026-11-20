@@ -130,10 +130,50 @@ static const char *duong_mang(void) {
 
 // ---------------------------------------------------------------- WiFi Station
 // Không chặn app_main: LoRa vẫn chạy khi chưa có WiFi, gói nhận được xếp hàng chờ gửi.
+// Các mạng theo thứ tự ưu tiên (secrets.h): WIFI_SSID, rồi WIFI_SSID_2 nếu có.
+static const struct { const char *ssid, *pass; } wifi_mang[] = {
+    { WIFI_SSID, WIFI_PASSWORD },
+#ifdef WIFI_SSID_2
+    { WIFI_SSID_2, WIFI_PASSWORD_2 },
+#endif
+};
+#define WIFI_SO_MANG (sizeof(wifi_mang) / sizeof(wifi_mang[0]))
+
+// Sau mỗi lần quét: nối vào mạng ưu tiên cao nhất đang thấy; không thấy mạng nào thì kể tên các mạng
+// đang thấy (để soát lỗi gõ tên) và quét lại.
+// shortcut: chỉ chọn lại khi mất kết nối; đang ở mạng 2 thì không tự quay về mạng 1 khi nó xuất hiện.
+static void wifi_chon_mang(void) {
+    static wifi_ap_record_t ap[20];   // static: ~1.6 KB, quá lớn cho stack task sự kiện
+    uint16_t n = sizeof(ap) / sizeof(ap[0]);
+    if (esp_wifi_scan_get_ap_records(&n, ap) != ESP_OK) n = 0;
+    for (size_t i = 0; i < WIFI_SO_MANG; i++) {
+        for (uint16_t j = 0; j < n; j++) {
+            if (strcmp((const char *)ap[j].ssid, wifi_mang[i].ssid) != 0) continue;
+            wifi_config_t cfg = { .sta = { .threshold.authmode = WIFI_AUTH_WPA2_PSK } };
+            strlcpy((char *)cfg.sta.ssid, wifi_mang[i].ssid, sizeof(cfg.sta.ssid));
+            strlcpy((char *)cfg.sta.password, wifi_mang[i].pass, sizeof(cfg.sta.password));
+            esp_wifi_set_config(WIFI_IF_STA, &cfg);
+            ESP_LOGI(TAG, "Dang ket noi WiFi \"%s\" (uu tien %u, RSSI %d dBm)...", wifi_mang[i].ssid,
+                     (unsigned)(i + 1), ap[j].rssi);
+            esp_wifi_connect();
+            return;
+        }
+    }
+    char thay[160] = "";
+    for (uint16_t j = 0; j < n && strlen(thay) < sizeof(thay) - 40; j++) {
+        strlcat(thay, j ? ", " : "", sizeof(thay));
+        strlcat(thay, (const char *)ap[j].ssid, sizeof(thay));
+    }
+    ESP_LOGW(TAG, "Khong thay WiFi da cai, quet lai. Dang thay %u mang: %s", n, n ? thay : "(khong co)");
+    esp_wifi_scan_start(NULL, false);
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                 int32_t event_id, void *event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        esp_wifi_scan_start(NULL, false);
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
+        wifi_chon_mang();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         bool vua_mat = (xEventGroupClearBits(net_event_group, WIFI_UP_BIT) & WIFI_UP_BIT) != 0;
         // DNS của hotspot không dùng được khi lwIP chuyển sang 4G
@@ -142,7 +182,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGW(TAG, "Mat ket noi WiFi (reason %d), dang thu lai...%s",
                  ((wifi_event_sta_disconnected_t *)event_data)->reason,
                  (vua_mat && (xEventGroupGetBits(net_event_group) & CELL_UP_BIT)) ? " Chuyen sang 4G." : "");
-        esp_wifi_connect();   // thử lại mãi mãi
+        esp_wifi_scan_start(NULL, false);   // quét lại và chọn mạng ưu tiên cao nhất đang thấy, mãi mãi
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Da ket noi WiFi, IP: " IPSTR, IP2STR(&event->ip_info.ip));
@@ -161,19 +201,10 @@ static void khoi_dong_wifi_sta(void) {
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
 
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = WIFI_SSID,
-            .password = WIFI_PASSWORD,
-            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-        },
-    };
-
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_start());   // STA_START -> quét -> wifi_chon_mang
 
-    ESP_LOGI(TAG, "Dang ket noi WiFi \"%s\"...", WIFI_SSID);
+    ESP_LOGI(TAG, "Dang quet WiFi: %u mang theo thu tu uu tien", (unsigned)WIFI_SO_MANG);
 }
 
 // NVS, esp_netif, vòng sự kiện rồi bật các đường mạng. Không chặn: kết nối chạy ở nền.
@@ -455,7 +486,10 @@ static void tra_loi_phao(const char *raw) {
         if (len == 0) return;
     }
     vTaskDelay(pdMS_TO_TICKS(LORA_TURNAROUND_MS));
+    // Thời gian phát thật: khung ACK 40 byte ở SF9 mất khoảng 330 ms; vài ms là radio không hề phát.
+    TickType_t phat_tu = xTaskGetTickCount();
     bool ok = sx127x_send_packet(&lora_dev, (const uint8_t *)frame, (uint8_t)len, LORA_TX_TIMEOUT_MS);
+    unsigned phat_ms = (unsigned)pdTICKS_TO_MS(xTaskGetTickCount() - phat_tu);
     sx127x_start_receive(&lora_dev);
     if (la_rte)
         ESP_LOGI(TAG, "[LO TRINH] %s (%u ms) -> %s (phao co %u/%u diem): %s", ok ? "da phat" : "LOI phat", phat_ms, id,
@@ -486,10 +520,7 @@ static void task_nhan_lora(void *arg) {
 static void tao_url_tram(char *out, size_t n) {
     const char *u = CLOUD_INGEST_URL;
     const char *p = strstr(u, "/api/ingest");
-    // Thời gian phát thật: khung ACK 40 byte ở SF9 mất khoảng 330 ms; vài ms là radio không hề phát.
-    TickType_t phat_tu = xTaskGetTickCount();
     if (p) snprintf(out, n, "%.*s/api/station", (int)(p - u), u);
-    unsigned phat_ms = (unsigned)pdTICKS_TO_MS(xTaskGetTickCount() - phat_tu);
     else   snprintf(out, n, "%s", u);
 }
 
