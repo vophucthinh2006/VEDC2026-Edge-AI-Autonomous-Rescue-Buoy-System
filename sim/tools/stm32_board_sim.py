@@ -75,6 +75,7 @@ FRONT_BACK_MAX = 0.40         # NAV BACK: the most the front motor pulls astern
 FRONT_BRAKE_S_PER_THROTTLE, FRONT_BRAKE_MAX_S, ESC_FRONT_REVERSE_DELAY_S = 2.0, 1.0, 0.2
 FRONT_BRAKE_HOLD_S = 1.0
 CAM_PAN_LIMIT_DEG = 90.0
+CAM_TILT_START_DEG = 10.0     # app_config.h: the tilt until the Pi sends one
 AUTO_THROTTLE_MAX = 0.50
 TILT_REPEAT_S = 30.0
 LORA_EVENT_RETRY_S = 1.5
@@ -264,7 +265,8 @@ class Board:
             ("pod_left", "pod_rear_left_joint", "cmd_pos"),
             ("pod_right", "pod_rear_right_joint", "cmd_pos"),
             ("pod_front", "pod_front_joint", "cmd_pos"),
-            ("pan", "camera_pan_joint", "cmd_pos"))}
+            ("pan", "camera_pan_joint", "cmd_pos"),
+            ("tilt", "camera_tilt_joint", "cmd_pos"))}
         gains = os.environ.get("VEDC_SIM_HEADING_GAINS", "firmware")
         if gains not in HEADING_GAINS:
             raise SystemExit(f"VEDC_SIM_HEADING_GAINS={gains}: not one of {', '.join(HEADING_GAINS)}")
@@ -275,6 +277,7 @@ class Board:
         self.nav_seq, self.last_nav = 0, 0.0
         self.last_hbt, self.link_ok = 0.0, False
         self.cam_pan: float | None = None
+        self.cam_tilt = CAM_TILT_START_DEG
         self.victims = 0
         self.pi_route_rev = 0
         # $HBT's reason, mission and waypoint, and why the board does not drive: App/diag_frame.h
@@ -360,6 +363,9 @@ class Board:
                 pan = float(fields[2])
                 if -90.0 <= pan <= 90.0:
                     self.cam_pan = pan
+                    # uart_protocol.c: optional tilt, clamped to 0..60 (absent: kept)
+                    if len(fields) >= 4 and not math.isnan(float(fields[3])):
+                        self.cam_tilt = clamp(float(fields[3]), 0.0, 60.0)
             elif kind == "TXD" and len(fields) >= 6:
                 if fields[2] in ("VICTIM_FOUND", "VICTIM_UPDATE"):
                     if fields[2] == "VICTIM_FOUND":   # a new person; UPDATE: the one followed, not counted again
@@ -467,6 +473,7 @@ class Board:
         put("pod_front", -pod * RUDDER_FRONT_GAIN)
         if self.cam_pan is not None:   # Camera_Tick: independent of arming, holds the last angle
             put("pan", math.radians(clamp(self.cam_pan, -CAM_PAN_LIMIT_DEG, CAM_PAN_LIMIT_DEG)))
+        put("tilt", math.radians(self.cam_tilt))
 
     def position(self) -> tuple[float, float] | None:
         """The boat's GPS position (None without a fix), as lora_beacon.c boat_position."""

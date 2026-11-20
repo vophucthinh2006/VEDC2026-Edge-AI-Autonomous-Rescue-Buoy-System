@@ -87,7 +87,7 @@ printf 'serial:\n  stm32_port: %s\n  lidar_port: %s\n' "$T/f407_pty" "$T/lidar_p
 if [ -n "$MEDIA" ]; then
     python3 -u "$REPO/sim/tools/record_media.py" record --out "$T/rec" --duration "$((DURATION + 5))" \
         --topic bank=/vedc_central/cam_bank:15 --topic close=/vedc_central/cam_close:5 \
-        --topic buoy=/vedc_buoy/camera:4 --topic overview=/vedc_central/overview:1 --viewer 8090:15 \
+        --topic buoy=/vedc_buoy/camera:15 --topic overview=/vedc_central/overview:1 --viewer 8090:15 \
         > "$T/record.log" 2>&1 &
     RECORDER=$!
 fi

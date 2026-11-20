@@ -205,7 +205,7 @@
 
     <!-- ===================== sensors ===================== -->
     <!-- The CAD model has no LiDAR yet. It stays on a short mast on the roof (0.26 m), its scan
-         plane at 0.37 m: above the camera (0.305 m), so the bow sector is not shadowed, and above
+         plane at 0.37 m: above the camera (0.34 m), so the bow sector is not shadowed, and above
          the tip of the antenna (0.355 m), which at 0.35 m showed up as an obstacle 0.3 m astern. -->
     <link name="sensor_mast_link">
       <pose>0.30 0 0.32 0 0 0</pose>
@@ -256,22 +256,56 @@
       <child>sensor_mast_link</child>
     </joint>
 
-    <!-- OV9726 camera on an SG90 pan servo, on the bow box where the CAD has it. The link shows
-         the CAD's camera body and pans with the servo. -->
+    <!-- OV9726 camera on the pan-tilt gimbal of two SG90, the team's FreeCAD Gimbal_SG90 (meshes
+         gimbal_*.stl exported from it, mm to m, its +Y to the bow). The base stands on the bow box with
+         the pan axis where the pan servo was (x 0.41); the pan servo turns upside down on its horn and
+         carries the holders and the tilt servo (gimbal_pan_link); the tilt servo carries the platform
+         and the camera (camera_link). From the CAD: tilt axis 42.6 mm above the base and 17.9 mm behind
+         the pan axis; the camera on the platform, 7.8 mm ahead of the tilt axis and 15 mm above it. -->
+    <link name="gimbal_base_link">
+      <pose>0.41 0 0.2755 0 0 0</pose>
+      <inertial>
+        <mass>0.01</mass>
+        <inertia><ixx>1e-5</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-5</iyy><iyz>0</iyz><izz>1e-5</izz></inertia>
+      </inertial>
+      <visual name="cad_visual">
+        <geometry><mesh><uri>model://vedc_buoy/meshes/gimbal_base.stl</uri></mesh></geometry>
+        <material><ambient>0.75 0.7 0.2 1</ambient><diffuse>0.8 0.75 0.25 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="gimbal_base_joint" type="fixed">
+      <parent>sensor_mast_link</parent>
+      <child>gimbal_base_link</child>
+    </joint>
+    <link name="gimbal_pan_link">
+      <pose>0.41 0 0.2755 0 0 0</pose>
+      <inertial>
+        <mass>0.02</mass>
+        <inertia><ixx>1e-5</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-5</iyy><iyz>0</iyz><izz>1e-5</izz></inertia>
+      </inertial>
+      <visual name="cad_visual">
+        <geometry><mesh><uri>model://vedc_buoy/meshes/gimbal_pan.stl</uri></mesh></geometry>
+        <material><ambient>0.85 0.45 0.15 1</ambient><diffuse>0.9 0.5 0.2 1</diffuse></material>
+      </visual>
+    </link>
     <link name="camera_link">
-      <pose>0.41 0 0.295 0 0 0</pose>
+      <pose>0.3999 0 0.3331 0 0 0</pose>
       <inertial>
         <mass>0.03</mass>
         <inertia><ixx>1e-4</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1e-4</iyy><iyz>0</iyz><izz>1e-4</izz></inertia>
       </inertial>
       <visual name="cad_visual">
-        <geometry><mesh><uri>model://vedc_buoy/meshes/camera.stl</uri></mesh></geometry>
+        <geometry><mesh><uri>model://vedc_buoy/meshes/gimbal_tilt.stl</uri></mesh></geometry>
+        <material><ambient>0.3 0.65 0.35 1</ambient><diffuse>0.35 0.7 0.4 1</diffuse></material>
+      </visual>
+      <visual name="camera_body">
+        <geometry><box><size>0.014 0.032 0.014</size></box></geometry>
         <material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse><specular>0.2 0.2 0.2 1</specular></material>
       </visual>
       <!-- OV9726 with the team's 60 deg lens. Horizontal FOV must match
            camera.horizontal_fov_deg in the Pi's settings.yaml; at 4:3 that is 46.8 deg vertical. -->
       <sensor name="camera" type="camera">
-        <pose>0.02 0 0 0 0 0</pose>
+        <pose>0.008 0 0 0 0 0</pose>
         <always_on>1</always_on>
         <update_rate>15</update_rate>
         <topic>vedc_buoy/camera</topic>
@@ -286,10 +320,22 @@
          Rasp_Pi/modules/perception.py track_pan and of the CAM packet. -->
     <joint name="camera_pan_joint" type="revolute">
       <parent>sensor_mast_link</parent>
-      <child>camera_link</child>
+      <child>gimbal_pan_link</child>
       <axis>
         <xyz>0 0 -1</xyz>
         <limit><lower>-1.5708</lower><upper>1.5708</upper><effort>1e6</effort></limit>
+        <dynamics><damping>0.01</damping></dynamics>
+      </axis>
+    </joint>
+    <!-- Tilt: axis to port so a positive angle looks up, the convention of the CAM packet's tilt
+         (STM32F4 App/camera_pan.c). Mechanical range of the CAD -3 .. +90 deg; the F407 keeps 0 .. 60. -->
+    <joint name="camera_tilt_joint" type="revolute">
+      <pose>-0.0078 0 -0.015 0 0 0</pose>
+      <parent>gimbal_pan_link</parent>
+      <child>camera_link</child>
+      <axis>
+        <xyz>0 -1 0</xyz>
+        <limit><lower>-0.0524</lower><upper>1.5708</upper><effort>1e6</effort></limit>
         <dynamics><damping>0.01</damping></dynamics>
       </axis>
     </joint>
@@ -362,6 +408,15 @@
     <plugin name="gz::sim::systems::JointPositionController" filename="gz-sim-joint-position-controller-system">
       <joint_name>camera_pan_joint</joint_name>
       <topic>/model/vedc_buoy/joint/camera_pan_joint/cmd_pos</topic>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>20</p_gain>
+      <cmd_max>10</cmd_max>
+      <cmd_min>-10</cmd_min>
+    </plugin>
+    <!-- Camera tilt (second SG90): angle in radians, positive up; the F407 stand-in publishes it. -->
+    <plugin name="gz::sim::systems::JointPositionController" filename="gz-sim-joint-position-controller-system">
+      <joint_name>camera_tilt_joint</joint_name>
+      <topic>/model/vedc_buoy/joint/camera_tilt_joint/cmd_pos</topic>
       <use_velocity_commands>true</use_velocity_commands>
       <p_gain>20</p_gain>
       <cmd_max>10</cmd_max>
