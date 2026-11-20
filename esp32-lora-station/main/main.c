@@ -458,10 +458,10 @@ static void tra_loi_phao(const char *raw) {
     bool ok = sx127x_send_packet(&lora_dev, (const uint8_t *)frame, (uint8_t)len, LORA_TX_TIMEOUT_MS);
     sx127x_start_receive(&lora_dev);
     if (la_rte)
-        ESP_LOGI(TAG, "[LO TRINH] %s -> %s (phao co %u/%u diem): %s", ok ? "da phat" : "LOI phat", id,
+        ESP_LOGI(TAG, "[LO TRINH] %s (%u ms) -> %s (phao co %u/%u diem): %s", ok ? "da phat" : "LOI phat", phat_ms, id,
                  ack.has ? ack.have : 0U, count, frame);
     else
-        ESP_LOGI(TAG, "[ACK] %s -> %s: %s", ok ? "da phat" : "LOI phat", id, frame);
+        ESP_LOGI(TAG, "[ACK] %s (%u ms) -> %s: %s", ok ? "da phat" : "LOI phat", phat_ms, id, frame);
 }
 
 // ---------------------------------------------------------------- Task nhận LoRa
@@ -486,7 +486,10 @@ static void task_nhan_lora(void *arg) {
 static void tao_url_tram(char *out, size_t n) {
     const char *u = CLOUD_INGEST_URL;
     const char *p = strstr(u, "/api/ingest");
+    // Thời gian phát thật: khung ACK 40 byte ở SF9 mất khoảng 330 ms; vài ms là radio không hề phát.
+    TickType_t phat_tu = xTaskGetTickCount();
     if (p) snprintf(out, n, "%.*s/api/station", (int)(p - u), u);
+    unsigned phat_ms = (unsigned)pdTICKS_TO_MS(xTaskGetTickCount() - phat_tu);
     else   snprintf(out, n, "%s", u);
 }
 
