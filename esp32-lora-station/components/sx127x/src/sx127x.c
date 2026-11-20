@@ -328,15 +328,22 @@ bool sx127x_send_packet(sx127x_t *dev, const uint8_t *data, uint8_t len, uint32_
     set_mode(dev, MODE_TX);
 
     TickType_t start = xTaskGetTickCount();
+    uint8_t irq = 0;
     while (true) {
-        uint8_t irq = read_reg(dev, REG_IRQ_FLAGS);
-        if (irq & IRQ_TX_DONE_MASK) {
+        irq = read_reg(dev, REG_IRQ_FLAGS);
+        // 0xff: chip không trả lời SPI (MISO treo mức cao), không phải mọi cờ cùng bật. Coi là TX_DONE thì
+        // về standby ngay và cắt khung: trạm báo "da phat" sau 0 ms mà không gói nào ra sóng (2026-11-19).
+        if (irq != 0xff && (irq & IRQ_TX_DONE_MASK)) {
             write_reg(dev, REG_IRQ_FLAGS, 0xff);
             set_mode(dev, MODE_STDBY);
             return true;
         }
         if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(timeout_ms)) {
-            ESP_LOGW(TAG, "Gui goi LoRa timeout");
+            if (irq == 0xff)
+                ESP_LOGW(TAG, "Gui goi LoRa timeout: RA-02 khong tra loi SPI khi dang phat. Kiem tra nguon 3V3 cua "
+                              "RA-02 (dong ~120 mA khi phat, them tu 100 uF sat chan VCC) va anten");
+            else
+                ESP_LOGW(TAG, "Gui goi LoRa timeout");
             set_mode(dev, MODE_STDBY);
             return false;
         }

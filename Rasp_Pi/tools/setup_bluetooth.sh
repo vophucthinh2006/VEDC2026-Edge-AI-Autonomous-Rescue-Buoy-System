@@ -22,10 +22,18 @@ stm32_boat() {
     [ "$(tr -d '[:space:]' < "$DIR/.boat_profile" 2>/dev/null || echo stm32)" = "stm32" ]
 }
 
+# No adapter (dtoverlay=disable-bt in /boot/firmware/config.txt, as on the team's Pi 4): bluetoothd
+# never starts and "bluetoothctl power on" waited for it for ever, holding run_all.bat (2026-11-19).
+has_adapter() {
+    [ -n "$(ls /sys/class/bluetooth 2>/dev/null)" ] && return
+    echo "bluetooth: no adapter on this Pi (dtoverlay=disable-bt in /boot/firmware/config.txt?): skipped, no manual control"
+    return 1
+}
+
 ensure_sdptool() {
     command -v sdptool > /dev/null && return
     echo "bluetooth: installing bluez (sdptool)"
-    $SUDO apt-get install -y bluez > /dev/null
+    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y bluez > /dev/null 2>&1
     command -v sdptool > /dev/null || { echo "bluetooth: no sdptool after installing bluez" >&2; exit 1; }
 }
 
@@ -52,7 +60,7 @@ ensure_compat() {
 
 adapter_on() {
     $SUDO rfkill unblock bluetooth 2>/dev/null || true
-    bluetoothctl power on > /dev/null 2>&1 || true
+    timeout 10 bluetoothctl power on > /dev/null 2>&1 || true   # waits for bluetoothd otherwise
 }
 
 ensure_sdp() {
@@ -74,14 +82,17 @@ ensure_sdp() {
 }
 
 pair() {
+    # An agent that accepts the pairing. bluetoothctl --agent fed through a pipe accepted nothing
+    # (2026-11-17, BlueZ 5.82: the phone saw pi5 but never paired); bt-agent is a real one.
+    # Installed first: the install restarts bluetoothd, which drops the SPP record and the
+    # discoverable state; the phone then paired but found no serial port (2026-11-19, Pi 4).
+    command -v bt-agent > /dev/null || $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y bluez-tools > /dev/null 2>&1
     adapter_on
+    ensure_sdp
     echo "bluetooth: '$(hostname)' visible for 120 s: pair it from the phone's Bluetooth settings"
     bluetoothctl pairable on > /dev/null
     bluetoothctl discoverable-timeout 120 > /dev/null
     bluetoothctl discoverable on > /dev/null
-    # An agent that accepts the pairing. bluetoothctl --agent fed through a pipe accepted nothing
-    # (2026-11-17, BlueZ 5.82: the phone saw pi5 but never paired); bt-agent is a real one.
-    command -v bt-agent > /dev/null || $SUDO apt-get install -y bluez-tools > /dev/null
     timeout 120 bt-agent -c NoInputNoOutput || true
     bluetoothctl discoverable off > /dev/null
     # Trusted: the phone reconnects later without asking. "devices Paired" from BlueZ 5.65 on.
@@ -99,15 +110,18 @@ pair() {
 case "$ACTION" in
     install)
         stm32_boat || { echo "bluetooth: not the STM32 boat, skipped"; exit 0; }
+        has_adapter || exit 0
         ensure_sdptool
         ensure_compat
         adapter_on
         ensure_sdp ;;
     sdp)
         stm32_boat || exit 0
+        has_adapter || exit 0
         adapter_on
         ensure_sdp ;;
     pair)
+        has_adapter || exit 1
         pair ;;
     -h|--help)
         sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
