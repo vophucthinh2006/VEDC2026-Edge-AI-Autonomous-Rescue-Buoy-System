@@ -162,19 +162,31 @@
 #define HW_TEST_ESC_ARM_AT_BOOT    1       /* stop signal from boot (1500 us on all three) so the ESCs arm */
 #define HW_TEST_SWEEP_US           350U    /* rudder swing each side of centre */
 
-/* Camera pan servo (SERVO_CAMERA, TIM3_CH1) follows the CAM packet from the Pi.
-   Pulse = centre + dir * us_per_deg * angle. Flip DIR if the camera turns away from the person. */
+/* Camera gimbal, two SG90 (App/camera_pan.c). Pan (SERVO_CAMERA, PA6 TIM3_CH1) follows the CAM
+   packet from the Pi; tilt (PD12 TIM4_CH1) holds CAM_TILT_START_DEG. Pulse = centre + dir * us_per_deg
+   * angle, then clamped to the pulses of the angle limits. CALIBRATE on the gimbal: both servos are
+   mounted so their body turns, not the horn, which reverses them; DIR is a guess until checked. */
+#define CAM_PAN_CENTER_US          SERVO_CENTER_US   /* camera looking along the bow */
 #define CAM_PAN_US_PER_DEG         11.0f   /* measured on the boat: 1005 us turned it 45 deg from 1500 */
-#define CAM_PAN_DIR                (-1)
-#define CAM_PAN_LIMIT_DEG          80.0f
-/* App/camera_pan.c glides the servo to the CAM angle: speed = KP * error, at most MAX_RATE.
+#define CAM_PAN_DIR                (-1)    /* flip if the camera turns away from the person */
+#define CAM_PAN_LIMIT_DEG          90.0f   /* +-90 deg: 510..2490 us at 11 us/deg */
+/* Tilt: 0 = platform resting on the top of the frame, positive raises it (gimbal drawing, Fig. 2).
+   Hard stops at -3 and +90 deg; below 0 it jams on the frame, so 0..60 is all it is ever sent. */
+#define CAM_TILT_ZERO_US           1500U   /* pulse that just sets the platform on the frame: trim so it does not press */
+#define CAM_TILT_US_PER_DEG        11.0f   /* same SG90 as pan */
+#define CAM_TILT_DIR               (-1)    /* flip if a positive angle pushes the platform into the frame */
+#define CAM_TILT_MIN_DEG           0.0f
+#define CAM_TILT_MAX_DEG           60.0f
+#define CAM_TILT_START_DEG         10.0f   /* glides here from 0 at power-up and stays */
+/* App/camera_pan.c glides the servos: speed = KP * error, at most MAX_RATE.
    The simulator's joint: 20 /s and 573 deg/s; softer here for the real servo and camera head.
    KP 10 /s settles a step in about 0.3 s and trails a 30 deg/s sweep by 3 deg. */
-#define CAM_PAN_SMOOTH_KP          10.0f   /* per second */
+#define CAM_PAN_SMOOTH_KP          10.0f   /* per second, both axes */
 #define CAM_PAN_MAX_RATE_DPS       180.0f
-/* The camera servo needs more than 1000..2000 us for +-80 deg; the rudders keep SERVO_MIN/MAX_US. */
-#define CAM_SERVO_MIN_US           600U
-#define CAM_SERVO_MAX_US           2400U
+#define CAM_TILT_MAX_RATE_DPS      60.0f
+/* Last guard in Actuators_WriteServo: the SG90's own travel. The rudders keep SERVO_MIN/MAX_US. */
+#define CAM_SERVO_MIN_US           500U
+#define CAM_SERVO_MAX_US           2500U
 
 /* LoRa: the boat sends its GPS position to the shore station (App/lora_beacon.c).
    The radio settings MUST match the station (esp32-lora-station/main/main.c). Fit the

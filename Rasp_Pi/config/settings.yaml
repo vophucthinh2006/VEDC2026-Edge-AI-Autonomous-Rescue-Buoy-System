@@ -63,6 +63,7 @@ vehicle:
   turn_room_m: 0.50
   arrive_radius_m: 4.0
   target_standoff_m: 2.0     # rescue_main.py (Pixhawk boat): range to the person from the boat's sensors
+  roof_standoff_m: 8.0       # main.py: somebody on a roof (camera.roof_min_deg) is held off this far, not approached
   # main.py (STM32 boat): the water kept between the bow and the person, and how far the bow is ahead
   # of the LiDAR and camera that measure the person's range (LD14 at 0.30 m, bow at 0.55 m from the
   # hull's centre, sim/models/vedc_buoy). The boat holds at a range of person_gap_m + bow_ahead_m.
@@ -139,6 +140,13 @@ camera:
   lidar_association_half_angle_deg: 8.0
   min_target_distance_m: 1.0
   max_target_distance_m: 8.0
+  max_standing_distance_m: 20.0   # somebody standing clear of the water (a roof): ranged further, held off at roof_standoff_m
+  # Camera lens above the water. A "swimmer" box whose bottom is more than waterline_tolerance_deg
+  # above where a swimmer's waterline would be at the box's range gets no range (ai_vision._distance);
+  # with a range, feet roof_min_height_m above the water are on a roof (ai_vision._on_roof).
+  camera_height_m: 0.40           # measure on the boat
+  waterline_tolerance_deg: 1.5
+  roof_min_height_m: 0.45        # above a doorstep (0.25 in the simulator), below a low roof (0.54)
   # lidar: range from the LiDAR return at the person's bearing, none without one.
   # bbox: range from the person box height (no LiDAR, about +-30 %).
   # fused: the LiDAR return when there is one, else the box.
@@ -156,6 +164,15 @@ camera:
   pan_gain: 0.25
   pan_deadband_deg: 2.0
   pan_limit_deg: 80.0
+  # Pan-tilt gimbal (main.py, STM32 boat): tilt 0 level .. 60 up, positive up; the F407 clamps it too
+  # (App/camera_pan.c). Out of a sweep or a person the camera comes back to tilt_home_deg. A person
+  # is followed in tilt as in pan. Feet more than roof_min_deg above the horizon: on a roof.
+  tilt_enabled: false         # config/boat_stm32.yaml turns it on
+  tilt_limit_deg: [0, 60]
+  tilt_home_deg: 10.0
+  tilt_gain: 0.25
+  tilt_deadband_deg: 2.0
+  roof_min_deg: 5.0
   # The smooth sweep goes out this many times a second from its own thread, whatever the detector's
   # pace; the controller glides the servo between commands (STM32F4 App/camera_pan.c). 0: once a frame.
   pan_rate_hz: 20.0
@@ -169,6 +186,9 @@ camera:
   #   mode: sweep  the servo turns smoothly between -sweep_limit_deg and +sweep_limit_deg at
   #                sweep_rate_deg_s. Slower keeps a person in view longer (60 / rate seconds) but
   #                takes 4 * limit / rate seconds to come back to the same side.
+  #   mode: raster the sweep, over the gimbal's tilt_rows_deg: one way at the first row (the water),
+  #                tilt to the next at the end and back (perception.RasterSweep); frames are dropped
+  #                for tilt_settle_s after each row change. Only with a gimbal (main.py).
   scan:
     enabled: true
     mode: sweep
@@ -177,6 +197,8 @@ camera:
     dwell_frames: 3
     sweep_limit_deg: 60
     sweep_rate_deg_s: 30
+    tilt_rows_deg: [0, 20]
+    tilt_settle_s: 0.6
     modes: [AUTO]
     always: false               # true: sweep whether armed or not, for a bench without the RC (config/bench_scan.yaml)
 # LiDAR of the Pixhawk boat (rescue_main.py). none: no LiDAR, only the keep-outs reach the autopilot.

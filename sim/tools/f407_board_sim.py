@@ -43,7 +43,8 @@ TELEMETRY_PERIOD_S = 0.100
 HBT_TIMEOUT_S = 0.500
 NAV_TIMEOUT_S = 0.300
 ESC_RAMP_PER_S = 2.0
-CAM_PAN_LIMIT_DEG = 80.0
+CAM_PAN_LIMIT_DEG = 90.0
+CAM_TILT_START_DEG = 10.0     # app_config.h: the tilt until the Pi sends one
 RUDDER_DIR_FRONT, RUDDER_DIR_REAR = -1.0, 1.0
 # Gazebo side (sim/models/vedc_buoy/model.sdf): a rear ESC at full is the 2000 us the ArduPilot link
 # turns into 15 N; a pod at +-RUDDER_SPAN_US (250 us of the 1000 us servo range over +-45 deg) is
@@ -77,6 +78,8 @@ def load_firmware(path: Path) -> ctypes.CDLL:
     lib.Heading_Wrap360.argtypes = [f]
     lib.CameraPan_Step.restype = f
     lib.CameraPan_Step.argtypes = [ctypes.POINTER(CameraPanT), f, f]
+    lib.CameraTilt_Step.restype = f
+    lib.CameraTilt_Step.argtypes = [ctypes.POINTER(CameraPanT), f, f]
     return lib
 
 
@@ -123,6 +126,7 @@ class PiCommand:
         self.sequence = 0
         self.last_nav = self.last_hbt = self.last_cam = 0.0
         self.cam_pan_deg = 0.0
+        self.cam_tilt_deg = CAM_TILT_START_DEG
         self.victims = 0
 
     def handle(self, line: bytes, now: float, reply) -> str | None:
@@ -146,6 +150,9 @@ class PiCommand:
             pan = float(f[1])
             if -90.0 <= pan <= 90.0:
                 self.cam_pan_deg, self.last_cam = pan, now
+                # uart_protocol.c: optional 4th field, the gimbal's tilt (CameraTilt_Step clamps it)
+                if len(f) >= 3 and not math.isnan(float(f[2])):
+                    self.cam_tilt_deg = float(f[2])
         elif packet.command == "TXD" and len(f) >= 5:
             if f[1] == "VICTIM_FOUND":
                 self.victims += 1
@@ -179,7 +186,7 @@ def main() -> int:
         ("left", "prop_rear_left_joint", "cmd_thrust"), ("right", "prop_rear_right_joint", "cmd_thrust"),
         ("front", "prop_front_joint", "cmd_thrust"), ("pod_left", "pod_rear_left_joint", "cmd_pos"),
         ("pod_right", "pod_rear_right_joint", "cmd_pos"), ("pod_front", "pod_front_joint", "cmd_pos"),
-        ("camera", "camera_pan_joint", "cmd_pos"))}
+        ("camera", "camera_pan_joint", "cmd_pos"), ("tilt", "camera_tilt_joint", "cmd_pos"))}
 
     def publish(name: str, value: float) -> None:
         msg = Double()
@@ -194,11 +201,11 @@ def main() -> int:
 
     log = args.log.open("w", buffering=1) if args.log else None
     if log:
-        log.write("t,x,y,heading,speed,mode,nav_speed,nav_heading,rear_left,rear_right,steer,cam_deg,victims\n")
+        log.write("t,x,y,heading,speed,mode,nav_speed,nav_heading,rear_left,rear_right,steer,cam_deg,tilt_deg,victims\n")
     pi = PiCommand()
     heading = HeadingControllerT()
     fw.HeadingController_Reset(ctypes.byref(heading))
-    pan = CameraPanT(0.0)
+    pan, tilt = CameraPanT(0.0), CameraPanT(0.0)
     heading_auto = False
     rear = [0.0, 0.0]
     steer = 0.0
@@ -261,6 +268,8 @@ def main() -> int:
             if pi.last_cam:
                 angle = fw.CameraPan_Step(ctypes.byref(pan), max(-CAM_PAN_LIMIT_DEG, min(CAM_PAN_LIMIT_DEG, pi.cam_pan_deg)), dt)
                 publish("camera", math.radians(angle))
+            # Tilt: glides from 0 at power-up to CAM_TILT_START_DEG, then to the Pi's tilt.
+            publish("tilt", math.radians(fw.CameraTilt_Step(ctypes.byref(tilt), pi.cam_tilt_deg, dt)))
 
             if now - last_telemetry >= TELEMETRY_PERIOD_S:
                 last_telemetry = now
@@ -275,7 +284,7 @@ def main() -> int:
             if log and now - last_log >= 0.1:
                 last_log = now
                 log.write(f"{time.time():.2f},{x:.3f},{y:.3f},{yaw:.1f},{pose.speed_mps:.2f},{pi.mode if nav_fresh else 'STOP'},"
-                          f"{pi.speed_mps:.2f},{pi.heading_deg:.1f},{rear[0]:.3f},{rear[1]:.3f},{steer:.3f},{pan.angle_deg:.1f},{pi.victims}\n")
+                          f"{pi.speed_mps:.2f},{pi.heading_deg:.1f},{rear[0]:.3f},{rear[1]:.3f},{steer:.3f},{pan.angle_deg:.1f},{tilt.angle_deg:.1f},{pi.victims}\n")
     except KeyboardInterrupt:
         pass
     finally:

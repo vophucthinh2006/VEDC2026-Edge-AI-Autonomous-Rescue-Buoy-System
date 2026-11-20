@@ -83,23 +83,26 @@ static void publish_debug(const controller_t *control, const bno055_euler_t *imu
     heading_debug.imu_ok = imu_fresh ? 1U : 0U;
 }
 
-/* Follows the Pi's CAM angle, gliding there (App/camera_pan.c). Independent of arming: the camera
-   only looks, and Actuators_Stop leaves it alone. */
+/* Pan follows the Pi's CAM angle (0 until the first one), tilt its optional tilt (CAM_TILT_START_DEG
+   until the Pi sends one), gliding up from the frame at power-up; both glide (App/camera_pan.c). Independent of arming: the camera only looks,
+   and Actuators_Stop leaves it alone. */
 void Camera_Tick(const pi_command_t *pi, uint32_t now_ms) {
-    static camera_pan_t pan;
+    static camera_pan_t pan, tilt;
     static uint32_t last_ms;
-    if (pi->last_cam_ms == 0U) {
+    static bool started;
+    if (!started) {
         CameraPan_Init(&pan);
+        CameraTilt_Init(&tilt);
         last_ms = now_ms;
-        return;
+        started = true;
     }
     float dt = (float)(uint32_t)(now_ms - last_ms) / 1000.0f;
     last_ms = now_ms;
     if (dt > 0.1f) dt = 0.1f;   /* a stalled loop: no leap */
-    float target = clamp(pi->cam_pan_deg, -CAM_PAN_LIMIT_DEG, CAM_PAN_LIMIT_DEG);
-    float angle = CameraPan_Step(&pan, target, dt);
-    float us = (float)actuator_servo_center[SERVO_CAMERA] + (float)CAM_PAN_DIR * CAM_PAN_US_PER_DEG * angle;
-    Actuators_WriteServo(SERVO_CAMERA, (uint32_t)us);
+    CameraPan_Step(&pan, pi->last_cam_ms != 0U ? pi->cam_pan_deg : 0.0f, dt);
+    CameraTilt_Step(&tilt, pi->cam_tilt_deg, dt);
+    Actuators_WriteServo(SERVO_CAMERA, CameraPan_Us(pan.angle_deg));
+    Actuators_WriteCameraTilt(CameraTilt_Us(tilt.angle_deg));
 }
 
 /* There is no RC transmitter: the boat is armed whenever it is safe, and AUTO is the only mode. The

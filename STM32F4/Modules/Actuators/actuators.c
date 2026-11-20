@@ -40,6 +40,16 @@ void Actuators_WriteServo(servo_id_t id, uint32_t us) {
     actuator_debug.servo_us[id] = (uint16_t)us;
 }
 
+/* Tilt servo of the camera gimbal, PD12 TIM4_CH1. CubeMX defines CAM_TILT_Pin once PD12 is set up
+   there (label CAM_TILT); before that the pulse is only recorded. */
+void Actuators_WriteCameraTilt(uint32_t us) {
+    us = clamp_u32(us, CAM_SERVO_MIN_US, CAM_SERVO_MAX_US);
+#ifdef CAM_TILT_Pin
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, us);
+#endif
+    actuator_debug.cam_tilt_us = (uint16_t)us;
+}
+
 void Actuators_WriteEsc(esc_id_t id, uint32_t us) {
     if (!escs_started) return;
     __HAL_TIM_SET_COMPARE(&htim2, esc_channel[id], clamp_u32(us, ESC_MIN_US, ESC_MAX_US));
@@ -50,6 +60,10 @@ void Actuators_Init(void) {
         Actuators_WriteServo((servo_id_t)i, actuator_servo_center[i]);
         HAL_TIM_PWM_Start(&htim3, servo_channel[i]);
     }
+    Actuators_WriteCameraTilt(CAM_TILT_ZERO_US);   /* where the platform rests unpowered */
+#ifdef CAM_TILT_Pin
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+#endif
     for (int i = 0; i < ESC_COUNT; i++) actuator_debug.esc_us[i] = esc_stop[i];
 }
 

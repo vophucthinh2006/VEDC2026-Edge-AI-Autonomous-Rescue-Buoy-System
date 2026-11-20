@@ -443,6 +443,10 @@ camera quét tìm. `estop` luôn 0
 
 `CAM` là góc quay camera, dương sang phải, giới hạn `CAM_PAN_LIMIT_DEG`. `App/camera_pan.c` cho servo
 trượt tới góc đó (`CAM_PAN_SMOOTH_KP`, tối đa `CAM_PAN_MAX_RATE_DPS`); Pi gửi 20 lần/s khi quét hoặc bám người.
+Gimbal 2 SG90: `$CAM,seq,pan[,tilt]`, tilt tuỳ chọn (Pi cũ không gửi). Servo tilt ở PD12 (TIM4_CH1) lúc bật nguồn
+trượt từ 0° (platform tựa khung) lên `CAM_TILT_START_DEG` (10°) và giữ đó tới khi Pi gửi tilt; tilt kẹp trong
+`CAM_TILT_MIN_DEG..CAM_TILT_MAX_DEG` (0..60°), xung của cả hai trục không ra ngoài dải góc giới hạn. Pi bật tilt bằng
+`camera.tilt_enabled` (`config/boat_stm32.yaml`): quét 2 hàng (tilt 0° mặt nước, 30° mái nhà) và bám người cả 2 trục.
 
 `$TXD,...,VICTIM_FOUND|VICTIM_UPDATE,lat,lon,confidence,risk`: vị trí người Pi ước tính (0, 0 = không có), `risk` 0
 an toàn, 1 trung bình, 2 cao, 3 nguy kịch (Pi cũ không gửi: coi là 2). `VICTIM_FOUND` là người mới (tăng số người
