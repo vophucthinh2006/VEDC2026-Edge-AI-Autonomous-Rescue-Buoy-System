@@ -111,7 +111,7 @@ def main() -> int:
     scan = config["camera"].get("scan", {})
     # camera.tilt_enabled: the pan-tilt gimbal. The phone's W sweep is then the AUTO one, over the rows too.
     tilt_on = bool(config["camera"].get("tilt_enabled", False))
-    manual_sweep = (RasterSweep(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15), scan.get("tilt_rows_deg", [0, 30]))
+    manual_sweep = (RasterSweep(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15), scan.get("tilt_rows_deg", [0, 20]))
                     if tilt_on and str(scan.get("mode", "")).lower() == "raster"
                     else SweepPattern(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15)))
     manual_pan: dict[str, float | None] = {"deg": 0.0, "tilt": float(config["camera"].get("tilt_home_deg", 10.0)) if tilt_on else None}

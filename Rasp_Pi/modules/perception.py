@@ -190,8 +190,9 @@ class SweepPattern:
 class RasterSweep(SweepPattern):
     """SweepPattern over rows of the gimbal's tilt: the pan sweeps one way at tilt_rows_deg[0] (the
     water), the camera tilts up to the next row at the end and sweeps back, and so on. With rows
-    [0, 30] and a 60 x 47 deg camera, row 0 sees the water up to the head of somebody on a one-storey
-    roof from about 11 m, row 30 the roofs from 5 to 15 m. At +-45 deg and 15 deg/s a round is 12 s.
+    [0, 20] and a 60 x 47 deg camera (vertical -23..+23 deg, then -3..+43), row 0 sees the water and
+    somebody on a roof from about 8 m, row 20 the roofs and the people on them from about 3 m.
+    At +-45 deg and 15 deg/s a round is 12 s.
 
     Same interface as SweepPattern, frame_done still returns the pan; tilt_deg is the row. Frames are
     unusable for settle_s after a row change, while the tilt servo travels (F407 CAM_TILT_MAX_RATE_DPS)."""
@@ -227,7 +228,7 @@ def make_scan(scan: dict | None) -> ScanPattern | SweepPattern | None:
         return None
     mode = str(scan.get("mode", "step")).lower()
     if mode == "raster":
-        return RasterSweep(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"], scan.get("tilt_rows_deg", [0, 30]),
+        return RasterSweep(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"], scan.get("tilt_rows_deg", [0, 20]),
                            scan.get("tilt_settle_s", 0.6))
     if mode == "sweep":
         return SweepPattern(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"])
