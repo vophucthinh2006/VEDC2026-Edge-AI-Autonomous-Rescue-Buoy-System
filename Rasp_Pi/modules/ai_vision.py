@@ -11,7 +11,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from math import cos, radians
+from math import atan, cos, degrees, radians, tan
 from time import monotonic, sleep, strftime
 from typing import Callable
 
@@ -150,6 +150,8 @@ class VisionWorker(threading.Thread):
         self._rate_frames, self._rate_busy = 0, 0.0
         self._frame_times: deque[float] = deque(maxlen=400)   # when each detection finished, for fps
         self._ranged_standing: bool | None = None
+        self._roof_votes: deque[bool] = deque(maxlen=10)   # on a roof, in the last frames of the person followed
+        self._roof_held = False
         self._frame_aspect = 4.0 / 3.0       # width over height, taken from the frames once they come
         # For the live viewer (modules/viewer.py): the last frame read and what was made of the last one looked at.
         self._view_frame: np.ndarray | None = None
@@ -252,11 +254,17 @@ class VisionWorker(threading.Thread):
             return candidates[0]
         return candidates[0] if focus is None and nearest.risk < candidates[0].risk else nearest
 
-    def _on_roof(self, detection: PersonDetection, tilt_deg: float) -> bool:
+    def _on_roof(self, detection: PersonDetection, tilt_deg: float, distance_m: float | None = None) -> bool:
         """Feet (box bottom) more than camera.roof_min_deg above the horizon: on a roof, not in the
-        water, whose surface is always below the horizon from a camera 0.4 m above it."""
+        water, whose surface is always below the horizon from a camera 0.4 m above it. Further off a
+        low roof is barely above the horizon (0.2 m at 13 m: 1 deg): with a range, feet standing
+        camera.roof_min_height_m or more above the water also count."""
         pitch = self.state.snapshot().imu.pitch_deg + tilt_deg
-        return box_bottom_elevation_deg(detection.box[2], self.c["vertical_fov_deg"], pitch) >= float(self.c.get("roof_min_deg", 5.0))
+        feet_deg = box_bottom_elevation_deg(detection.box[2], self.c["vertical_fov_deg"], pitch)
+        if feet_deg >= float(self.c.get("roof_min_deg", 5.0)):
+            return True
+        feet_m = float(self.c.get("camera_height_m", 0.4)) + (distance_m or 0.0) * tan(radians(feet_deg))
+        return distance_m is not None and feet_m >= float(self.c.get("roof_min_height_m", 0.45))
 
     def _distance(self, detection: PersonDetection, bearing_body_deg: float, followed: bool = True, tilt_deg: float = 0.0) -> float | None:
         """Range along the water to the person; tilt_deg: the gimbal's tilt when the frame was taken."""
@@ -297,9 +305,21 @@ class VisionWorker(threading.Thread):
             # guessing. Anybody else, often somebody on a roof whose head is out of the frame: no
             # range. Placed at the stand-off they became a phantom right at the boat, "reached" at once.
             return self.standoff_m if followed and snap.focus is not None else None
+        if not elevated:
+            # A swimmer's waterline is below the horizon by atan(camera height / range). A box whose bottom
+            # sits well above that is somebody standing clear of the water whose box came out wide
+            # (people side by side on a roof merged into one): with the swimmer's figure their range would
+            # read three times too short and the boat back off from a house 15 m away. No range then.
+            bottom = box_bottom_elevation_deg(detection.box[2], self.c["vertical_fov_deg"], snap.imu.pitch_deg + tilt_deg)
+            waterline = -degrees(atan(float(self.c.get("camera_height_m", 0.4)) / max(box_range, 0.1)))
+            if bottom > waterline + float(self.c.get("waterline_tolerance_deg", 1.5)):
+                return None
         # person_height_m is what a box covers of somebody in the water. Somebody standing clear of
         # it shows their whole height; with the swimmer's figure their range would read 2.5 times too short.
-        return box_range if box_range <= self.c["max_target_distance_m"] else None
+        # Somebody on a roof is held off at vehicle.roof_standoff_m (8 m): their range is needed beyond
+        # max_target_distance_m, up to max_standing_distance_m.
+        limit = float(self.c.get("max_standing_distance_m", self.c["max_target_distance_m"])) if elevated else self.c["max_target_distance_m"]
+        return box_range if box_range <= limit else None
 
     def _recenter(self) -> None:
         step = float(self.c["recenter_step_deg"])
@@ -390,6 +410,7 @@ class VisionWorker(threading.Thread):
             return
         self.state.update_human_target(None)
         self._followed_bearing = None
+        self._roof_votes.clear()
         focus = self._focus_bearing()
         if focus is not None:
             # The rescue logic is going to somebody not in the frame: look their way.
@@ -531,17 +552,29 @@ class VisionWorker(threading.Thread):
                     self._save_snapshot(frame, detections, detection, pan_at_capture, now)
                 # Everybody in the frame goes to the rescue logic, each with a bearing, a range and a risk.
                 targets, target, others = [], None, []
+                previous_bearing = self._followed_bearing
                 for found in detections:
                     bearing_body = signed_angle_deg(pan_at_capture + found.bearing_cam_deg)
                     distance = self._distance(found, bearing_body, followed=found is detection, tilt_deg=tilt_at_capture)
+                    on_roof = self._on_roof(found, tilt_at_capture, distance)
                     if found is detection:
+                        # On a low roof the feet are a degree or so above the horizon and the waves blur
+                        # that, while one odd box puts a swimmer on a roof: the person followed is on a
+                        # roof when 4 of their last 10 frames say so. A jump to somebody else (more than
+                        # follow_gate_deg) starts the count again.
+                        if previous_bearing is None or abs(signed_angle_deg(bearing_body - previous_bearing)) > float(self.c.get("follow_gate_deg", 15.0)):
+                            self._roof_votes.clear()
+                        self._roof_votes.append(on_roof)
+                        on_roof = sum(self._roof_votes) >= 4
+                        if on_roof != self._roof_held:
+                            self._roof_held = on_roof
+                            self.log.info("person followed %s", "on a roof: held off at vehicle.roof_standoff_m" if on_roof else "not on a roof")
                         self._followed_bearing = bearing_body
                         self._view_result = (detection, pan_at_capture, distance, now)
                     elif not found.on_boat:         # those are drawn from on_boat
                         others.append((found, distance))
                     if distance is not None:
-                        targets.append(HumanTarget(bearing_body, distance, found.confidence, now, found.risk,
-                                                   self._on_roof(found, tilt_at_capture)))
+                        targets.append(HumanTarget(bearing_body, distance, found.confidence, now, found.risk, on_roof))
                         if found is detection:
                             target = targets[-1]
                 self._view_others = others

@@ -33,6 +33,7 @@ camera:
   # the pace of the boat, not of the laptop: 15 frames a second, the rate of the Gazebo camera
   # (sim/models/vedc_buoy/model.sdf, update_rate). The team measured 8 on the Pi 4 before.
   max_fps: 15.0
+  camera_height_m: 0.33       # the gimbal's camera, sim/models/vedc_buoy/model.sdf camera_link
   distance_source: fused
   # Only a LiDAR return right at the person's bearing counts. With the 8 deg of settings.yaml the
   # utility pole of the flood scene, a few metres off to the side, was taken for the range of the

@@ -140,6 +140,13 @@ camera:
   lidar_association_half_angle_deg: 8.0
   min_target_distance_m: 1.0
   max_target_distance_m: 8.0
+  max_standing_distance_m: 20.0   # somebody standing clear of the water (a roof): ranged further, held off at roof_standoff_m
+  # Camera lens above the water. A "swimmer" box whose bottom is more than waterline_tolerance_deg
+  # above where a swimmer's waterline would be at the box's range gets no range (ai_vision._distance);
+  # with a range, feet roof_min_height_m above the water are on a roof (ai_vision._on_roof).
+  camera_height_m: 0.40           # measure on the boat
+  waterline_tolerance_deg: 1.5
+  roof_min_height_m: 0.45        # above a doorstep (0.25 in the simulator), below a low roof (0.54)
   # lidar: range from the LiDAR return at the person's bearing, none without one.
   # bbox: range from the person box height (no LiDAR, about +-30 %).
   # fused: the LiDAR return when there is one, else the box.

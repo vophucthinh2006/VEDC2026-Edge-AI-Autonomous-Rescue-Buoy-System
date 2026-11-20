@@ -90,6 +90,31 @@ class GimbalVisionTest(unittest.TestCase):
         swimmer = self.worker._person((0.5, 0.48, 0.6, 0.52), 0.8)
         self.assertFalse(self.worker._on_roof(swimmer, 0.0))
 
+    def test_a_low_roof_far_off_is_a_roof_by_the_height_of_the_feet(self):
+        # Feet 1 deg above the horizon, under roof_min_deg: 0.4 + 13 m x tan(0.94 deg) = 0.61 m above the water.
+        feet = self.worker._person((0.28, 0.49, 0.48, 0.51), 0.8)
+        self.assertFalse(self.worker._on_roof(feet, 0.0))
+        self.assertTrue(self.worker._on_roof(feet, 0.0, 13.0))
+        self.assertFalse(self.worker._on_roof(feet, 0.0, 3.0))       # 0.45 m: a doorstep
+        swimmer = self.worker._person((0.5, 0.48, 0.58, 0.52), 0.8)
+        self.assertFalse(self.worker._on_roof(swimmer, 0.0, 8.0))
+
+    def test_a_wide_box_above_the_waterline_gets_no_swimmer_range(self):
+        # Wide and short, so "a swimmer", but its bottom is 1 deg above the horizon: a swimmer 8 m away
+        # would have theirs 2.8 deg below it. People side by side on a roof: no range, not a 3x short one.
+        group = self.worker._person((0.40, 0.40, 0.48, 0.52), 0.8)
+        self.assertIsNone(self.worker._distance(group, 0.0))
+        swimmer = self.worker._person((0.50, 0.48, 0.58, 0.52), 0.8)
+        self.assertAlmostEqual(self.worker._distance(swimmer, 0.0), 0.57 / (2 * 0.4348 * 0.08), delta=0.3)
+
+    def test_somebody_standing_is_ranged_past_max_target_distance(self):
+        worker = VisionWorker(dict(CAMERA, max_target_distance_m=8.0, max_standing_distance_m=20.0), StateStore(),
+                              threading.Event(), lambda _t: None, lambda *a: None, 2.0, tilt=True)
+        far = worker._person((0.37, 0.49, 0.49, 0.51), 0.8)          # tall and narrow, 1.7 m over 0.12 of the frame: 16 m
+        self.assertAlmostEqual(worker._distance(far, 0.0), 1.7 / (2 * 0.4348 * 0.12), delta=0.5)
+        self.assertIsNone(VisionWorker(dict(CAMERA, max_target_distance_m=8.0), StateStore(), threading.Event(), lambda _t: None,
+                                       lambda *a: None, 2.0)._distance(far, 0.0))
+
     def test_the_tilt_goes_out_with_the_pan_and_follows_the_raster(self):
         worker = VisionWorker(dict(CAMERA, scan={"enabled": True, "mode": "raster", "sweep_limit_deg": 45, "sweep_rate_deg_s": 15,
                                                  "tilt_rows_deg": [0, 30]}),
