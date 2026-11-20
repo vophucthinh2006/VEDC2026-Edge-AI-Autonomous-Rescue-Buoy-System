@@ -7,7 +7,8 @@
 /* Output map, from the Pinout (Hy) sheet:
    rear ESCs  PWM 50 Hz on TIM2 (PA5 left CH1, PA3 right CH4), forward only
    front ESC  PWM 50 Hz on TIM2_CH2 (PA1), bidirectional around ESC_FRONT_NEUTRAL_US
-   servos     PWM on TIM3: PA6 camera, PA7 front, PB0 left, PB1 right rudder */
+   servos     PWM on TIM3: PA6 camera (gimbal pan), PA7 front, PB0 left, PB1 right rudder
+   gimbal     tilt servo PWM on TIM4_CH1 (PD12) */
 
 typedef enum { SERVO_CAMERA, SERVO_FRONT, SERVO_RIGHT, SERVO_LEFT, SERVO_COUNT } servo_id_t;
 typedef enum { ESC_FRONT, ESC_RIGHT, ESC_LEFT, ESC_COUNT } esc_id_t;
@@ -27,6 +28,7 @@ typedef struct {
     actuator_cmd_t cmd;
     uint16_t esc_us[ESC_COUNT];
     uint16_t servo_us[SERVO_COUNT];
+    uint16_t cam_tilt_us;
 } actuator_debug_t;
 
 extern volatile actuator_debug_t actuator_debug;
@@ -49,3 +51,5 @@ void Actuators_Stop(void);
 /* Raw pulses for the bench test, no ramp and no ACTUATORS_ENABLED gate. */
 void Actuators_WriteServo(servo_id_t id, uint32_t us);
 void Actuators_WriteEsc(esc_id_t id, uint32_t us);
+/* Camera gimbal tilt servo, kept within CAM_SERVO_MIN/MAX_US; App/camera_pan.c keeps it in its own range. */
+void Actuators_WriteCameraTilt(uint32_t us);

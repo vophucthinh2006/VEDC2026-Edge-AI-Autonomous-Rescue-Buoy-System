@@ -15,6 +15,7 @@ void Protocol_Init(pi_command_t *command) {
     TxdQueue_Init(&command->txd);
     command->mode = NAV_STOP;
     command->pi_fps_x10 = -1;
+    command->cam_tilt_deg = CAM_TILT_START_DEG;
 }
 
 static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms) {
@@ -66,6 +67,12 @@ static void handle_packet(pi_command_t *command, char *payload, uint32_t now_ms)
         float pan = strtof(fields[2], NULL);
         if (pan < -90.0f || pan > 90.0f) return;
         command->cam_pan_deg = pan; command->last_cam_ms = now_ms;
+        /* 4th field, optional: the gimbal's tilt, clamped to its safe range. An older Pi sends none
+           and the tilt stays where it was (CAM_TILT_START_DEG from Protocol_Init). */
+        char *end = NULL;
+        float tilt = count >= 4U ? strtof(fields[3], &end) : 0.0f;
+        if (end != NULL && end != fields[3] && !isnan(tilt))
+            command->cam_tilt_deg = fminf(fmaxf(tilt, CAM_TILT_MIN_DEG), CAM_TILT_MAX_DEG);
     } else if (strcmp(fields[0], "SOS") == 0 && count >= 3U) {
         command->sos_on = strtoul(fields[2], NULL, 10) != 0U;
     } else if (strcmp(fields[0], "TXD") == 0 && count >= 6U) {

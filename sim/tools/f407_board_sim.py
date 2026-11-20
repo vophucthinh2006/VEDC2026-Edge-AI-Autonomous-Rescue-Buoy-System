@@ -43,7 +43,7 @@ TELEMETRY_PERIOD_S = 0.100
 HBT_TIMEOUT_S = 0.500
 NAV_TIMEOUT_S = 0.300
 ESC_RAMP_PER_S = 2.0
-CAM_PAN_LIMIT_DEG = 80.0
+CAM_PAN_LIMIT_DEG = 90.0
 RUDDER_DIR_FRONT, RUDDER_DIR_REAR = -1.0, 1.0
 # Gazebo side (sim/models/vedc_buoy/model.sdf): a rear ESC at full is the 2000 us the ArduPilot link
 # turns into 15 N; a pod at +-RUDDER_SPAN_US (250 us of the 1000 us servo range over +-45 deg) is

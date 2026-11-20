@@ -43,6 +43,23 @@ int main(void) {
     feed(&c, "NAV,12,MANUAL,0.30,90.0,300", 400U);
     assert(c.mode == NAV_MANUAL && near(c.man_rear, 0.0f) && near(c.man_front, 0.0f));
 
+    /* $CAM: tilt is optional. An older Pi's pan alone leaves the start tilt, a tilt is clamped to 0..60. */
+    pi_command_t cam;
+    Protocol_Init(&cam);
+    assert(near(cam.cam_tilt_deg, 10.0f));
+    feed(&cam, "CAM,1,-30.0", 100U);
+    assert(near(cam.cam_pan_deg, -30.0f) && near(cam.cam_tilt_deg, 10.0f) && cam.last_cam_ms == 100U);
+    feed(&cam, "CAM,2,20.0,30.0", 150U);
+    assert(near(cam.cam_pan_deg, 20.0f) && near(cam.cam_tilt_deg, 30.0f));
+    feed(&cam, "CAM,3,0.0,75.0", 200U);
+    assert(near(cam.cam_tilt_deg, 60.0f));
+    feed(&cam, "CAM,4,0.0,-8.0", 250U);
+    assert(near(cam.cam_tilt_deg, 0.0f));
+    feed(&cam, "CAM,5,5.0", 300U);
+    assert(near(cam.cam_pan_deg, 5.0f) && near(cam.cam_tilt_deg, 0.0f));   /* pan alone keeps the last tilt */
+    feed(&cam, "CAM,6,95.0,30.0", 350U);
+    assert(near(cam.cam_pan_deg, 5.0f) && near(cam.cam_tilt_deg, 0.0f));   /* a pan out of range drops the packet */
+
     puts("uart_protocol_test OK");
     return 0;
 }
