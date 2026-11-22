@@ -1,0 +1,6 @@
+stm32f1/build/
+__pycache__/
+.venv/
+*.jsonl
+state.json
+gps_uart.bin

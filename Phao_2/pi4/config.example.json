@@ -1,0 +1,20 @@
+{
+  "id": "PHAO-02",
+  "serial_port": "/dev/serial/by-id/REPLACE_WITH_USB_UART_ID",
+  "baud": 115200,
+  "relay": true,
+  "beacon_seconds": 7.3,
+  "retry_seconds": 4.5,
+  "max_attempts": 8,
+  "claim_radius_m": 6,
+  "claim_ttl_s": 120,
+  "demo_target": null,
+  "camera": {
+    "backend": "picamera2",
+    "device": 0,
+    "detector": "hog",
+    "model": "models/yolo11n.pt",
+    "confidence": 0.6,
+    "confirm_frames": 3
+  }
+}
