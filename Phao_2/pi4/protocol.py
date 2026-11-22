@@ -38,9 +38,9 @@ def ack(frame, buoy_id):
 
 def victim(buoy_id, seq, pos, confidence, count):
     lat, lon = coordinate(*pos)
-    # Legacy protocol requires risk 0..3 (0 means safe). This is a fixed DEMO value,
-    # not a drowning assessment. The prototype cannot infer medical/rescue risk.
-    return f"ev={buoy_id},{seq},V,{lat:.6f},{lon:.6f},0,{confidence:.2f},{count}"
+    # Legacy protocol requires risk 0..3 (0 = safe; the dashboard alerts only on risk > 0).
+    # Fixed 2 = high, the F407 default when its Pi sends no risk: not a drowning assessment.
+    return f"ev={buoy_id},{seq},V,{lat:.6f},{lon:.6f},2,{confidence:.2f},{count}"
 
 def beacon(buoy_id, seq, pos, count):
     location = f"{pos[0]:.6f},{pos[1]:.6f}" if pos else "NO_FIX"

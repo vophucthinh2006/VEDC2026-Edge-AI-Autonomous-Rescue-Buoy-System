@@ -81,6 +81,31 @@ class PrototypeTests(unittest.TestCase):
         n=NMEA(); n.feed(b"t1238AABBCCDDEEFF0011\r\n",0)
         self.assertIsNone(n.fix(0))
 
+    def test_victim_risk_alerts_dashboard(self):
+        e=Engine(config(),lambda *a,**k:None); e.detected(.6,1)
+        risk=e.next_frame(1)[0].split(",")[5]
+        self.assertGreater(int(risk),0)  # dashboard alerts only on risk > 0
+
+    def test_relay_uplink_waits_out_shore_ack_window(self):
+        events=[]; e=Engine(config(),lambda ev,**k: events.append((ev,k))); e.next_beacon=1e9
+        e.receive(beacon("PHAO-01",1,None,0),0)
+        self.assertIsNone(e.next_frame(1.5))  # shore ACK slot for PHAO-01
+        self.assertTrue(e.next_frame(2.0)[0].startswith("id=PHAO-01,"))
+
+    def test_relay_uplink_dropped_when_shore_acks_origin(self):
+        events=[]; e=Engine(config(),lambda ev,**k: events.append((ev,k))); e.next_beacon=1e9
+        e.receive(beacon("PHAO-01",1,None,0),0)
+        ackf=checksum("ACK,PHAO-01,1,0,,")
+        e.receive(ackf,0.1)
+        self.assertEqual(e.next_frame(0.2),(ackf,"relay"))  # downlink ACK still relayed promptly
+        self.assertIsNone(e.next_frame(2.0))
+        self.assertIn(("RELAY_DROP",{"reason":"shore_acked","frame":beacon("PHAO-01",1,None,0)}),events)
+
+    def test_requeue_keeps_relay_frame(self):
+        e=Engine(config(),lambda *a,**k:None); e.next_beacon=1e9
+        e.requeue("id=PHAO-01,NO_FIX",1)
+        self.assertEqual(e.next_frame(1),("id=PHAO-01,NO_FIX","relay"))
+
     def test_radio_frame_size(self):
         self.assertLessEqual(len(beacon("PHAO-02",4294967295,(-89.999999,-179.999999),65535)),120)
 

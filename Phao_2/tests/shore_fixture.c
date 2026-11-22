@@ -7,7 +7,8 @@
 int main(int argc, char **argv) {
     if (argc != 3) return 1;
     lora_event_t event;
-    if (!lora_event_parse(argv[2], &event) || event.type != 'V' || !event.has_position) return 2;
+    /* risk 0 = safe: the dashboard would not raise a rescue alert. */
+    if (!lora_event_parse(argv[2], &event) || event.type != 'V' || !event.has_position || event.risk == 0) return 2;
     claims_t claims; Claims_Init(&claims);
     if (!strcmp(argv[1], "existing"))
         Claims_OnReport(&claims, "PHAO-01", event.lat, event.lon, 1000);

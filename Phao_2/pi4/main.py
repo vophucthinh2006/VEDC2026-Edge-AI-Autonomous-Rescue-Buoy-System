@@ -9,6 +9,8 @@ import time
 
 from protocol import ID, Claims, Relay, NMEA, ack, beacon, coordinate, distance, victim
 
+UPLINK_HOLD = 1.6  # s: past the origin's ~1.5 s ACK listen window
+
 class Engine:
     def __init__(self, cfg, emit, persist=lambda seq, count: None, seq=0, count=0):
         self.cfg, self.emit, self.persist = cfg, emit, persist
@@ -63,18 +65,25 @@ class Engine:
                     self.next_report = now + 20
                     self.emit("REPORT_ACKED", sequence=seq, state=self.state)
                 return
+        if frame.startswith("ACK,"):
+            # The shore heard that buoy directly: its held uplink no longer needs forwarding.
+            heard = ("id=" + frame[4:11] + ",", "ev=" + frame[4:11] + ",")
+            for job in [j for j in self.jobs if j[1].startswith(heard)]:
+                self.jobs.remove(job); self.emit("RELAY_DROP", reason="shore_acked", frame=job[1])
         if self.cfg["relay"]:
             try: accepted = self.relay.accept(frame, now)
             except (ValueError, UnicodeError): accepted = False
             if accepted:
                 if len(self.jobs) == self.jobs.maxlen:
                     self.emit("RELAY_DROP", reason="queue_full"); return
-                # Prioritize downlink ACKs over forwarded telemetry.
-                job = (now + random.uniform(0.06, 0.12), frame, "relay")
-                if frame.startswith("ACK,"): self.jobs.appendleft(job)
-                else: self.jobs.append(job)
+                # Prioritize downlink ACKs over forwarded telemetry. Uplink waits out the
+                # shore's reply window (~50 ms + ~0.3 s ACK at SF9) so it can't collide with it.
+                if frame.startswith("ACK,"):
+                    self.jobs.appendleft((now + random.uniform(0.06, 0.12), frame, "relay"))
+                else: self.jobs.append((now + UPLINK_HOLD + random.uniform(0, 0.3), frame, "relay"))
 
     def next_frame(self, now):
+        # Due times already include the hold; drop jobs more than 2 s late.
         while self.jobs and now-self.jobs[0][0] > 2:
             self.jobs.popleft(); self.emit("RELAY_DROP", reason="expired")
         if self.jobs and self.jobs[0][0] <= now:
@@ -96,6 +105,10 @@ class Engine:
             self.beacon_seq += 1
             return beacon(self.id, self.beacon_seq, self.gps.fix(now), self.count), "own"
         return None
+
+    def requeue(self, frame, due):
+        if len(self.jobs) == self.jobs.maxlen: self.emit("RELAY_DROP", reason="queue_full")
+        else: self.jobs.appendleft((due, frame, "relay"))
 
 def main():
     parser = argparse.ArgumentParser()
@@ -128,7 +141,7 @@ def main():
         emit("START", target=engine.target, mode="stationary", relay=cfg["relay"],
              detector=None if args.no_camera else cfg["camera"]["detector"])
         port = None; buffer = bytearray(); busy_until = 0; quiet_until = 0
-        tx_kind = None; last_frame = 0; consecutive = 0; reconnect = 0; ready = False
+        tx_kind = None; sent = None; last_frame = 0; consecutive = 0; reconnect = 0; ready = False
         ping_due = 0; camera_error = None; status_due = 0
         try:
             while True:
@@ -142,8 +155,10 @@ def main():
                         last_frame = captured
                         consecutive = consecutive+1 if score >= cfg["camera"]["confidence"] else 0
                         if consecutive >= cfg["camera"]["confirm_frames"] and now-captured < 3:
-                            # HOG confidence is deliberately unspecified on the radio.
-                            engine.detected(score if cfg["camera"]["detector"] == "yolo" else 0.0, now)
+                            # HOG gives only hit/miss (1.0/0.0): send the configured threshold as a
+                            # nominal confidence, not a measured probability.
+                            engine.detected(score if cfg["camera"]["detector"] == "yolo"
+                                            else cfg["camera"]["confidence"], now)
                 if port is None and now >= reconnect:
                     try:
                         port = serial.Serial(cfg["serial_port"], cfg["baud"], timeout=0, write_timeout=0.2)
@@ -174,6 +189,10 @@ def main():
                                 emit("BRIDGE_ERROR", detail=text)
                                 busy_until=0
                                 if "RADIO_INIT" in text: ready=False
+                                # Bridge never started this frame: put a relay job back (own reports retry anyway).
+                                if text in ("ERROR,BUSY", "ERROR,TX") and sent and sent[1] == "relay":
+                                    engine.requeue(sent[0], now+0.2); sent=None
+                                if text == "ERROR,BUSY": busy_until=now+0.2  # bridge still sending
                             elif text.startswith("STATUS,"): emit("BRIDGE_STATUS", detail=text)
                         if not ready and now >= ping_due:
                             port.write(b"PING\n"); ping_due=now+3
@@ -183,8 +202,8 @@ def main():
                                 frame, kind = job
                                 tx_kind = "uplink" if kind == "relay" and frame.startswith(("id=", "ev=")) else kind
                                 encoded = frame.encode("ascii")
-                                if len(encoded) > 120: raise ValueError("radio payload too long")
-                                port.write(b"TX,"+encoded+b"\n"); busy_until=now+2.5
+                                if len(encoded) > 120: emit("TX_DROP", reason="payload_too_long", frame=frame)
+                                else: port.write(b"TX,"+encoded+b"\n"); busy_until=now+2.5; sent=job
                     except (serial.SerialException, OSError) as exc:
                         emit("SERIAL_ERROR", detail=str(exc)); port.close(); port=None; reconnect=now+3
                 if now >= status_due:
