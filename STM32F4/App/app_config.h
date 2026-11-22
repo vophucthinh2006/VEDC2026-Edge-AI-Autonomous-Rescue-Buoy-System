@@ -174,7 +174,7 @@
    Hard stops at -3 and +90 deg; below 0 it jams on the frame, so 0..60 is all it is ever sent. */
 #define CAM_TILT_ZERO_US           1500U   /* pulse that just sets the platform on the frame: trim so it does not press */
 #define CAM_TILT_US_PER_DEG        11.0f   /* same SG90 as pan */
-#define CAM_TILT_DIR               (-1)    /* flip if a positive angle pushes the platform into the frame */
+#define CAM_TILT_DIR               (+1)    /* flip if a positive angle pushes the platform into the frame; +1 on the gimbal 2026-11-21 */
 #define CAM_TILT_MIN_DEG           0.0f
 #define CAM_TILT_MAX_DEG           60.0f
 #define CAM_TILT_START_DEG         10.0f   /* glides here from 0 at power-up and stays */
