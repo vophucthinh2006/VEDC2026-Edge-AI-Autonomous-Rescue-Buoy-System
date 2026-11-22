@@ -82,9 +82,21 @@ int main(void) {
     if (ready) SX127x_StartRx(&radio);
     say(ready ? "READY,2\n" : "ERROR,RADIO_INIT\n");
     char line[132]; unsigned used = 0; bool overflow = false, transmitting = false;
-    uint32_t started = 0, last_gps = 0, last_status = 0;
+    uint32_t started = 0, last_gps = 0, last_status = 0, last_radio = 0;
     while (1) {
         uint32_t now = HAL_GetTick(); int b;
+        /* A power dip resets the RA-02 to FSK defaults (OpMode 0x04, 434 MHz) while the F103
+           keeps running: no RX, and its flag register fakes TX_DONE. Re-init when LoRa bit is gone. */
+        if (!transmitting && (uint32_t)(now-last_radio) >= 1000) {
+            last_radio = now;
+            uint8_t op = SX127x_ReadReg(&radio, 0x01U);   /* RegOpMode, bit 7 = LoRa */
+            if (!ready || op == 0xFFU || (op & 0x80U) == 0U) {
+                bool was_ready = ready;
+                ready = SX127x_Init(&radio, &cfg, &version) == SX127X_OK;
+                if (ready) SX127x_StartRx(&radio);
+                if (was_ready || ready) say(ready ? "ERROR,RADIO_RESET\n" : "ERROR,RADIO_INIT\n");
+            }
+        }
         while ((b = get(&pi_ring)) >= 0) {
             if (b == '\r') continue;
             if (b == '\n') {
@@ -116,12 +128,18 @@ int main(void) {
         }
         if ((uint32_t)(now-last_gps) >= 10) {
             last_gps = now;
-            char out[138] = "GPSHEX,"; unsigned n = 7;
-            for (unsigned i=0; i<64 && (b=get(&gps_ring))>=0; i++) {
-                static const char hex[]="0123456789ABCDEF";
-                out[n++]=hex[b>>4]; out[n++]=hex[b&15];
+            /* Up to 4 lines of 64 B per pass (25.6 kB/s): a single line (6.4 kB/s) fell behind a
+               continuous 115200 GPS (11.5 kB/s). Capped because say() blocks: hex doubles the
+               bytes, so a full 1 kB ring would stall the radio loop ~180 ms on the 115200 Pi link. */
+            bool more = true;
+            for (unsigned line_no = 0; more && line_no < 4; line_no++) {
+                char out[138] = "GPSHEX,"; unsigned n = 7;
+                for (unsigned i=0; i<64 && (more = (b=get(&gps_ring))>=0); i++) {
+                    static const char hex[]="0123456789ABCDEF";
+                    out[n++]=hex[b>>4]; out[n++]=hex[b&15];
+                }
+                if (n>7) { out[n++]='\n'; out[n]=0; say(out); }
             }
-            if (n>7) { out[n++]='\n'; out[n]=0; say(out); }
         }
         if ((uint32_t)(now-last_status) >= 5000) {
             char out[90]; last_status=now;

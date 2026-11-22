@@ -53,9 +53,9 @@ uint8_t SX127x_ReadReg(sx127x_t *d, uint8_t addr)
     uint8_t tx[2] = { (uint8_t)(addr & 0x7FU), 0U };
     uint8_t rx[2] = { 0U, 0U };
     nss(d, GPIO_PIN_RESET);
-    (void)HAL_SPI_TransmitReceive(d->hspi, tx, rx, 2U, SPI_TIMEOUT_MS);
+    bool ok = HAL_SPI_TransmitReceive(d->hspi, tx, rx, 2U, SPI_TIMEOUT_MS) == HAL_OK;
     nss(d, GPIO_PIN_SET);
-    return rx[1];
+    return ok ? rx[1] : 0xFFU;   /* 0xFF = no answer, same as an unpowered chip with MISO high */
 }
 
 static bool write_fifo(sx127x_t *d, const uint8_t *data, uint8_t len)
@@ -169,7 +169,10 @@ bool SX127x_StartTx(sx127x_t *d, const uint8_t *data, uint8_t len)
 
 bool SX127x_TxDone(sx127x_t *d)
 {
-    if ((SX127x_ReadReg(d, REG_IRQ_FLAGS) & IRQ_TX_DONE) == 0U) return false;
+    /* 0xFF: the chip lost SPI (3V3 sag while sending), not every flag set. Keep waiting so
+       the caller's 2 s timeout reports ERROR,TX_TIMEOUT instead of a false TXDONE. */
+    uint8_t irq = SX127x_ReadReg(d, REG_IRQ_FLAGS);
+    if (irq == 0xFFU || (irq & IRQ_TX_DONE) == 0U) return false;
     (void)write_reg(d, REG_IRQ_FLAGS, 0xFFU);
     (void)set_mode(d, MODE_STDBY);
     return true;
@@ -187,7 +190,7 @@ bool SX127x_StartRx(sx127x_t *d)
 bool SX127x_ReadPacket(sx127x_t *d, uint8_t *buf, uint8_t max, uint8_t *len)
 {
     uint8_t irq = SX127x_ReadReg(d, REG_IRQ_FLAGS);
-    if ((irq & IRQ_RX_DONE) == 0U) return false;
+    if (irq == 0xFFU || (irq & IRQ_RX_DONE) == 0U) return false;   /* 0xFF: no SPI answer */
     (void)write_reg(d, REG_IRQ_FLAGS, 0xFFU);
     if ((irq & IRQ_PAYLOAD_CRC_ERROR) != 0U) return false;
     uint8_t count = SX127x_ReadReg(d, REG_RX_NB_BYTES);
