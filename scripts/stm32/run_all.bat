@@ -10,7 +10,9 @@ rem       service vedc-boat, which starts again by itself after a reboot; its ou
 rem       its own
 rem    6. opens the dashboard
 rem
-rem  Usage: run_all [noflash] [nostation] [notest] [sim] [stand]
+rem  Usage: run_all [noflash] [nostation] [notest] [sim] [stand] [pi4|pi5]
+rem    pi4, pi5  : which Pi to deploy to, when boat.local.cmd gives PI4_HOST and PI5_HOST
+rem                (boat.local.example.cmd); without it the PI variable, else pi5
 rem    noflash   : the F407 keeps its firmware (steps 2 skipped)
 rem    nostation : the station keeps its firmware and runs on its own (step 3 skipped)
 rem    notest    : step 1 skipped
@@ -27,6 +29,11 @@ rem  Then: draw a route on the dashboard and press "Gui toi phao": the boat runs
 rem  route stops it. The lights are the two switches of the boat's card (admin).
 rem ============================================================
 setlocal EnableExtensions
+rem The Pi first: boat.local.cmd (called by _env.cmd and boat.bat) picks PI_HOST from it.
+for %%A in (%*) do (
+    if /I "%%~A"=="pi4" set "PI=pi4"
+    if /I "%%~A"=="pi5" set "PI=pi5"
+)
 call "%~dp0_env.cmd"
 set "NOFLASH=" & set "NOSTATION=" & set "NOTEST=" & set "SIM=" & set "STAND="
 for %%A in (%*) do (

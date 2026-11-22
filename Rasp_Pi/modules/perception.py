@@ -156,6 +156,7 @@ class SweepPattern:
     def __init__(self, limit_deg: float, rate_deg_s: float) -> None:
         self.limit, self.rate = abs(float(limit_deg)), abs(float(rate_deg_s))
         self._angle, self._direction, self._at = 0.0, -1.0, 0.0
+        self._turns = 0     # ends reached since start(): RasterSweep changes rows on them
 
     @property
     def target_deg(self) -> float:
@@ -165,7 +166,7 @@ class SweepPattern:
         """Begin (or resume) from where the camera points, heading for the nearer end first."""
         self._angle = max(-self.limit, min(self.limit, float(pan_deg)))
         self._direction = 1.0 if self._angle > 0 else -1.0
-        self._at = now
+        self._at, self._turns = now, 0
         return self._angle
 
     def usable(self, _now: float) -> bool:
@@ -182,23 +183,66 @@ class SweepPattern:
                 break
             self._angle = self.limit * self._direction
             self._direction, travel = -self._direction, travel - room
+            self._turns += 1
         return self._angle
+
+
+class RasterSweep(SweepPattern):
+    """SweepPattern over rows of the gimbal's tilt: the pan sweeps one way at tilt_rows_deg[0] (the
+    water), the camera tilts up to the next row at the end and sweeps back, and so on. With rows
+    [0, 20] and a 60 x 47 deg camera (vertical -23..+23 deg, then -3..+43), row 0 sees the water and
+    somebody on a roof from about 8 m, row 20 the roofs and the people on them from about 3 m.
+    At +-45 deg and 15 deg/s a round is 12 s.
+
+    Same interface as SweepPattern, frame_done still returns the pan; tilt_deg is the row. Frames are
+    unusable for settle_s after a row change, while the tilt servo travels (F407 CAM_TILT_MAX_RATE_DPS)."""
+
+    def __init__(self, limit_deg: float, rate_deg_s: float, rows_deg: list[float], settle_s: float = 0.6) -> None:
+        super().__init__(limit_deg, rate_deg_s)
+        self.rows = [float(r) for r in rows_deg] or [0.0]
+        self.settle_s = float(settle_s)
+        self._row_changed_at = -1e9
+
+    @property
+    def tilt_deg(self) -> float:
+        return self.rows[self._turns % len(self.rows)]
+
+    def start(self, now: float, pan_deg: float) -> float:
+        self._row_changed_at = now   # the tilt may move to row 0 now
+        return super().start(now, pan_deg)
+
+    def usable(self, now: float) -> bool:
+        return now - self._row_changed_at >= self.settle_s
+
+    def frame_done(self, now: float) -> float:
+        row = self.tilt_deg
+        angle = super().frame_done(now)
+        if self.tilt_deg != row:
+            self._row_changed_at = now
+        return angle
 
 
 def make_scan(scan: dict | None) -> ScanPattern | SweepPattern | None:
     """The search pattern of camera.scan, or None when it is off."""
     if not scan or not scan.get("enabled"):
         return None
-    if str(scan.get("mode", "step")).lower() == "sweep":
+    mode = str(scan.get("mode", "step")).lower()
+    if mode == "raster":
+        return RasterSweep(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"], scan.get("tilt_rows_deg", [0, 20]),
+                           scan.get("tilt_settle_s", 0.6))
+    if mode == "sweep":
         return SweepPattern(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"])
     return ScanPattern(scan["angles_deg"], scan["settle_s"], scan["dwell_frames"])
 
 
-def track_pan(pan_deg: float, bearing_cam_deg: float, gain: float, deadband_deg: float, limit_deg: float) -> float:
-    """One P step that turns the camera servo toward the person; positive is right."""
+def track_pan(pan_deg: float, bearing_cam_deg: float, gain: float, deadband_deg: float, limit_deg: float,
+              low_deg: float | None = None) -> float:
+    """One P step that turns the camera servo toward the person; positive is right. Also the
+    gimbal's tilt (positive up), with its own range low_deg..limit_deg; else -limit..limit."""
     if abs(bearing_cam_deg) <= deadband_deg:
         return pan_deg
-    return max(-limit_deg, min(limit_deg, pan_deg + gain * bearing_cam_deg))
+    low = -limit_deg if low_deg is None else low_deg
+    return max(low, min(limit_deg, pan_deg + gain * bearing_cam_deg))
 
 
 def associate_person(bearing_body_deg: float, obstacles: tuple[Obstacle, ...], half_angle_deg: float, min_distance_m: float, max_distance_m: float) -> Obstacle | None:

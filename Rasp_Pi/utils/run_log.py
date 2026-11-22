@@ -1,5 +1,6 @@
-"""One line a second of what the Pi knows, as CSV, for reading a run back afterwards
-(rescue_main.py --log). A new file per run: logs/run_<date>_<time>.csv."""
+"""What the Pi knows, one CSV line per write, for reading a run back afterwards: rescue_main.py --log once
+a second (logs/run_<date>_<time>.csv), main.py every AUTO loop with its $NAV command (logs/nav_*.csv,
+read by tools/lake_report.py)."""
 from __future__ import annotations
 
 import csv
@@ -11,7 +12,9 @@ from modules.state_store import Snapshot
 
 COLUMNS = ("time", "t_s", "mode", "armed", "phase", "fix", "lat", "lon", "speed_mps", "yaw_deg", "roll_deg", "pitch_deg", "mission_item",
            "wp_dist_m", "people_found", "person_bearing_deg", "person_range_m", "person_confidence", "obstacles", "nearest_obstacle_m",
-           "lidar_age_s", "board", "battery_v", "current_a", "estop", "alarm", "lora_ok")
+           "lidar_age_s", "board", "battery_v", "current_a", "estop", "alarm", "lora_ok",
+           # main.py: the $NAV command and the route's waypoint gone to (wp_index "k/n")
+           "hdop", "course_deg", "cmd_mode", "cmd_speed_mps", "cmd_heading_deg", "reason", "wp_index", "wp_lat", "wp_lon")
 
 
 def row(snap: Snapshot, now: float, started: float, phase: str, found: int, board: object | None, board_online: bool) -> dict:
@@ -28,7 +31,7 @@ def row(snap: Snapshot, now: float, started: float, phase: str, found: int, boar
         "person_confidence": f"{target.confidence:.2f}" if target else "", "obstacles": len(snap.obstacles),
         "nearest_obstacle_m": f"{nearest:.2f}" if nearest is not None else "",
         "lidar_age_s": f"{now - snap.scan_timestamp:.1f}" if snap.scan_timestamp > 0.0 else "",
-        "board": "" if board is None else int(board_online),
+        "board": "" if board is None else int(board_online), "hdop": f"{snap.gps.hdop:.1f}", "course_deg": f"{snap.gps.course_deg:.1f}",
     }
     if board is not None and board_online:
         out.update(battery_v=f"{board.battery_v:.2f}", current_a=f"{board.current_a:.2f}", estop=int(board.estop), alarm=int(board.alarm),
@@ -37,16 +40,17 @@ def row(snap: Snapshot, now: float, started: float, phase: str, found: int, boar
 
 
 class RunLog:
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, path: Path | None = None) -> None:
         directory.mkdir(parents=True, exist_ok=True)
-        self.path = directory / f"run_{datetime.now():%Y%m%d_%H%M%S}.csv"
+        self.path = path or directory / f"run_{datetime.now():%Y%m%d_%H%M%S}.csv"
         self._file = self.path.open("w", newline="", encoding="utf-8", buffering=1)     # line buffered: a power cut loses one line
         self._writer = csv.DictWriter(self._file, fieldnames=COLUMNS, restval="")
         self._writer.writeheader()
         self._started = monotonic()
 
-    def write(self, snap: Snapshot, now: float, phase: str, found: int, board: object | None = None, board_online: bool = False) -> None:
-        self._writer.writerow(row(snap, now, self._started, phase, found, board, board_online))
+    def write(self, snap: Snapshot, now: float, phase: str, found: int, board: object | None = None, board_online: bool = False, **extra: object) -> None:
+        """extra: further COLUMNS (main.py's cmd_*, reason, wp_*)."""
+        self._writer.writerow(row(snap, now, self._started, phase, found, board, board_online) | extra)
 
     def close(self) -> None:
         self._file.close()

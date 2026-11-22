@@ -82,6 +82,8 @@ void Error_Handler(void);
 #define LORA_DIO2_EXTI_IRQn EXTI15_10_IRQn
 #define LORA_NSS_Pin GPIO_PIN_12
 #define LORA_NSS_GPIO_Port GPIOB
+#define CAM_TILT_Pin GPIO_PIN_12
+#define CAM_TILT_GPIO_Port GPIOD
 #define BNO055_RST_Pin GPIO_PIN_6
 #define BNO055_RST_GPIO_Port GPIOC
 

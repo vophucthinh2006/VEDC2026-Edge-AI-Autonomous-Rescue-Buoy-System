@@ -44,3 +44,8 @@ camera:
     sweep_limit_deg: 45       # the search sweep (in every state but IDLE, modules/mission.py): +-45 deg
     sweep_rate_deg_s: 15      # at about 1 detector frame a second, 30 deg/s moved half the 60 deg view
                               # between frames: a spot was seen in 2 frames, blurred; 15: in 4, 12 s a round
+    # Pan-tilt gimbal (2 SG90): the water at tilt 0, the roofs at 20, a row each way: 12 s a round.
+    # 30 was tried in the simulator: with the camera 0.33 m above the water that row was mostly sky.
+    mode: raster
+    tilt_rows_deg: [0, 20]
+  tilt_enabled: true          # $CAM,seq,pan,tilt; the tilt follows the person too (settings.yaml tilt_*)

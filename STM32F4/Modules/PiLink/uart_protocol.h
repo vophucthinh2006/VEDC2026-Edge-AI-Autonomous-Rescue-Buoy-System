@@ -32,6 +32,7 @@ typedef struct {
     float man_steer;
     uint8_t man_lights;
     float cam_pan_deg;            /* camera servo angle from the bow, positive right */
+    float cam_tilt_deg;           /* gimbal tilt, 0 = level .. 60 up: $CAM,seq,pan[,tilt], CAM_TILT_START_DEG until sent */
     uint32_t last_cam_ms;         /* 0 until the first CAM packet */
     uint16_t route_rev;           /* LoRa route the Pi reports in $HBT, 0 = none (App/route_link.h) */
     /* $HBT,seq,reason,route_rev[,mission,wp/total[,fps_x10]]: the reason of the Pi's NAV command, its

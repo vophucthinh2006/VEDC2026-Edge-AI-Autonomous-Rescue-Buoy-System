@@ -11,6 +11,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from math import atan, cos, degrees, radians, tan
 from time import monotonic, sleep, strftime
 from typing import Callable
 
@@ -18,7 +19,8 @@ import cv2
 import numpy as np
 
 from modules.edge_model import EDGES, MEDIUM, RISK_COLOURS, RISK_NAMES, SAFE
-from modules.perception import SweepPattern, associate_person, estimate_distance_bbox, make_scan, standing_score, track_pan
+from modules.perception import (SweepPattern, associate_person, box_bottom_elevation_deg, estimate_distance_bbox, make_scan,
+                                standing_score, track_pan)
 from modules.state_store import HumanTarget, StateStore
 from utils.geometry import bearing_deg, signed_angle_deg
 
@@ -39,6 +41,7 @@ class PersonDetection:
     near_camera: bool = False      # yolo_movenet: box on the bottom edge, so not in the water (NEAR_CAMERA_SAFE)
     risk: int = MEDIUM             # edge_model SAFE .. CRITICAL
     on_boat: bool = False          # yolo_movenet: inside a boat's box (risk SAFE)
+    elevation_cam_deg: float = 0.0  # box centre above the camera axis, positive up
 
 
 def source_needs_box(camera: dict) -> bool:
@@ -101,11 +104,15 @@ class CameraReader:
 
 class VisionWorker(threading.Thread):
     def __init__(self, camera: dict, state: StateStore, stop_event: threading.Event, on_confirmed: Callable[[HumanTarget], None], send_pan: Callable[[float], None], standoff_m: float,
-                 sweep_allowed: Callable[[], bool] | None = None, detect_allowed: Callable[[], bool] | None = None) -> None:
+                 sweep_allowed: Callable[[], bool] | None = None, detect_allowed: Callable[[], bool] | None = None,
+                 tilt: bool = False) -> None:
         """sweep_allowed: whether the mission wants the search sweep now (main.py: not while the
         STM32 boat stands still without a route); None: always, as far as the autopilot's mode goes.
         detect_allowed: whether to run the detector at all (main.py: the same); while it is not, the
-        camera only feeds the viewer, a few frames a second, and looks ahead. None: always."""
+        camera only feeds the viewer, a few frames a second, and looks ahead. None: always.
+        tilt: the camera is on a pan-tilt gimbal (main.py, STM32 boat): send_pan(pan, tilt) then, the
+        sweep may be a RasterSweep and the tilt follows the person too. Without it the tilt is 0 and
+        send_pan(pan) as before."""
         super().__init__(name="vision", daemon=True)
         self.c = camera
         self.state, self.stop, self.on_confirmed = state, stop_event, on_confirmed
@@ -118,6 +125,11 @@ class VisionWorker(threading.Thread):
         self._last_report = 0.0
         self._pan = 0.0          # camera servo angle from the bow, positive right
         self._sent_pan = 0.0
+        # Gimbal tilt, positive up (camera.tilt_limit_deg; the F407, App/camera_pan.c, clamps it too).
+        self._tilt_on = tilt
+        self._tilt_low, self._tilt_high = (float(a) for a in camera.get("tilt_limit_deg", (0.0, 60.0)))
+        self._tilt_home = float(camera.get("tilt_home_deg", 10.0)) if tilt else 0.0
+        self._tilt = self._sent_tilt = self._tilt_home
         self._sent_at = 0.0
         # Search sweep (camera.scan): only while the autopilot runs the search pattern.
         scan = camera.get("scan") or {}
@@ -138,6 +150,8 @@ class VisionWorker(threading.Thread):
         self._rate_frames, self._rate_busy = 0, 0.0
         self._frame_times: deque[float] = deque(maxlen=400)   # when each detection finished, for fps
         self._ranged_standing: bool | None = None
+        self._roof_votes: deque[bool] = deque(maxlen=10)   # on a roof, in the last frames of the person followed
+        self._roof_held = False
         self._frame_aspect = 4.0 / 3.0       # width over height, taken from the frames once they come
         # For the live viewer (modules/viewer.py): the last frame read and what was made of the last one looked at.
         self._view_frame: np.ndarray | None = None
@@ -157,8 +171,9 @@ class VisionWorker(threading.Thread):
                 keypoints: tuple = (), near_camera: bool = False, risk: int = MEDIUM, on_boat: bool = False) -> PersonDetection:
         ymin, xmin, ymax, xmax = box
         bearing = ((xmin + xmax) / 2.0 - 0.5) * float(self.c["horizontal_fov_deg"])
+        elevation = (0.5 - (ymin + ymax) / 2.0) * float(self.c["vertical_fov_deg"])
         return PersonDetection(bearing, confidence, max(0.0, ymax - ymin), ymin < 0.02 or ymax > 0.98, box, in_water, keypoints,
-                               near_camera, risk, on_boat)
+                               near_camera, risk, on_boat, elevation)
 
     def _detect_edge(self, frame: np.ndarray) -> list[PersonDetection]:
         """YOLOv8n + MoveNet. People on a boat stay in, as SAFE: reported, never followed."""
@@ -239,11 +254,24 @@ class VisionWorker(threading.Thread):
             return candidates[0]
         return candidates[0] if focus is None and nearest.risk < candidates[0].risk else nearest
 
-    def _distance(self, detection: PersonDetection, bearing_body_deg: float, followed: bool = True) -> float | None:
+    def _on_roof(self, detection: PersonDetection, tilt_deg: float, distance_m: float | None = None) -> bool:
+        """Feet (box bottom) more than camera.roof_min_deg above the horizon: on a roof, not in the
+        water, whose surface is always below the horizon from a camera 0.4 m above it. Further off a
+        low roof is barely above the horizon (0.2 m at 13 m: 1 deg): with a range, feet standing
+        camera.roof_min_height_m or more above the water also count."""
+        pitch = self.state.snapshot().imu.pitch_deg + tilt_deg
+        feet_deg = box_bottom_elevation_deg(detection.box[2], self.c["vertical_fov_deg"], pitch)
+        if feet_deg >= float(self.c.get("roof_min_deg", 5.0)):
+            return True
+        feet_m = float(self.c.get("camera_height_m", 0.4)) + (distance_m or 0.0) * tan(radians(feet_deg))
+        return distance_m is not None and feet_m >= float(self.c.get("roof_min_height_m", 0.45))
+
+    def _distance(self, detection: PersonDetection, bearing_body_deg: float, followed: bool = True, tilt_deg: float = 0.0) -> float | None:
+        """Range along the water to the person; tilt_deg: the gimbal's tilt when the frame was taken."""
         snap = self.state.snapshot()
         # Somebody standing clear of the water (on a roof) or a swimmer: by the shape of the box and
-        # where its bottom edge falls (perception.standing_score).
-        score = standing_score(detection.box, self._frame_aspect, self.c["vertical_fov_deg"], snap.imu.pitch_deg)
+        # where its bottom edge falls (perception.standing_score), the tilt counted as pitch.
+        score = standing_score(detection.box, self._frame_aspect, self.c["vertical_fov_deg"], snap.imu.pitch_deg + tilt_deg)
         standing_min = float(self.c.get("standing_score_min", 2.5))
         elevated = score >= standing_min
         # Between water_score_max and standing_score_min the box could be either, and the two
@@ -260,7 +288,9 @@ class VisionWorker(threading.Thread):
         # below the scan plane: the return at their bearing is whatever stands behind them, and with
         # the camera looking sideways down a flooded street that is always a house.
         height_m = float(self.c.get("standing_height_m", self.c["person_height_m"])) if elevated else self.c["person_height_m"]
-        box_range = estimate_distance_bbox(detection.box_height_frac, self.c["vertical_fov_deg"], height_m)
+        # The box gives the range along the line of sight: up to a roof that is longer than along the water.
+        elevation = snap.imu.pitch_deg + tilt_deg + detection.elevation_cam_deg
+        box_range = estimate_distance_bbox(detection.box_height_frac, self.c["vertical_fov_deg"], height_m) * cos(radians(elevation))
         if source == "lidar" or (source == "fused" and elevated):
             obstacle = associate_person(bearing_body_deg, snap.obstacles, self.c["lidar_association_half_angle_deg"], self.c["min_target_distance_m"], self.c["max_target_distance_m"])
             # fused: the return must be the wall under the person, at about the range their box gives.
@@ -275,14 +305,33 @@ class VisionWorker(threading.Thread):
             # guessing. Anybody else, often somebody on a roof whose head is out of the frame: no
             # range. Placed at the stand-off they became a phantom right at the boat, "reached" at once.
             return self.standoff_m if followed and snap.focus is not None else None
+        if not elevated:
+            # A swimmer's waterline is below the horizon by atan(camera height / range). A box whose bottom
+            # sits well above that is somebody standing clear of the water whose box came out wide
+            # (people side by side on a roof merged into one): with the swimmer's figure their range would
+            # read three times too short and the boat back off from a house 15 m away. No range then.
+            bottom = box_bottom_elevation_deg(detection.box[2], self.c["vertical_fov_deg"], snap.imu.pitch_deg + tilt_deg)
+            waterline = -degrees(atan(float(self.c.get("camera_height_m", 0.4)) / max(box_range, 0.1)))
+            if bottom > waterline + float(self.c.get("waterline_tolerance_deg", 1.5)):
+                return None
         # person_height_m is what a box covers of somebody in the water. Somebody standing clear of
         # it shows their whole height; with the swimmer's figure their range would read 2.5 times too short.
-        return box_range if box_range <= self.c["max_target_distance_m"] else None
+        # Somebody on a roof is held off at vehicle.roof_standoff_m (8 m): their range is needed beyond
+        # max_target_distance_m, up to max_standing_distance_m.
+        limit = float(self.c.get("max_standing_distance_m", self.c["max_target_distance_m"])) if elevated else self.c["max_target_distance_m"]
+        return box_range if box_range <= limit else None
 
     def _recenter(self) -> None:
         step = float(self.c["recenter_step_deg"])
         self._pan = 0.0 if abs(self._pan) <= step else self._pan - step * (1 if self._pan > 0 else -1)
+        off = self._tilt - self._tilt_home
+        self._tilt = self._tilt_home if abs(off) <= step else self._tilt - step * (1 if off > 0 else -1)
         self._publish_pan(monotonic())
+
+    def _scan_tilt(self) -> None:
+        """The tilt of the sweep's row (RasterSweep); a pan-only sweep looks from the home tilt."""
+        if self._tilt_on:
+            self._tilt = float(getattr(self._scan, "tilt_deg", self._tilt_home))
 
     def view(self) -> dict:
         detection, pan_deg, distance_m, at = self._view_result
@@ -293,7 +342,8 @@ class VisionWorker(threading.Thread):
                 "others": [(d.box, d.confidence, range_m, d.risk) for d, range_m in self._view_others],
                 "boats": self._view_boats, "on_boat": self._view_ignored,
                 "model": "YOLOv8n + MoveNet" if self._model is not None else "SSD MobileNet",
-                "pan_deg": self._pan if detection is None else pan_deg, "scanning": self._scanning, "age_s": monotonic() - at}
+                "pan_deg": self._pan if detection is None else pan_deg, "tilt_deg": self._tilt if self._tilt_on else None,
+                "scanning": self._scanning, "age_s": monotonic() - at}
 
     def _searching(self) -> bool:
         vehicle = self.state.snapshot().vehicle
@@ -338,15 +388,19 @@ class VisionWorker(threading.Thread):
 
     def _publish_pan(self, now: float) -> None:
         with self._pan_lock:
-            if abs(self._pan - self._sent_pan) >= 0.5 or now - self._sent_at >= 0.25:
-                self.send_pan(self._pan)
-                self._sent_pan, self._sent_at = self._pan, now
+            if abs(self._pan - self._sent_pan) >= 0.5 or abs(self._tilt - self._sent_tilt) >= 0.5 or now - self._sent_at >= 0.25:
+                if self._tilt_on:
+                    self.send_pan(self._pan, self._tilt)
+                else:
+                    self.send_pan(self._pan)
+                self._sent_pan, self._sent_tilt, self._sent_at = self._pan, self._tilt, now
 
     def _sweep_step(self, now: float) -> None:
         """Move a smooth sweep on to `now` and send the angle; nothing outside a smooth sweep."""
         with self._pan_lock:
             if self._scanning and isinstance(self._scan, SweepPattern):
                 self._pan = self._scan.frame_done(now)
+                self._scan_tilt()
                 self._publish_pan(now)
 
     def _nobody_to_follow(self, now: float) -> None:
@@ -356,6 +410,7 @@ class VisionWorker(threading.Thread):
             return
         self.state.update_human_target(None)
         self._followed_bearing = None
+        self._roof_votes.clear()
         focus = self._focus_bearing()
         if focus is not None:
             # The rescue logic is going to somebody not in the frame: look their way.
@@ -366,6 +421,7 @@ class VisionWorker(threading.Thread):
             if self._searching():
                 with self._pan_lock:
                     self._pan = self._scan.frame_done(now) if self._scanning else self._scan.start(now, self._pan)
+                    self._scan_tilt()
                     self._scanning = True
                     self._publish_pan(now)
             else:
@@ -466,7 +522,7 @@ class VisionWorker(threading.Thread):
                         self._view_others = []
                     with self._pan_lock:
                         self._scanning = False
-                        if self._pan != 0.0:
+                        if self._pan != 0.0 or self._tilt != self._tilt_home:
                             self._recenter()   # a step a frame until the camera looks ahead
                     self._view_result = (None, self._pan, None, now)
                     self.stop.wait(IDLE_FRAME_S)   # the viewer still gets a picture, the CPU rests
@@ -476,6 +532,7 @@ class VisionWorker(threading.Thread):
                     self._detector_on = True
                 self._sweep_step(now)        # without the pan thread (pan_rate_hz: 0), once per frame
                 pan_at_capture = self._pan   # the sweep moves on while the detector runs
+                tilt_at_capture = self._tilt
                 # Simulator only (camera.max_fps): hold the detector to the rate expected of the Pi.
                 if max_fps and now - self._last_frame < 1.0 / max_fps:
                     continue
@@ -495,16 +552,29 @@ class VisionWorker(threading.Thread):
                     self._save_snapshot(frame, detections, detection, pan_at_capture, now)
                 # Everybody in the frame goes to the rescue logic, each with a bearing, a range and a risk.
                 targets, target, others = [], None, []
+                previous_bearing = self._followed_bearing
                 for found in detections:
                     bearing_body = signed_angle_deg(pan_at_capture + found.bearing_cam_deg)
-                    distance = self._distance(found, bearing_body, followed=found is detection)
+                    distance = self._distance(found, bearing_body, followed=found is detection, tilt_deg=tilt_at_capture)
+                    on_roof = self._on_roof(found, tilt_at_capture, distance)
                     if found is detection:
+                        # On a low roof the feet are a degree or so above the horizon and the waves blur
+                        # that, while one odd box puts a swimmer on a roof: the person followed is on a
+                        # roof when 4 of their last 10 frames say so. A jump to somebody else (more than
+                        # follow_gate_deg) starts the count again.
+                        if previous_bearing is None or abs(signed_angle_deg(bearing_body - previous_bearing)) > float(self.c.get("follow_gate_deg", 15.0)):
+                            self._roof_votes.clear()
+                        self._roof_votes.append(on_roof)
+                        on_roof = sum(self._roof_votes) >= 4
+                        if on_roof != self._roof_held:
+                            self._roof_held = on_roof
+                            self.log.info("person followed %s", "on a roof: held off at vehicle.roof_standoff_m" if on_roof else "not on a roof")
                         self._followed_bearing = bearing_body
                         self._view_result = (detection, pan_at_capture, distance, now)
                     elif not found.on_boat:         # those are drawn from on_boat
                         others.append((found, distance))
                     if distance is not None:
-                        targets.append(HumanTarget(bearing_body, distance, found.confidence, now, found.risk))
+                        targets.append(HumanTarget(bearing_body, distance, found.confidence, now, found.risk, on_roof))
                         if found is detection:
                             target = targets[-1]
                 self._view_others = others
@@ -519,6 +589,9 @@ class VisionWorker(threading.Thread):
                 with self._pan_lock:
                     # From where the camera pointed when the frame was taken, not where the sweep got to since.
                     self._pan = track_pan(pan_at_capture, detection.bearing_cam_deg, self.c["pan_gain"], self.c["pan_deadband_deg"], self.c["pan_limit_deg"])
+                    if self._tilt_on:
+                        self._tilt = track_pan(tilt_at_capture, detection.elevation_cam_deg, float(self.c.get("tilt_gain", self.c["pan_gain"])),
+                                               float(self.c.get("tilt_deadband_deg", self.c["pan_deadband_deg"])), self._tilt_high, self._tilt_low)
                     self._publish_pan(now)
                 self.state.update_human_targets(tuple(targets), target)
                 if target is None:
