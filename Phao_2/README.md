@@ -57,7 +57,7 @@ NEO 3X dùng DroneCAN và nguồn vào 4,7–5,2 V. Không nối CAN-H/CAN-L tr�
 - Pi chỉ chấp nhận RMC/GGA NMEA có checksum đúng và fix hợp lệ; fix quá 3 s thành `NO_FIX`.
 - Nếu bộ chuyển xuất SLCAN, khung nhị phân riêng hoặc DroneCAN thô, GPS vẫn được ghi raw nhưng **chưa có tọa độ**. Cần bổ sung decoder đúng loại bộ chuyển sau khi biết model/mẫu dữ liệu.
 - Mặc định UART GPS 115200 baud; thay tham số CMake `GPS_BAUD` theo thực tế.
-- GPS luồng liên tục tốc độ cao có thể vượt băng thông do hex làm tăng gấp đôi dung lượng; giảm tốc độ bản tin của bộ chuyển và kiểm tra `gps_lost=0`.
+- **Cảnh báo băng thông:** hex làm gấp đôi số byte, còn đường STM32→Pi chỉ 115200 baud (~11,5 kB/s, dùng chung với `RX,`/`TXDONE`). GPS chạy **liên tục** ở 115200 (~11,5 kB/s) cần ~23 kB/s hex, tức vượt gấp đôi khả năng của đường lên Pi, nên chắc chắn mất dữ liệu (`gps_lost` tăng). Dữ liệu GPS thực tế nên dưới ~4 kB/s: đặt bộ chuyển xuất ở 9600–38400 baud hoặc giảm tần số/bớt loại bản tin (chỉ RMC/GGA, 1–5 Hz), rồi build lại với `GPS_BAUD` tương ứng và kiểm tra `gps_lost=0`. Firmware xả tối đa 4 dòng 64 byte mỗi 10 ms để không chặn vòng radio quá lâu.
 
 ## Vị trí người trong demo
 
@@ -65,7 +65,7 @@ Camera một mắt không tự cung cấp tọa độ GPS của người. Bản 
 
 Đặt `demo_target` thành `[latitude, longitude]` của người/điểm cứu. Nếu để `null`, camera vẫn phát hiện nhưng trạng thái là `DETECTED_NO_TARGET_POSITION` và không phát báo cáo người có tọa độ giả. GPS của phao chỉ dùng cho beacon, không bị dùng thay vị trí người.
 
-HOG là lựa chọn nhẹ sẵn có để thử người đứng nhìn thấy toàn thân; không phải mô hình phát hiện người chìm/nạn nhân. Tùy chọn YOLO dùng model COCO có class 0 là person. Không có phân loại đuối nước. Giao thức cũ bắt buộc trường risk: giá trị `0` trong demo là giá trị cố định (dashboard hiểu là safe), **không phải kết luận an toàn từ AI**; HOG gửi confidence=0 vì trọng số HOG không phải xác suất. Không dùng kết quả này làm đánh giá cứu nạn thực tế.
+HOG là lựa chọn nhẹ sẵn có để thử người đứng nhìn thấy toàn thân; không phải mô hình phát hiện người chìm/nạn nhân. Tùy chọn YOLO dùng model COCO có class 0 là person. Không có phân loại đuối nước. Giao thức cũ bắt buộc trường risk: demo gửi cố định `2` (cao, giống mặc định của F407 khi Pi không gửi risk) để dashboard bật cảnh báo cứu hộ, **không phải AI đánh giá mức nguy hiểm**; HOG chỉ cho có/không nên confidence gửi bằng ngưỡng `camera.confidence` (giá trị ước lệ, không phải xác suất). Không dùng kết quả này làm đánh giá cứu nạn thực tế.
 
 ## Build và nạp STM32
 
@@ -138,6 +138,6 @@ Từ thư mục `Phao_2`:
 python -m unittest discover -s tests -v
 ```
 
-12 test đã chạy đạt trên máy phát triển, trong đó 2 test biên dịch và chạy **parser, bộ phân xử và bộ tạo ACK thật của trạm bờ** bằng host GCC. Nếu không có host GCC, hai test tích hợp được đánh dấu skip.
+16 test đã chạy đạt trên máy phát triển, trong đó 2 test biên dịch và chạy **parser, bộ phân xử và bộ tạo ACK thật của trạm bờ** bằng host GCC. Nếu không có host GCC, hai test tích hợp được đánh dấu skip.
 
-ARM firmware chưa build/link thành công: `arm-none-eabi-gcc.exe` 14.2 trên máy hiện báo `Illegal System DLL Relocation`, kể cả khi chỉ gọi `--version`. Chưa nạp STM32, chưa chạy camera Pi 4, chưa đo RF/độ trễ ACK. GPS DroneCAN qua bộ chuyển chưa thể chốt decoder khi chưa biết model và dữ liệu UART. Đây là các phần cần xác minh phần cứng, không được suy ra từ host test.
+ARM firmware build/link đạt, không cảnh báo, với Arm GNU Toolchain 14.2 rel1 (FLASH 12 kB/64 kB, RAM 4,3 kB/20 kB). Chưa nạp STM32, chưa chạy camera Pi 4, chưa đo RF/độ trễ ACK. GPS DroneCAN qua bộ chuyển chưa thể chốt decoder khi chưa biết model và dữ liệu UART. Đây là các phần cần xác minh phần cứng, không được suy ra từ host test.
