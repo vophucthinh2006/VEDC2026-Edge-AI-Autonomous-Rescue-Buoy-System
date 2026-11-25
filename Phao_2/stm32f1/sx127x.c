@@ -35,17 +35,34 @@
 #define IRQ_RX_DONE              0x40U
 #define IRQ_PAYLOAD_CRC_ERROR    0x20U
 
-#define SPI_TIMEOUT_MS           5U
+#define SPI_TIMEOUT_MS           50U
 
-static void nss(sx127x_t *d, GPIO_PinState level) { HAL_GPIO_WritePin(d->nss_port, d->nss_pin, level); }
+/* About 50 us at 64 MHz. On the jumper-wired RA-02 writes are lost without a pause round NSS. */
+static void settle(void) { for (volatile uint32_t i = 0U; i < 400U; i++) { } }
+
+static void nss(sx127x_t *d, GPIO_PinState level)
+{
+    settle();
+    HAL_GPIO_WritePin(d->nss_port, d->nss_pin, level);
+    settle();
+}
+
+/* Byte by byte, each received in full before the next: HAL_SPI_Transmit alone can return early enough
+   for NSS to rise over the last bit. */
+static bool transfer(sx127x_t *d, const uint8_t *tx, uint8_t *rx, uint16_t len)
+{
+    for (uint16_t i = 0U; i < len; i++)
+        if (HAL_SPI_TransmitReceive(d->hspi, (uint8_t *)&tx[i], &rx[i], 1U, SPI_TIMEOUT_MS) != HAL_OK) return false;
+    return true;
+}
 
 static bool write_reg(sx127x_t *d, uint8_t addr, uint8_t value)
 {
-    uint8_t tx[2] = { (uint8_t)(addr | 0x80U), value };
+    uint8_t tx[2] = { (uint8_t)(addr | 0x80U), value }, rx[2];
     nss(d, GPIO_PIN_RESET);
-    HAL_StatusTypeDef st = HAL_SPI_Transmit(d->hspi, tx, 2U, SPI_TIMEOUT_MS);
+    bool ok = transfer(d, tx, rx, 2U);
     nss(d, GPIO_PIN_SET);
-    return st == HAL_OK;
+    return ok;
 }
 
 uint8_t SX127x_ReadReg(sx127x_t *d, uint8_t addr)
@@ -53,20 +70,20 @@ uint8_t SX127x_ReadReg(sx127x_t *d, uint8_t addr)
     uint8_t tx[2] = { (uint8_t)(addr & 0x7FU), 0U };
     uint8_t rx[2] = { 0U, 0U };
     nss(d, GPIO_PIN_RESET);
-    bool ok = HAL_SPI_TransmitReceive(d->hspi, tx, rx, 2U, SPI_TIMEOUT_MS) == HAL_OK;
+    bool ok = transfer(d, tx, rx, 2U);
     nss(d, GPIO_PIN_SET);
     return ok ? rx[1] : 0xFFU;   /* 0xFF = no answer, same as an unpowered chip with MISO high */
 }
 
 static bool write_fifo(sx127x_t *d, const uint8_t *data, uint8_t len)
 {
-    uint8_t buf[SX127X_MAX_PAYLOAD + 1U];
+    uint8_t buf[SX127X_MAX_PAYLOAD + 1U], rx[SX127X_MAX_PAYLOAD + 1U];
     buf[0] = (uint8_t)(REG_FIFO | 0x80U);
     for (uint8_t i = 0U; i < len; i++) buf[1U + i] = data[i];
     nss(d, GPIO_PIN_RESET);
-    HAL_StatusTypeDef st = HAL_SPI_Transmit(d->hspi, buf, (uint16_t)(len + 1U), SPI_TIMEOUT_MS);
+    bool ok = transfer(d, buf, rx, (uint16_t)(len + 1U));
     nss(d, GPIO_PIN_SET);
-    return st == HAL_OK;
+    return ok;
 }
 
 static bool read_fifo(sx127x_t *d, uint8_t *data, uint8_t len)
@@ -74,10 +91,10 @@ static bool read_fifo(sx127x_t *d, uint8_t *data, uint8_t len)
     uint8_t tx[SX127X_MAX_PAYLOAD + 1U] = { (uint8_t)(REG_FIFO & 0x7FU) };
     uint8_t rx[SX127X_MAX_PAYLOAD + 1U];
     nss(d, GPIO_PIN_RESET);
-    HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(d->hspi, tx, rx, (uint16_t)(len + 1U), SPI_TIMEOUT_MS);
+    bool ok = transfer(d, tx, rx, (uint16_t)(len + 1U));
     nss(d, GPIO_PIN_SET);
     for (uint8_t i = 0U; i < len; i++) data[i] = rx[1U + i];
-    return st == HAL_OK;
+    return ok;
 }
 
 static bool set_mode(sx127x_t *d, uint8_t mode) { return write_reg(d, REG_OP_MODE, (uint8_t)(MODE_LONG_RANGE | mode)); }
