@@ -35,6 +35,7 @@ const REASONS = {
   human_standoff: ['Giữ khoảng cách với người cần cứu', 'ok'],
   arrived: ['Đã tới điểm', 'idle'],
   no_goal: ['Không có điểm đến', 'idle'],
+  stationary: ['Phao đứng yên', 'idle'],
   obstacle_too_close: ['Dừng: vật cản quá gần trên hướng đi', 'bad'],
   bow_blocked: ['Dừng: mũi kẹt sát vật cản, không quay ra được', 'bad'],
   overspeed: ['Thả ga: thuyền chạy nhanh hơn lệnh', 'warn'],
@@ -117,6 +118,14 @@ function renderProgress(id, ahead, b) {
   else put('h-prog', `Đang tới điểm ${ahead.k}/${ahead.n}: còn ${fmtDist(ahead.remaining)} tới ${ahead.loop ? 'hết vòng' : 'điểm cuối'}${eta(ahead.remaining)}`, 'ok');
 }
 
+// The Pi's detector in words and a tone; d: the diagnostics frame, undefined before the first one
+export function aiState(d) {
+  if (!d) return ['Chưa có dữ liệu', 'idle'];
+  if (Number.isFinite(d.fps)) return ['Đang nhận diện', d.fps < FPS_LOW ? 'warn' : 'ok'];
+  if (d.reason === 'pi_silent') return ['Pi im lặng', 'bad'];
+  return [d.mission === 'I' ? 'Tắt (chưa có lộ trình)' : 'Pi chưa báo', 'idle'];
+}
+
 function renderDiag(id) {
   const d = state.diag.get(id);
   $('d-diag').hidden = !d;
@@ -131,8 +140,8 @@ function renderDiag(id) {
   const [driveText, driveTone] = DRIVE[d.drive] || ['-', 'idle'];
   put('g-drive', driveText + (d.drive === 1 && ARM[d.arm] ? ` (${ARM[d.arm]})` : ''), driveTone);
   // The Pi's detector: frames a second over its last 10 s (Rasp_Pi/modules/ai_vision.py VisionWorker.fps)
-  put('g-fps', Number.isFinite(d.fps) ? `${d.fps.toFixed(1)} khung/giây` : d.mission === 'I' ? 'Tắt (chưa có lộ trình)' : 'Pi chưa báo',
-      !Number.isFinite(d.fps) ? 'idle' : d.fps < FPS_LOW ? 'warn' : 'ok');
+  const [aiText, aiTone] = aiState(d);
+  put('g-fps', Number.isFinite(d.fps) ? `${d.fps.toFixed(1)} khung/giây` : aiText, aiTone);
   put('g-pack', Number.isFinite(d.volts) ? `${d.volts.toFixed(2)} V` : 'Chưa đọc được INA226', 'idle');
   put('g-recov', `Bus I2C ${d.i2c} lần, IMU ${d.imu} lần`, d.i2c || d.imu ? 'warn' : 'ok');
 }

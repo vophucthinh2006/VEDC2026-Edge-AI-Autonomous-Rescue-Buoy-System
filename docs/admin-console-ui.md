@@ -8,7 +8,7 @@ Bản đồ toàn màn hình. Thông số đọc bằng số và hình, ít câu
 | Vùng | Phần tử | Nội dung |
 |---|---|---|
 | Thanh trên | `#pill`, `#st-sats`, `#conn` | Phao đang chọn và trạng thái của nó (một dòng), số vệ tinh trạm bờ, kết nối |
-| Hàng thẻ | `#gauges` (`js/features/gauges.js`, `css/gauges.css`) | Mưa 24 giờ, lắc ngang, chúi dọc, hướng, pin, LoRa |
+| Hàng thẻ | `#gauges` (`js/features/gauges.js`, `css/gauges.css`) | AI nhận diện (fps), lắc ngang, chúi dọc, hướng, pin, LoRa |
 | Rail phải | `#rail` | Cần cứu, Sức khoẻ, Đội phao, Sự kiện, Mưa/ngập, Chú giải. Mỗi nút mở một ngăn trong `#drawer` |
 | Giữa đáy | `#ctl` | Đổi phao ‹ ›, tốc độ GPS, gọi về bờ (`/api/return`) |
 | Thanh dưới | `#dock` | Giám sát / Lộ trình / Đội tàu, đèn, DỪNG PHAO (`#d-hold`) |

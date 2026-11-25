@@ -2,6 +2,7 @@
 // và cảnh báo lật phao / xác nhận nhận đồ cứu hộ.
 // Máy chủ đã bỏ bản phao gửi lặp và gộp báo cáo của mọi phao cách nhau dưới 6 m thành một người; phao báo đầu là
 // chủ (docs/victim-claim.md). Viền chấm theo màu phao chủ; admin đánh dấu đã cứu, nhả, hoặc giao cho phao khác.
+import { tellVictim } from './demo.js';
 import { state, RISKS, LORA_GOOD_M, LORA_WEAK_M } from '../state.js';
 import { hm, fmtAgo } from '../util/format.js';
 import { distM } from '../util/geo.js';
@@ -214,7 +215,7 @@ export function onVictimMessage(m) {
   if (!v || !RISKS[v.risk]) return;
   state.eventBuoys.add(v.buoy);
   const before = victims.get(v.vid);
-  const was = before && { status: before.status, owner: before.owner, seen: seenBy(before).length };
+  const was = before && { status: before.status, owner: before.owner, seen: seenBy(before).length, risk: before.risk };
   putVictim(v);
   renderVictims();
   if (m.new || !before) {
@@ -224,6 +225,7 @@ export function onVictimMessage(m) {
   }
   // Nhận nạn nhân: một phao khác thấy cùng người (nó đi tiếp), người đã được cứu, được nhả, đổi chủ
   if (seenBy(v).length > was.seen) {
+  tellVictim(v, was);
     const boat = seenBy(v).at(-1);
     log('claim', `${boat} cũng thấy người của ${ownerOf(v) || v.buoy}: đi tiếp, không dừng`, v.last_at, `v${v.vid}@${v.first_at}:seen:${boat}`);
   }
