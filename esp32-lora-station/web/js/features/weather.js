@@ -9,7 +9,7 @@
 // the radar and flood tiles come straight from each service, the DEM through the Worker (util/basemap.js). Everything sits in a pane of its own, over the base map and
 // under the boats, so the dark map's colour inversion does not touch it.
 import { fmtDist, hm } from '../util/format.js';
-import { demUrls } from '../util/basemap.js';
+import { demUrls, MAX_ZOOM } from '../util/basemap.js';
 
 const STORE_KEY = 'weather.layers';
 const REFRESH_MS = 10 * 60 * 1000;
@@ -48,8 +48,6 @@ const dayText = d => `${d.getDate()}/${d.getMonth() + 1}`;
 function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(on)); } catch { /* not remembered */ } }
 function load() { try { on = { ...on, ...(JSON.parse(localStorage.getItem(STORE_KEY)) || {}) }; } catch { /* defaults */ } }
 
-// The forecast last fetched ({ hours: [{ t, rain_mm, prob, wind_kmh }], stale }) or null
-export const forecast = () => data?.forecast || null;
 
 // ---- data ----------------------------------------------------------------------------------
 async function fetchJson(url) {
@@ -91,7 +89,6 @@ async function refresh() {
     try { gauges = await fetchJson('/api/gauges'); } catch { /* keep the last list */ }
   }
   renderForecast();
-  window.dispatchEvent(new Event('weatherupdate'));   // the console's rain gauge (features/gauges.js)
   renderRadar();
   renderGauges();
   renderDepthInfo();
@@ -147,7 +144,7 @@ function renderRadar() {
   ui.radarSlider.max = String(r.frames.length - 1);
   if (frame < 0 || frame >= r.frames.length) frame = r.frames.length - 1;
   if (!radarLayer) {
-    radarLayer = L.tileLayer(radarUrl(frame), { pane: 'weather', opacity: 0.7, maxNativeZoom: 7, maxZoom: 19,
+    radarLayer = L.tileLayer(radarUrl(frame), { pane: 'weather', opacity: 0.7, maxNativeZoom: 7, maxZoom: MAX_ZOOM,
       attribution: 'Mưa: <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>' });
   }
   showFrame(frame);
@@ -187,7 +184,7 @@ function renderFlood() {
   if (layers.flood) layers.flood.remove();
   if (!on.flood) return;
   const day = new Date(Date.now() - Number(ui.floodDay.value || 1) * 86400e3);
-  layers.flood = L.tileLayer(FLOOD_URL.replace('{time}', dayStr(day)), { pane: 'weather', opacity: 0.85, maxNativeZoom: 9, maxZoom: 19,
+  layers.flood = L.tileLayer(FLOOD_URL.replace('{time}', dayStr(day)), { pane: 'weather', opacity: 0.85, maxNativeZoom: 9, maxZoom: MAX_ZOOM,
     attribution: 'Ngập: <a href="https://www.earthdata.nasa.gov/data/instruments/viirs" target="_blank" rel="noopener">NASA</a>' }).addTo(map);
 }
 
@@ -268,7 +265,7 @@ function renderDepth() {
   ui.depthRow.hidden = !on.depth;
   if (!on.depth) { layers.depth?.remove(); return; }
   if (!layers.depth) {
-    layers.depth = new DepthLayer({ pane: 'weather', opacity: 1, maxZoom: 19,
+    layers.depth = new DepthLayer({ pane: 'weather', opacity: 1, maxZoom: MAX_ZOOM,
       attribution: 'DEM: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Terrain Tiles</a>' });
   }
   if (!map.hasLayer(layers.depth)) layers.depth.addTo(map);
