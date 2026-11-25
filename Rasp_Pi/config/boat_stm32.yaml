@@ -48,4 +48,7 @@ camera:
     # 30 was tried in the simulator: with the camera 0.33 m above the water that row was mostly sky.
     mode: raster
     tilt_rows_deg: [0, 20]
+    # Ease the turns: slow down into each end and speed up out of it, not back at full speed at once
+    # (the pan looked jerky). 30 deg/s2 at 15 deg/s: the last 3.75 deg, about 0.5 s more a turn.
+    sweep_accel_deg_s2: 30
   tilt_enabled: true          # $CAM,seq,pan,tilt; the tilt follows the person too (settings.yaml tilt_*)

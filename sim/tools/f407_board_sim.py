@@ -64,7 +64,9 @@ class HeadingControllerT(ctypes.Structure):
 
 
 class CameraPanT(ctypes.Structure):
-    _fields_ = [("angle_deg", ctypes.c_float)]
+    # camera_pan_t (STM32F4/App/camera_pan.h), field for field
+    _fields_ = [("angle_deg", ctypes.c_float), ("velocity_dps", ctypes.c_float), ("last_target_deg", ctypes.c_float),
+                ("target_rate_dps", ctypes.c_float), ("since_target_s", ctypes.c_float)]
 
 
 def load_firmware(path: Path) -> ctypes.CDLL:
@@ -205,7 +207,9 @@ def main() -> int:
     pi = PiCommand()
     heading = HeadingControllerT()
     fw.HeadingController_Reset(ctypes.byref(heading))
-    pan, tilt = CameraPanT(0.0), CameraPanT(0.0)
+    pan, tilt = CameraPanT(), CameraPanT()
+    fw.CameraPan_Init(ctypes.byref(pan))     # as the firmware: no target yet, so the first gives no speed
+    fw.CameraTilt_Init(ctypes.byref(tilt))
     heading_auto = False
     rear = [0.0, 0.0]
     steer = 0.0

@@ -85,6 +85,13 @@ vehicle:
   lidar_required: false
   imu_stale_s: 0.30
   gps_stale_s: 2.0
+  # AUTO waits until the BNO055's compass reports this calibration (0..3); it starts at 0 after every
+  # power-up and climbs once the boat is turned about. 0 turns the wait off.
+  min_mag_calib: 2
+  # The compass's bias learned from the GPS course on straight runs (modules/heading_bias.py), above
+  # min_speed_mps with a 3D fix, after straight_s without turning faster than max_rate_dps; tau_s the
+  # time constant, max_deg the most it may correct. Back to 0 at each start of main.py.
+  heading_bias: {enabled: true, tau_s: 20.0, min_speed_mps: 0.3, max_deg: 60.0, max_rate_dps: 3.0, straight_s: 2.0}
   # true: no AUTO to a waypoint or home without a fresh GPS fix (gps_stale_or_no_fix); a person is
   # followed anyway (the camera's bearing). false (main.py, indoors where no fix ever comes): the
   # route's speed along the bow instead (bow_no_gps), the LiDAR still avoiding.
@@ -197,6 +204,7 @@ camera:
     dwell_frames: 3
     sweep_limit_deg: 60
     sweep_rate_deg_s: 30
+    sweep_accel_deg_s2: 0       # > 0: speed eased in and out of each end (config/boat_stm32.yaml); 0: plain triangle
     tilt_rows_deg: [0, 20]
     tilt_settle_s: 0.6
     modes: [AUTO]

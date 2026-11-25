@@ -422,7 +422,7 @@ lý do `backing_off`), mỗi lần tối đa 3 s. F407 cũ không biết `BACK` 
 STM32 → Raspberry Pi:
 
 ```
-$IMU,seq,pitch,roll,yaw,imu_ok,overturned*CS\n
+$IMU,seq,pitch,roll,yaw,imu_ok,overturned,mag_calib*CS\n           (mag_calib: la bàn 0..3; Pi chặn AUTO dưới 2)
 $GPS,seq,lat,lon,fix,hdop,speed,course*CS\n
 $SYS,seq,battery_v,motor_fault,estop,link_ok,armed,auto,confirm_presses,battery_pct*CS\n
 $LNK,seq,shore_ok,heard_ago_s,home_valid,home_lat,home_lon,hold,ret*CS\n     (mỗi giây)

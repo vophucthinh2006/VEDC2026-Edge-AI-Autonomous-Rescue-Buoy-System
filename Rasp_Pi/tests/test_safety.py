@@ -63,3 +63,22 @@ class GpsGateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompassGateTest(unittest.TestCase):
+    """Right after power-up the BNO055's compass is uncalibrated and its heading wrong: no AUTO."""
+
+    def check(self, mag_calib, mode="AUTO"):
+        now = monotonic()
+        snapshot = Snapshot(ImuState(yaw_deg=90.0, imu_ok=True, timestamp=now, mag_calib=mag_calib), GpsState(fix=3, timestamp=now),
+                            SysState(timestamp=now), (), now, WAYPOINT, None)
+        return SafetyArbiter(VEHICLE | {"min_mag_calib": 2}).check(snapshot, NavCommand(mode, 0.3, 55.0, "waypoint"))
+
+    def test_an_uncalibrated_compass_holds_auto(self):
+        self.assertEqual((self.check(1).mode, self.check(1).reason), ("STOP", "compass_calibrating"))
+
+    def test_calibration_2_drives(self):
+        self.assertEqual(self.check(2).reason, "waypoint")
+
+    def test_backing_off_needs_no_compass(self):
+        self.assertEqual(self.check(0, "BACK").mode, "BACK")

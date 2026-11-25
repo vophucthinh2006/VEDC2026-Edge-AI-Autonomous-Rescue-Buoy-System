@@ -14,7 +14,9 @@ COLUMNS = ("time", "t_s", "mode", "armed", "phase", "fix", "lat", "lon", "speed_
            "wp_dist_m", "people_found", "person_bearing_deg", "person_range_m", "person_confidence", "obstacles", "nearest_obstacle_m",
            "lidar_age_s", "board", "battery_v", "current_a", "estop", "alarm", "lora_ok",
            # main.py: the $NAV command and the route's waypoint gone to (wp_index "k/n")
-           "hdop", "course_deg", "cmd_mode", "cmd_speed_mps", "cmd_heading_deg", "reason", "wp_index", "wp_lat", "wp_lon")
+           "hdop", "course_deg", "cmd_mode", "cmd_speed_mps", "cmd_heading_deg", "reason", "wp_index", "wp_lat", "wp_lon",
+           # main.py: the compass's bias learned from the GPS course (modules/heading_bias.py); yaw_deg is yaw minus it
+           "heading_bias_deg")
 
 
 def row(snap: Snapshot, now: float, started: float, phase: str, found: int, board: object | None, board_online: bool) -> dict:

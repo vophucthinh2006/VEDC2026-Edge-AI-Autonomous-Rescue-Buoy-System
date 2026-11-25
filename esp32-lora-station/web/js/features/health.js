@@ -42,6 +42,7 @@ const REASONS = {
   pi_silent: ['Pi không gửi lệnh (Pi tắt, main.py dừng hoặc mất UART)', 'bad'],
   imu_stale: ['Dừng: mất dữ liệu IMU', 'bad'],
   gps_stale_or_no_fix: ['Dừng: mất GPS', 'bad'],
+  compass_calibrating: ['Chờ la bàn: xoay phao vài vòng để hiệu chuẩn', 'warn'],
   lidar_stale: ['Dừng: mất LiDAR', 'bad'],
   attitude_fault: ['Dừng: phao nghiêng quá mức', 'bad'],
   stm32_fault_or_estop: ['Dừng: F407 báo lỗi', 'bad'],

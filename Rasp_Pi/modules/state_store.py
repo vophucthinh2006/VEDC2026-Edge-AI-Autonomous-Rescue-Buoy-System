@@ -18,6 +18,7 @@ class ImuState:
     imu_ok: bool = False
     overturned: bool = False
     timestamp: float = 0.0
+    mag_calib: int = 3   # BNO055 magnetometer 0..3 ($IMU 7th field); 3 when not reported (Pixhawk, older F407)
 
 
 @dataclass(frozen=True)
@@ -183,9 +184,9 @@ class StateStore:
         with self._lock:
             self._nav = NavState(self._nav.steer_bearing_deg, self._nav.target_bearing_deg, route, self._nav.timestamp)
 
-    def update_imu(self, pitch: float, roll: float, yaw: float, imu_ok: bool, overturned: bool) -> None:
+    def update_imu(self, pitch: float, roll: float, yaw: float, imu_ok: bool, overturned: bool, mag_calib: int = 3) -> None:
         with self._lock:
-            self._imu = ImuState(pitch, roll, yaw % 360.0, imu_ok, overturned, monotonic())
+            self._imu = ImuState(pitch, roll, yaw % 360.0, imu_ok, overturned, monotonic(), mag_calib)
 
     def update_gps(self, lat: float, lon: float, fix: int, hdop: float, speed: float, course: float) -> None:
         with self._lock:

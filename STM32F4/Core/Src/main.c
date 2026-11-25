@@ -88,7 +88,7 @@ static void send_telemetry(uint16_t sequence)
      and the front motor braked, while the F407 itself stayed armed. */
   bool imu_ok = control.last_imu_ms != 0U && (uint32_t)(now - control.last_imu_ms) <= IMU_TIMEOUT_MS;
 
-  snprintf(payload, sizeof(payload), "%u,%.2f,%.2f,%.2f,%u,%u", sequence, imu.pitch_deg, imu.roll_deg, imu.heading_deg, imu_ok ? 1U : 0U, control.overturned ? 1U : 0U);
+  snprintf(payload, sizeof(payload), "%u,%.2f,%.2f,%.2f,%u,%u,%u", sequence, imu.pitch_deg, imu.roll_deg, imu.heading_deg, imu_ok ? 1U : 0U, control.overturned ? 1U : 0U, (unsigned)imu.mag_calibration);
   Protocol_Send(&huart4, "IMU", payload);
   snprintf(payload, sizeof(payload), "%u,%.6f,%.6f,%u,%.1f,%.2f,%.1f", sequence, gps.latitude_deg, gps.longitude_deg, gps.fix, gps.hdop, gps.speed_mps, gps.course_deg);
   Protocol_Send(&huart4, "GPS", payload);

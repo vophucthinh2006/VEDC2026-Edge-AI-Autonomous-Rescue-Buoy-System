@@ -24,6 +24,7 @@ typedef struct {
     float pitch_deg;     /* BNO055 Euler pitch: -90 .. +90 */
     float yaw_rate_dps;  /* turn rate, positive clockwise like heading_deg */
     uint8_t calibration; /* system calibration, 0 = none .. 3 = full */
+    uint8_t mag_calibration; /* magnetometer 0..3: the heading is trusted from 2 (the Pi holds AUTO below) */
     bool valid;          /* last read succeeded */
 } bno055_euler_t;
 

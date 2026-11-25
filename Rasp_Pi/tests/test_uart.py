@@ -97,6 +97,12 @@ class Stm32LinesTest(unittest.TestCase):
         self.feed("SYS", 9, "11.84", 0, 0, 1)
         self.assertEqual(self.state.snapshot().system.confirm_presses, -1)
 
+    def test_imu_compass_calibration_field(self):
+        self.feed("IMU", 1, "0.00", "0.00", "90.00", 1, 0, 1)
+        self.assertEqual(self.state.snapshot().imu.mag_calib, 1)
+        self.feed("IMU", 2, "0.00", "0.00", "90.00", 1, 0)   # firmware before 2026-11-22: taken as calibrated
+        self.assertEqual(self.state.snapshot().imu.mag_calib, 3)
+
     def test_gps_fix_quality_1_is_a_fix_the_boat_may_drive_on(self):
         # A plain GPS fix (GGA quality 1), what the boat's receiver reports, was read as "no fix":
         # safety.py stopped every waypoint with gps_stale_or_no_fix.
