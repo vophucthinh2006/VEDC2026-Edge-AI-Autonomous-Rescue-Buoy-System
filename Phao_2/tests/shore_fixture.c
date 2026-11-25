@@ -6,6 +6,12 @@
 #include <string.h>
 int main(int argc, char **argv) {
     if (argc != 3) return 1;
+    if (!strcmp(argv[1], "diag")) {
+        lora_diag_t dg;
+        if (!lora_diag_parse(argv[2], &dg)) return 4;
+        printf("%s %s fps=%d\n", dg.id, dg.reason, dg.has_fps ? (int)(dg.fps * 10.0f + 0.5f) : -1);
+        return 0;
+    }
     lora_event_t event;
     /* risk 0 = safe: the dashboard would not raise a rescue alert. */
     if (!lora_event_parse(argv[2], &event) || event.type != 'V' || !event.has_position || event.risk == 0) return 2;

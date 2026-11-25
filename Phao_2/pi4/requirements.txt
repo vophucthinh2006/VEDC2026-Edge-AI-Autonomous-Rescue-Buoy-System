@@ -1,3 +1,3 @@
 pyserial>=3.5,<4
 # Install opencv and picamera2 through Raspberry Pi OS apt packages.
-# Optional YOLO: pip install ultralytics (requires a compatible torch wheel).
+# detector yolo_movenet: Phao 1's packages too, ../../Rasp_Pi/requirements.txt (its .venv can run this program).

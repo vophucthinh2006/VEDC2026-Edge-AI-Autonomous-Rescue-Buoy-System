@@ -36,15 +36,27 @@ def ack(frame, buoy_id):
     skip = coordinate(f[9], f[10]) if len(f) == 11 else None
     return seq, skip
 
-def victim(buoy_id, seq, pos, confidence, count):
+def offset(origin, bearing_deg, metres):
+    """Point metres away from origin (lat, lon) along a compass bearing."""
+    lat, lon = origin
+    return (lat + metres*math.cos(math.radians(bearing_deg))/111_320.0,
+            lon + metres*math.sin(math.radians(bearing_deg))/(111_320.0*math.cos(math.radians(lat))))
+
+def victim(buoy_id, seq, pos, confidence, count, risk=2):
     lat, lon = coordinate(*pos)
     # Legacy protocol requires risk 0..3 (0 = safe; the dashboard alerts only on risk > 0).
-    # Fixed 2 = high, the F407 default when its Pi sends no risk: not a drowning assessment.
-    return f"ev={buoy_id},{seq},V,{lat:.6f},{lon:.6f},2,{confidence:.2f},{count}"
+    # Default 2 = high, the F407 default when its Pi sends no risk: not a drowning assessment.
+    return f"ev={buoy_id},{seq},V,{lat:.6f},{lon:.6f},{risk},{confidence:.2f},{count}"
 
 def beacon(buoy_id, seq, pos, count):
     location = f"{pos[0]:.6f},{pos[1]:.6f}" if pos else "NO_FIX"
     return f"id={buoy_id},{location},r=0,p=0,y=0,t=-1,m=S,i=0,c=0,q={seq},v={count}"
+
+def diag(buoy_id, fps):
+    """The F407's diagnostics frame (STM32F4/App/diag_frame.h) for a buoy that stands still: no IMU, no motors.
+    fps: the detector's frames a second, None while it is off."""
+    rate = "" if fps is None else f",f={min(999, round(fps*10))}"
+    return f"dg={buoy_id},n=stationary,s=-,w=0/0,a=1,d=1,k=0:0{rate}"
 
 class Claims:
     def __init__(self, radius=6, ttl=120):

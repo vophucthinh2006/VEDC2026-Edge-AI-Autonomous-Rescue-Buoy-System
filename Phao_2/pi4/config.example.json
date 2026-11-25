@@ -9,11 +9,16 @@
   "claim_radius_m": 6,
   "claim_ttl_s": 120,
   "demo_target": null,
+  "assumed_position": null,
+  "assumed_heading_deg": 0,
+  "max_range_m": 10,
+  "demo_flag": "~/demo_gps",
+  "demo_url": null,
   "camera": {
     "backend": "picamera2",
     "device": 0,
-    "detector": "hog",
-    "model": "models/yolo11n.pt",
+    "detector": "yolo_movenet",
+    "rasp_pi": "../../Rasp_Pi",
     "confidence": 0.6,
     "confirm_frames": 3
   }

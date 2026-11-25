@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from test_prototype import ROOT, config
 from main import Engine
+from protocol import diag
 
 @unittest.skipUnless(shutil.which("gcc"), "host gcc required for actual shore C integration")
 class ShoreIntegration(unittest.TestCase):
@@ -28,6 +29,12 @@ class ShoreIntegration(unittest.TestCase):
         e.receive(reply,2)
         self.assertIsNone(e.pending)
         return e
+
+    def test_the_station_reads_the_diagnostics_frame(self):
+        read = lambda fps: subprocess.check_output([str(self.exe), "diag", diag("PHAO-02", fps)], text=True).strip()
+        self.assertEqual(read(2.34), "PHAO-02 stationary fps=23")
+        self.assertEqual(read(None), "PHAO-02 stationary fps=-1")
+        self.assertEqual(read(500), "PHAO-02 stationary fps=999")
 
     def test_phao1_already_owns_person(self):
         e=self.run_case("existing")
