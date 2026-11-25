@@ -127,7 +127,7 @@ export function renderPlace() {
     : 'Chưa có phao nào gửi vị trí.';
   // Rebuild only when the set of buoys in range changes; distances, status tags and the people count
   // update in place, so a button is never swapped out under the pointer
-  const peopleText = `${people} người cần cứu trong bán kính này`;
+  const peopleText = `${people} vùng cứu hộ trong bán kính này`;
   const sig = JSON.stringify([place.name, radiusKm, !!people, inside.map(x => x.id), !inside.length && nearest?.id]);
   if (sig === lastSig) {
     const p = panel();

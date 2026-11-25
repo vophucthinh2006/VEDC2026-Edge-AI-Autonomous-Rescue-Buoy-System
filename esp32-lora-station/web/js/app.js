@@ -1,5 +1,5 @@
 // Điểm vào của dashboard: bản đồ, phao, lộ trình, đăng nhập, WebSocket.
-// Các panel phụ (thẻ phao, người cần cứu, dòng sự kiện, tìm địa chỉ, tiện ích bản đồ) nằm trong js/features/.
+// Các panel phụ (thẻ phao, vùng cứu hộ, dòng sự kiện, tìm địa chỉ, tiện ích bản đồ) nằm trong js/features/.
 import { state, emit, pushHistory, readBuoy, isReturning, buoyStatus, STATUS, signalOf, SIGNAL, batteryOf, stationStatus,
   LORA_GOOD_M, LORA_WEAK_M } from './state.js';
 import { distM } from './util/geo.js';
@@ -507,7 +507,7 @@ for (const b of document.querySelectorAll('#mode button')) b.addEventListener('c
 // The rail on the right opens one panel at a time in the drawer beside it: the people to rescue, the buoy's
 // health, the fleet, the events, the weather and the legend. Route and Fleet mode use the drawer for their own
 // panel. On a phone the rail and the drawer are the bottom sheet.
-const PANELS = { people: 'Người cần cứu', detail: 'Sức khoẻ phao', buoys: 'Đội phao', log: 'Sự kiện', wx: 'Mưa và ngập', legend: 'Chú giải' };
+const PANELS = { people: 'Vùng cứu hộ', detail: 'Sức khoẻ phao', buoys: 'Đội phao', log: 'Sự kiện', wx: 'Mưa và ngập', legend: 'Chú giải' };
 let panel = store.get('panel', 'people');   // first visit: the people to rescue, the job
 if (panel && !(panel in PANELS)) panel = 'people';
 

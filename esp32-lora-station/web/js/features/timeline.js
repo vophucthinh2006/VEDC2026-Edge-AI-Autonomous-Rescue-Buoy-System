@@ -148,7 +148,7 @@ export function initTimeline() {
     b.addEventListener('click', () => { shown = b.dataset.g; clearUnseen(); render(); });
   }
   $('tl-clear').addEventListener('click', () => {
-    if (!confirm('Xoá nhật ký sự kiện trên trình duyệt này? Người đang cần cứu vẫn hiện lại từ máy chủ.')) return;
+    if (!confirm('Xoá nhật ký sự kiện trên trình duyệt này? Các vùng cứu hộ vẫn hiện lại từ máy chủ.')) return;
     rows.people.length = 0; rows.ops.length = 0;
     unseen.people = 0; unseen.ops = 0;
     save(); updateBadge(); render();
