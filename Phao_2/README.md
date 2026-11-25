@@ -6,7 +6,7 @@ Thư mục này là phần bổ sung độc lập trong repository VEDC. Không 
 
 - Pi 4 nhận camera CSI qua Picamera2 (mặc định), hoặc camera USB qua OpenCV.
 - Nhận diện người; cần 3 khung hình liên tiếp có người trước khi báo.
-- Pi nối USB–UART với USART1 STM32F103C8T6. STM32 điều khiển Ra-02 bằng SPI1, nhận UART GPS qua USART2.
+- Pi nối USB–UART với USART1 STM32F103C8T6. STM32 điều khiển Ra-02 bằng SPI1, nhận GPS DroneCAN qua CAN (PA11/PA12).
 - Báo người bằng đúng khung `ev=PHAO-02,...,V,...` của hệ thống hiện tại.
 - Trạm bờ ESP32 phân xử: phao báo trước giữ điểm cứu; ACK 11 trường báo tọa độ cần bỏ qua cho phao khác. Pi 2 nhận ACK và dừng báo lại điểm đó trong 120 s (được gia hạn khi trạm nhắc lại).
 - `REPORT_ACKED` chỉ có nghĩa báo cáo đã được xác nhận; giao thức ACK không chứa ID người sở hữu. Xem chủ điểm cứu trên dashboard.
@@ -38,26 +38,23 @@ Firmware tham chiếu HAL/CMSIS, startup và linker của `../STM32F103`; cần 
 | PB1 | Có thể nối DIO0 theo sơ đồ cũ; firmware đọc IRQ qua SPI, không cần ngắt DIO0 |
 | PA9 TX | RX của USB–UART |
 | PA10 RX | TX của USB–UART |
-| PA3 RX | TX UART của bộ chuyển CAN–UART |
-| PA2 TX | RX UART của bộ chuyển CAN–UART, để dự phòng; firmware hiện chỉ đọc GPS |
+| PA11 CAN_RX | RXD (CRX) của module thu phát CAN |
+| PA12 CAN_TX | TXD (CTX) của module thu phát CAN |
 | PA13 / PA14 | SWDIO / SWCLK để nạp ST-Link |
-| GND | GND chung STM32, Ra-02, USB–UART, CAN–UART |
+| GND | GND chung STM32, Ra-02, USB–UART, module CAN, GPS |
 
 USB–UART cắm vào USB Pi 4. **Không đấu PA9/PA10 tới GPIO8/10 của Pi trong cấu hình này.** Chọn adapter UART TTL **3,3 V**, không phải RS232. Chân VCC adapter không cần nối nếu STM32 đã có nguồn riêng. Ra-02 dùng nguồn 3,3 V đủ dòng, tụ 100 nF + 10–47 µF gần module; anten phù hợp 433 MHz. BOOT0=0. Giữ PA13/PA14 cho SWD.
 
-## GPS CUAV NEO 3X và bộ CAN–UART
+## GPS CUAV NEO 3X qua CAN
 
 Tài liệu hãng: https://doc.cuav.net/gps/neo-series-gnss/en/neo-3x.html#connect
 
-NEO 3X dùng DroneCAN và nguồn vào 4,7–5,2 V. Không nối CAN-H/CAN-L trực tiếp vào UART. Nguồn GPS và mức logic UART của bộ chuyển là hai thông số khác nhau.
+NEO 3X dùng DroneCAN, nguồn 4,7–5,2 V. CANH/CANL của GPS nối vào **module thu phát CAN** (TJA1050, SN65HVD230...), TXD/RXD của module vào PA12/PA11. Nguồn module theo loại chip. Giữa CANH và CANL (tắt nguồn) nên đo được khoảng 60 Ω.
 
-**Thông tin còn thiếu: model bộ CAN–UART, baud UART và một mẫu dữ liệu đầu ra.** Bộ chuyển CAN thô sang serial không tự biến DroneCAN thành NMEA. Bản này không giả định bộ chuyển có bộ giải mã DroneCAN.
-
-- STM32 nhận byte UART và gửi lên Pi dưới dạng `GPSHEX,<hex>`; Pi lưu nguyên byte vào `logs/gps_uart.bin` để kiểm tra. Có thống kê `gps_lost` trong log nếu dữ liệu tràn bộ đệm.
-- Pi chỉ chấp nhận RMC/GGA NMEA có checksum đúng và fix hợp lệ; fix quá 3 s thành `NO_FIX`.
-- Nếu bộ chuyển xuất SLCAN, khung nhị phân riêng hoặc DroneCAN thô, GPS vẫn được ghi raw nhưng **chưa có tọa độ**. Cần bổ sung decoder đúng loại bộ chuyển sau khi biết model/mẫu dữ liệu.
-- Mặc định UART GPS 115200 baud; thay tham số CMake `GPS_BAUD` theo thực tế.
-- **Cảnh báo băng thông:** hex làm gấp đôi số byte, còn đường STM32→Pi chỉ 115200 baud (~11,5 kB/s, dùng chung với `RX,`/`TXDONE`). GPS chạy **liên tục** ở 115200 (~11,5 kB/s) cần ~23 kB/s hex, tức vượt gấp đôi khả năng của đường lên Pi, nên chắc chắn mất dữ liệu (`gps_lost` tăng). Dữ liệu GPS thực tế nên dưới ~4 kB/s: đặt bộ chuyển xuất ở 9600–38400 baud hoặc giảm tần số/bớt loại bản tin (chỉ RMC/GGA, 1–5 Hz), rồi build lại với `GPS_BAUD` tương ứng và kiểm tra `gps_lost=0`. Firmware xả tối đa 4 dòng 64 byte mỗi 10 ms để không chặn vòng radio quá lâu.
+- `dronecan.c` (không phụ thuộc HAL, có host test): cấp node ID 50 cho GPS nếu nó xin (F103 là node 100), phát NodeStatus mỗi giây, giải mã `Fix2` (1063). Chỉ một thiết bị DroneCAN được cấp ID.
+- CAN 1 Mbit/s, lấy mẫu 81 %. Firmware dùng thạch anh 8 MHz; nếu không có thì về HSI (sai số 1 %, CAN có thể lỗi).
+- Gửi lên Pi tối đa 1 lần/s dưới dạng câu GGA trong dòng `GPSHEX,<hex>`; Pi chỉ nhận RMC/GGA đúng checksum, fix quá 3 s thành `NO_FIX`. GGA không có giờ và độ cao. Pi vẫn ghi vào `logs/gps_uart.bin`.
+- Dòng `STATUS` (mỗi 5 s): `can_rx` tổng số khung CAN, `can_lost` khung mất, `can_esr` thanh ghi lỗi (REC, TEC), `gps_node`, `gps_fix` (0 không, 2 = 2D, 3 = 3D), `gps_sats`, `gps_msgs`, `gps_bad` (sai CRC). `can_rx=0` là không có tín hiệu CAN: kiểm tra dây, nguồn GPS, điện trở đầu cuối.
 
 ## Vị trí người trong demo
 
@@ -65,18 +62,18 @@ Camera một mắt không tự cung cấp tọa độ GPS của người. Bản 
 
 Đặt `demo_target` thành `[latitude, longitude]` của người/điểm cứu. Nếu để `null`, camera vẫn phát hiện nhưng trạng thái là `DETECTED_NO_TARGET_POSITION` và không phát báo cáo người có tọa độ giả. GPS của phao chỉ dùng cho beacon, không bị dùng thay vị trí người.
 
-HOG là lựa chọn nhẹ sẵn có để thử người đứng nhìn thấy toàn thân; không phải mô hình phát hiện người chìm/nạn nhân. Tùy chọn YOLO dùng model COCO có class 0 là person. Không có phân loại đuối nước. Giao thức cũ bắt buộc trường risk: demo gửi cố định `2` (cao, giống mặc định của F407 khi Pi không gửi risk) để dashboard bật cảnh báo cứu hộ, **không phải AI đánh giá mức nguy hiểm**; HOG chỉ cho có/không nên confidence gửi bằng ngưỡng `camera.confidence` (giá trị ước lệ, không phải xác suất). Không dùng kết quả này làm đánh giá cứu nạn thực tế.
+Mặc định `detector: yolo_movenet` dùng **đúng model và cấu hình của phao 1**: YOLOv8n 640 int8 + MoveNet qua `Rasp_Pi/modules/edge_model.py`, ngưỡng và đường dẫn model lấy từ `Rasp_Pi/config/settings.yaml` + `boat_stm32.yaml`. Đổi model phao 1 thì phao 2 đổi theo khi `camera.rasp_pi` trỏ tới bản `Rasp_Pi` đã cập nhật. Người ở trên thuyền không được báo; risk 1–3 do YOLO/MoveNet suy ra như phao 1, confidence là điểm YOLO. `hog` vẫn dùng được để thử nhanh: chỉ có/không, gửi confidence bằng `camera.confidence` và risk 2 ước lệ. Không dùng kết quả này làm đánh giá cứu nạn thực tế.
 
 ## Build và nạp STM32
 
 Cần CMake, Ninja, ARM GNU Toolchain trong PATH. Chạy tại `Phao_2/stm32f1`:
 
 ```powershell
-cmake -S . -B build -G Ninja "-DCMAKE_TOOLCHAIN_FILE=toolchain.cmake" "-DGPS_BAUD=115200"
+cmake -S . -B build -G Ninja "-DCMAKE_TOOLCHAIN_FILE=toolchain.cmake"
 cmake --build build
 ```
 
-Kết quả dự kiến `build/Phao2.elf`, `build/Phao2.hex`, `build/Phao2.bin`. Chip giới hạn Flash 64 KB/RAM 20 KB theo linker gốc. Firmware dùng HSI + PLL 64 MHz, không phụ thuộc thạch anh ngoài. Nạp HEX bằng STM32CubeProgrammer/ST-Link; không dùng file của phao 1. Chưa cung cấp binary đã kiểm chứng vì ARM GCC hiện không chạy được trên máy tạo mã.
+Kết quả dự kiến `build/Phao2.elf`, `build/Phao2.hex`, `build/Phao2.bin`. Chip giới hạn Flash 64 KB/RAM 20 KB theo linker gốc. Firmware chạy 64 MHz từ thạch anh 8 MHz, không có thì từ HSI. Nạp HEX bằng STM32CubeProgrammer/ST-Link; không dùng file của phao 1. Chưa cung cấp binary đã kiểm chứng vì ARM GCC hiện không chạy được trên máy tạo mã.
 
 ## Cài và chạy trên Pi 4
 
@@ -97,7 +94,7 @@ Sửa `config.json`:
 1. `serial_port`: đường dẫn đúng của USB–UART trong `/dev/serial/by-id/`.
 2. `demo_target`: tọa độ mục tiêu thực nghiệm. Không giữ một tọa độ ví dụ làm tọa độ thật.
 3. `camera.backend`: `picamera2` với CSI, hoặc `opencv` với USB/V4L2; `device` là chỉ số hoặc `/dev/video0`.
-4. `camera.detector`: `hog` để thử nhanh; `yolo` nếu đã cài `ultralytics` và có file model COCO phù hợp tại `camera.model`. Ứng dụng không tự tải model. Pi 4 chạy 320 px; tốc độ thực tế cần đo. Inference chạy thread riêng để không giữ vòng xử lý radio.
+4. `camera.detector`: `yolo_movenet` (giống phao 1) hoặc `hog`. `camera.rasp_pi`: thư mục `Rasp_Pi` (trên Pi: `/home/khanh/vedc/Rasp_Pi`), cạnh nó phải có `YOLO_Movenet/weights`; chạy bằng Python của `.venv` trong thư mục đó (có tflite-runtime). Pi 4 đo được khoảng 2,7 fps với model 640. Inference chạy thread riêng để không giữ vòng xử lý radio.
 
 ```bash
 python main.py --config config.json
@@ -138,6 +135,12 @@ Từ thư mục `Phao_2`:
 python -m unittest discover -s tests -v
 ```
 
-16 test đã chạy đạt trên máy phát triển, trong đó 2 test biên dịch và chạy **parser, bộ phân xử và bộ tạo ACK thật của trạm bờ** bằng host GCC. Nếu không có host GCC, hai test tích hợp được đánh dấu skip.
+28 test đã chạy đạt trên máy phát triển, trong đó 2 test biên dịch và chạy **parser, bộ phân xử và bộ tạo ACK thật của trạm bờ** bằng host GCC. Nếu không có host GCC, hai test tích hợp được đánh dấu skip.
 
-ARM firmware build/link đạt, không cảnh báo, với Arm GNU Toolchain 14.2 rel1 (FLASH 12 kB/64 kB, RAM 4,3 kB/20 kB). Chưa nạp STM32, chưa chạy camera Pi 4, chưa đo RF/độ trễ ACK. GPS DroneCAN qua bộ chuyển chưa thể chốt decoder khi chưa biết model và dữ liệu UART. Đây là các phần cần xác minh phần cứng, không được suy ra từ host test.
+ARM firmware build/link đạt, không cảnh báo, với Arm GNU Toolchain 14.2 rel1 (FLASH 14,5 kB/64 kB, RAM 4,6 kB/20 kB). Đã chạy trên phần cứng (24–25/11/2026): NEO 3X nhận node ID, gửi Fix2 5 Hz và có fix thật; RA-02 thu PHAO-01, phát được trạm nhận và ACK; Pi 4 + webcam + YOLO 640 chạy 2,3 fps, báo cáo được ACK trong khoảng 0,7–2,5 s. Chưa đo: tầm nhận diện 10 m, relay một chặng, hướng (F103 chưa đọc la bàn, hướng phao lấy từ `assumed_heading_deg`).
+
+**SPI của RA-02:** 31 kHz với sườn xung chậm (`GPIO_SPEED_FREQ_LOW`) trên NSS, SCK, MOSI. Với dây cắm hiện tại, sườn nhanh (nhất là NSS) làm mất lệnh ghi: radio bị khởi tạo lại mỗi giây dù đọc mã chip vẫn đúng.
+
+## Demo trong phòng (GPS giả định)
+
+Không có GPS thật thì người được đặt theo `assumed_position` + `assumed_heading_deg` và camera, trong `max_range_m`; người bị khung hình cắt (không có khoảng cách) thì dùng `demo_target`. Có GPS thật thì dùng GPS thật, trừ khi công tắc bật: nút trên dashboard (`demo_url`, Pi hỏi mỗi 5 s, tự tắt sau 3 giờ) hoặc file `demo_flag` trên Pi. Gói LoRa vẫn báo `NO_FIX` khi không có fix. Khung chẩn đoán `dg=` mỗi 10 s mang fps của AI.

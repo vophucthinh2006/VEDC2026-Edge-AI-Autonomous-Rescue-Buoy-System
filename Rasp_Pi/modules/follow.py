@@ -24,6 +24,15 @@ from utils.geometry import offset_latlon, signed_angle_deg
 SEARCH, FOLLOW = "SEARCH", "FOLLOW"
 
 
+def boat_position(snap: Snapshot) -> tuple[float, float] | None:
+    """The boat, to place people by: its GPS, or the assumed indoor position (demo.assumed_position) without one,
+    or whatever the GPS says while the demo switch is on (demo.flag_file).
+    Never to steer by: navigation and the fence read snap.gps only."""
+    if snap.gps.fix >= 2 and not (snap.assumed_forced and snap.assumed_position):
+        return snap.gps.lat_deg, snap.gps.lon_deg
+    return snap.assumed_position
+
+
 @dataclass(frozen=True)
 class Event:
     kind: str                 # "found" | "lost"
@@ -89,11 +98,12 @@ class Follow:
         return self._last_world_deg
 
     def position(self, snap: Snapshot) -> tuple[float, float] | None:
-        """Where the person last seen is reckoned to be (boat GPS + compass bearing + range); None
-        without a sighting or a GPS fix."""
-        if self._last is None or snap.gps.fix < 2:
+        """Where the person last seen is reckoned to be (boat position + compass bearing + range); None
+        without a sighting or a position (boat_position)."""
+        boat = boat_position(snap)
+        if self._last is None or boat is None:
             return None
-        return offset_latlon(snap.gps.lat_deg, snap.gps.lon_deg, self._last_world_deg, self._last.distance_m)
+        return offset_latlon(*boat, self._last_world_deg, self._last.distance_m)
 
     def plan(self, snap: Snapshot, waypoint: tuple[float, float] | None, now: float,
              only_on_route: bool) -> tuple[Snapshot, list[Event]]:

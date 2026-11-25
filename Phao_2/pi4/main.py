@@ -5,10 +5,12 @@ from collections import deque
 import json
 from pathlib import Path
 import random
+import sys
 import time
 
-from protocol import ID, Claims, Relay, NMEA, ack, beacon, coordinate, distance, victim
+from protocol import ID, Claims, Relay, NMEA, ack, beacon, coordinate, diag, distance, offset, victim
 
+DIAG_SECONDS = 10   # LORA_DIAG_PERIOD_MS of the F407
 UPLINK_HOLD = 1.6  # s: past the origin's ~1.5 s ACK listen window
 
 class Engine:
@@ -24,11 +26,33 @@ class Engine:
         self.next_report = 0
         self.next_beacon = 0
         self.beacon_seq = 0
+        self.demo = False    # the switch (Rasp_Pi/modules/demo_switch.py)
+        self.fps = None      # the detector's, for the diagnostics frame
+        self.next_diag = 0
         self.jobs = deque(maxlen=16)
         self.last_ack = -1e9
-        self.target = coordinate(*cfg["demo_target"]) if cfg.get("demo_target") else None
+        self.target = self.fallback = coordinate(*cfg["demo_target"]) if cfg.get("demo_target") else None
 
-    def detected(self, confidence, now):
+    def locate(self, where, now):
+        """(target, source) of the person, or None when they are further than max_range_m. self.demo, the switch: the
+        assumed place whatever the GPS says, so a fix coming in cannot move the demo. Otherwise, with a real fix: from it and
+        the camera, and no position without a range. Only without one, what is assumed: the buoy's place
+        (assumed_position) and, without a range (box cut by the frame), the configured point."""
+        fix = None if self.demo else self.gps.fix(now)
+        assumed = None if fix else self.cfg.get("assumed_position")
+        origin = fix or assumed
+        fallback = (None, "no_position") if fix else (self.fallback, "configured_demo_target")
+        if not origin or not where: return fallback
+        bearing, metres = where
+        if metres is None: return fallback
+        if metres > self.cfg["max_range_m"]: return None
+        target = coordinate(*offset(origin, self.cfg["assumed_heading_deg"] + bearing, metres))
+        return target, "gps_and_camera" if fix else "assumed_position_and_camera"
+
+    def detected(self, confidence, now, risk=2, where=None):
+        located = self.locate(where, now)
+        if located is None: return
+        self.target, source = located
         if self.target is None:
             if self.state != "DETECTED_NO_TARGET_POSITION":
                 self.state = "DETECTED_NO_TARGET_POSITION"; self.emit(self.state)
@@ -41,11 +65,11 @@ class Engine:
         # This prototype has one configured rescue point; repeat observations aren't new people.
         self.count = max(1, self.count)
         self.persist(self.seq, self.count)
-        self.pending = {"seq": self.seq, "frame": victim(self.id, self.seq, self.target, confidence, self.count),
+        self.pending = {"seq": self.seq, "frame": victim(self.id, self.seq, self.target, confidence, self.count, risk),
                         "next": now, "attempts": 0}
         self.state = "WAITING_ACK"
-        self.emit("DETECTION", target=self.target, sequence=self.seq, confidence=confidence,
-                  position_source="configured_demo_target")
+        self.emit("DETECTION", target=self.target, sequence=self.seq, confidence=confidence, risk=risk,
+                  position_source=source)
 
     def receive(self, frame, now):
         if frame.startswith("ACK,"):
@@ -104,6 +128,10 @@ class Engine:
             self.next_beacon = now + self.cfg["beacon_seconds"] + random.uniform(0, 0.5)
             self.beacon_seq += 1
             return beacon(self.id, self.beacon_seq, self.gps.fix(now), self.count), "own"
+        # Last, and never in the middle of a report or a relayed frame: the station does not answer it.
+        if now >= self.next_diag and not self.jobs and not self.pending:
+            self.next_diag = now + DIAG_SECONDS
+            return diag(self.id, self.fps), "diag"
         return None
 
     def requeue(self, frame, due):
@@ -134,6 +162,11 @@ def main():
             temp.replace(state_file)
         engine = Engine(cfg, emit, persist, saved.get("seq", 0), saved.get("count", 0))
         import serial
+        switch = None
+        if cfg.get("assumed_position"):
+            sys.path.append(str(Path(cfg["camera"]["rasp_pi"]).resolve()))
+            from modules.demo_switch import DemoSwitch
+            switch = DemoSwitch(cfg.get("demo_flag"), cfg.get("demo_url"))
         camera = None
         if not args.no_camera:
             from camera import Camera
@@ -142,23 +175,25 @@ def main():
              detector=None if args.no_camera else cfg["camera"]["detector"])
         port = None; buffer = bytearray(); busy_until = 0; quiet_until = 0
         tx_kind = None; sent = None; last_frame = 0; consecutive = 0; reconnect = 0; ready = False
-        ping_due = 0; camera_error = None; status_due = 0
+        ping_due = 0; camera_error = None; status_due = 0; flag_due = 0
         try:
             while True:
                 now = time.monotonic()
+                if now >= flag_due:
+                    flag_due = now+1
+                    if switch and engine.demo != switch.on:
+                        engine.demo = not engine.demo; emit("DEMO_GPS", on=engine.demo)
                 if camera and camera.error != camera_error:
                     camera_error = camera.error
                     if camera_error: emit("CAMERA_ERROR", detail=camera_error)
                 if camera:
-                    captured, score = camera.latest
+                    engine.fps = camera.fps(now)
+                    captured, score, risk, where = camera.latest
                     if captured > last_frame:
                         last_frame = captured
-                        consecutive = consecutive+1 if score >= cfg["camera"]["confidence"] else 0
+                        consecutive = consecutive+1 if score > 0 else 0
                         if consecutive >= cfg["camera"]["confirm_frames"] and now-captured < 3:
-                            # HOG gives only hit/miss (1.0/0.0): send the configured threshold as a
-                            # nominal confidence, not a measured probability.
-                            engine.detected(score if cfg["camera"]["detector"] == "yolo"
-                                            else cfg["camera"]["confidence"], now)
+                            engine.detected(score, now, risk, where)
                 if port is None and now >= reconnect:
                     try:
                         port = serial.Serial(cfg["serial_port"], cfg["baud"], timeout=0, write_timeout=0.2)

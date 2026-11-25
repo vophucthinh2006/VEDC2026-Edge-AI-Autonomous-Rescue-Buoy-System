@@ -41,7 +41,8 @@ import logging
 from collections import deque
 from dataclasses import dataclass, field, replace
 
-from modules.follow import FOLLOW as FOLLOWING, Follow
+from modules.demo_switch import DemoSwitch
+from modules.follow import FOLLOW as FOLLOWING, Follow, boat_position
 from modules.formation import FormationGoal, FormationKeeper
 from modules.state_store import RISK_NAMES, SAFE, HumanTarget, Snapshot
 from modules.waypoints import Route
@@ -87,9 +88,8 @@ class _Track:
 
 
 def _reckon(snap: Snapshot, world_deg: float, distance_m: float) -> tuple[float, float] | None:
-    if snap.gps.fix < 2:
-        return None
-    return offset_latlon(snap.gps.lat_deg, snap.gps.lon_deg, world_deg, distance_m)
+    boat = boat_position(snap)
+    return None if boat is None else offset_latlon(*boat, world_deg, distance_m)
 
 
 def _same(snap: Snapshot, position: tuple[float, float] | None, world_deg: float,
@@ -158,6 +158,13 @@ class Mission:
         self.reporter = Reporter(self.follow.confirm_frames, self.follow.confirm_s, float(follow.get("report_dedup_m", 5.0)))
         self.route = route
         self.only_on_route = only_on_route
+        # Indoors there is no GPS: people are placed from this position (config/judge_demo.yaml), nothing is steered by it.
+        demo = config.get("demo", {}) or {}
+        assumed = demo.get("assumed_position")
+        self.assumed = tuple(float(v) for v in assumed) if assumed else None
+        # The switch (dashboard button, or a file): while it is on the assumed position beats a real fix
+        self.demo_switch = DemoSwitch(demo.get("flag_file"), demo.get("url")) if assumed else None
+        self._flag_on, self._flag_due = False, float("-inf")
         # Steer at a point this far along the leg, not at the waypoint (modules/waypoints.py Route.aim); 0: at the waypoint
         self.lookahead_m = float((config.get("mission", {}) or {}).get("lookahead_m", 5.0))
         # ... and in a turn up to AIM_PER_TURN_RADIUS turn radii (aim_m)
@@ -259,6 +266,13 @@ class Mission:
 
     # -- the step -----------------------------------------------------------------------------
     def step(self, snap: Snapshot, now: float) -> Step:
+        if self.demo_switch is not None and now >= self._flag_due:
+            self._flag_due = now + 1.0
+            on = self.demo_switch.on
+            if on != self._flag_on:
+                self._flag_on = on
+                self.log.warning("demo GPS switch %s", "ON: people placed from the assumed position" if on else "off")
+        snap = replace(snap, assumed_position=self.assumed, assumed_forced=self._flag_on)
         fix = snap.gps.fix >= 2
         role = snap.link.follow
         # The station gives the leader itself a place 0 m right and 0 m back (no follower ever has it): it sails its

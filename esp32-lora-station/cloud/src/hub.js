@@ -91,6 +91,8 @@ const routeForStation = d => ({ rev: d.rev, id: d.id, loop: d.loop, pts: d.pts }
 // Một Durable Object duy nhất giữ vị trí mới nhất của từng phao, lộ trình chung, và phát cho mọi trình duyệt
 // đang mở. Với nhiều phao nó là bộ quản lý đội tàu của trạm bờ: mỗi phao một bản gửi lộ trình, lệnh riêng
 // (đèn, dừng, về bờ), điểm đỗ riêng, nhiệm vụ hiện tại, và cảnh báo khi một phao mất liên lạc.
+const DEMO_TTL_MS = 3 * 3600 * 1000;
+
 export class Hub extends DurableObject {
   buoys = null;     // id -> { msg, t }
   mission = null;   // { rev, waypoints, poly, spacing, angle, speed, by?, at? }
@@ -103,6 +105,7 @@ export class Hub extends DurableObject {
   // alerts: [{ type, buoy, seq, at, lat, lon, ... }], seen: id -> [{ seq, type, t }], vid }
   events = null;
   lights = null;    // id -> { want, by, at }: lệnh đèn của admin, tách khỏi bản gửi lộ trình
+  demo = null;      // { on, by, at }: the judges' demo (assumed GPS), off again after DEMO_TTL_MS
   hold = null;      // id -> { want, by, at }: lệnh DỪNG của admin (want true = F407 khóa motor), như đèn
   ret = null;       // id -> { want, by, at }: lệnh VỀ BỜ của admin (want true = Pi chạy về điểm đỗ), như đèn
   tasks = null;     // id -> { kind: idle|sector|return|formation|victim, ref, since }: phao đang làm gì
@@ -312,6 +315,13 @@ export class Hub extends DurableObject {
     if (ev.alerts.length > MAX_ALERTS) ev.alerts.splice(0, ev.alerts.length - MAX_ALERTS);
     await this.ctx.storage.put("events", ev);
     this.broadcast({ type: "alert", alert });
+  }
+
+  // The judges' demo switch. It expires: people are reported at assumed places while it is on, and it must not
+  // stay on into a real rescue.
+  async demoMessage() {
+    if (!this.demo) this.demo = (await this.ctx.storage.get("demo")) || { on: false, by: null, at: 0 };
+    return { type: "demo", on: this.demo.on && Date.now() - this.demo.at < DEMO_TTL_MS };
   }
 
   async setHold(id, want, by) {
@@ -528,6 +538,7 @@ export class Hub extends DurableObject {
       }
       const ev = await this.loadEvents();
       if (ev.victims.length || ev.alerts.length) server.send(JSON.stringify({ type: "victims", victims: ev.victims, alerts: ev.alerts }));
+      server.send(JSON.stringify(await this.demoMessage()));
       for (const id of Object.keys(await this.loadLights())) server.send(JSON.stringify(await this.lightsMessage(id)));
       for (const id of Object.keys(await this.loadHold())) server.send(JSON.stringify(await this.holdMessage(id)));
       for (const id of Object.keys(await this.loadRet())) server.send(JSON.stringify(await this.retMessage(id)));
@@ -668,6 +679,17 @@ export class Hub extends DurableObject {
       const m = await this.lightsMessage(id);
       this.broadcast(m);
       return json(m);
+    }
+
+    // The judges' demo (assumed GPS): { on, by }; GET is what the buoys' Pis ask (/api/demo)
+    if (url.pathname === "/demo") {
+      if (request.method === "PUT") {
+        const { on, by } = await request.json();
+        this.demo = { on: on === true, by: by || null, at: Date.now() };
+        await this.ctx.storage.put("demo", this.demo);
+        this.broadcast(await this.demoMessage());
+      }
+      return json(await this.demoMessage());
     }
 
     // Admin dừng / cho chạy tiếp một phao: { id, hold: true|false, by }. Lộ trình giữ nguyên.

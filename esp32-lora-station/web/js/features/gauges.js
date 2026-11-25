@@ -1,20 +1,19 @@
 // The console's instrument row (docs/admin-console-ui.md): what the buoy picked is doing, read at a glance as
 // numbers and pictures instead of sentences. Only what the boats and the Worker really send:
-//   - rain over the next 24 hours at the station (Open-Meteo through /api/weather, features/weather.js)
+//   - the Pi's person detector: frames a second, on or off (diagnostics frame)
 //   - roll and pitch (IMU), the bow now (yaw) against the heading the Pi asks for (target_yaw, -1 = none)
 //   - battery % (beacon) with volts (INA226, diagnostics frame; the current is not shown, the shunt reading is not trusted), LoRa bars and the distance to the station
 // Also the status pill in the top bar, the station's satellites, and the picked-buoy control at the bottom.
 import { state, buoyStatus, STATUS, signalOf, SIGNAL, batteryOf, speedOf, attitudeAgeSec, ATTITUDE_STALE_SEC,
-  isStale } from '../state.js';
+  isStale, DIAG_STALE_SEC } from '../state.js';
 import { distM, compassWord } from '../util/geo.js';
 import { fmtAgo } from '../util/format.js';
-import { forecast } from './weather.js';
+import { aiState } from './health.js';
 
 const $ = id => document.getElementById(id);
 const TILT_WARN_DEG = 20, TILT_BAD_DEG = 30;     // features/health.js
 const HEAD_WARN_DEG = 10, HEAD_BAD_DEG = 30;     // features/health.js
 const BATT_BAD = 20, BATT_WARN = 40;             // features/telemetry.js
-const RAIN_HOURS = 24;
 const TONE = { ok: 'ok', warn: 'warn', bad: 'bad', lost: 'lost', idle: 'idle' };
 
 const num = (v, d = 1) => v.toLocaleString('vi-VN', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -43,26 +42,41 @@ function swap(el, t) {
 
 let ctx = { onHome: () => {}, isHome: () => false, onStep: () => {} };
 
-// ---- rain ------------------------------------------------------------------------------------
-function renderRain() {
-  const card = $('g-rain');
-  const hours = forecast()?.hours?.slice(0, RAIN_HOURS) || [];
-  card.dataset.empty = String(!hours.length);
-  if (!hours.length) { text($('gr-mm'), '--'); text($('gr-prob').lastElementChild, '--'); return; }
-  const total = hours.reduce((s, h) => s + (h.rain_mm || 0), 0);
-  const prob = Math.max(...hours.map(h => h.prob ?? 0));
-  text($('gr-mm'), total < 0.1 ? '0' : num(total, total < 10 ? 1 : 0));
-  text($('gr-prob').lastElementChild, `${prob}%`);
-  tone(card, total >= 50 || prob >= 80 ? 'warn' : 'ok');
-  card.dataset.wet = String(total >= 0.1);   // the drops fall only when rain is forecast
-  card.title = total < 0.1 ? 'Không mưa 24 giờ tới' : `Mưa 24 giờ tới: ${num(total)} mm, khả năng ${prob}%`;
-  const bars = $('gr-bars');
-  if (bars.children.length !== hours.length) bars.replaceChildren(...hours.map(() => document.createElement('i')));
-  const peak = Math.max(2, ...hours.map(h => h.rain_mm || 0));
-  hours.forEach((h, i) => {
-    const bar = bars.children[i];
-    bar.style.transform = `scaleY(${Math.max(0.08, (h.rain_mm || 0) / peak).toFixed(3)})`;
-    bar.dataset.wet = String((h.rain_mm || 0) > 0);
+// ---- the AI ------------------------------------------------------------------------------------
+// The Pi's person detector, from the diagnostics frame (one every 10 s). The model's name is not sent: both
+// buoys run the same one (Rasp_Pi/config/settings.yaml camera.model).
+const AI_MODEL = 'YOLOv8n 640 + MoveNet';
+const FPS_SAMPLES = 24;
+const fpsHistory = new Map();   // id -> { at, list }: the last FPS_SAMPLES rates, null while the detector is off
+
+function noteFps(id, d) {
+  const h = fpsHistory.get(id) || { at: 0, list: [] };
+  if (d.at === h.at) return h.list;
+  h.at = d.at;
+  h.list = [...h.list, Number.isFinite(d.fps) ? d.fps : null].slice(-FPS_SAMPLES);
+  fpsHistory.set(id, h);
+  return h.list;
+}
+
+function renderAi(id, b) {
+  const card = $('g-ai'), d = state.diag.get(id);
+  const has = Boolean(d) && Number.isFinite(d.fps);
+  const [word, t] = aiState(d);
+  card.dataset.empty = String(!has);
+  card.dataset.stale = String(Boolean(d) && (Date.now() - d.at) / 1000 > DIAG_STALE_SEC);
+  card.dataset.on = String(has);
+  tone(card, t);
+  text($('ga-fps'), has ? num(d.fps) : '--');
+  text($('ga-state'), word);
+  text($('ga-ms'), has && d.fps > 0 ? ` · ${Math.round(1000 / d.fps)} ms` : '');
+  card.title = `Model: ${AI_MODEL}` + (Number.isInteger(b.victims) ? `; đã báo ${b.victims} người` : '');
+  const list = d ? noteFps(id, d) : [], bars = $('ga-bars');
+  if (bars.children.length !== FPS_SAMPLES) bars.replaceChildren(...Array.from({ length: FPS_SAMPLES }, () => document.createElement('i')));
+  const peak = Math.max(2, ...list.map(v => v ?? 0)), pad = FPS_SAMPLES - list.length;
+  [...bars.children].forEach((bar, i) => {
+    const v = list[i - pad] ?? 0;
+    bar.style.transform = `scaleY(${Math.max(0.08, v / peak).toFixed(3)})`;
+    bar.dataset.on = String(v > 0);
   });
 }
 
@@ -198,13 +212,13 @@ function renderStation() {
 
 export function renderGauges() {
   renderStation();
-  renderRain();
   const id = state.selected;
   const b = id && state.buoys.get(id);
   $('gauges').hidden = !b;
   if (!b) { $('pill').hidden = true; $('ctl').hidden = true; return; }
   const st = STATUS[buoyStatus(id, b)];
   $('gauges').dataset.lost = String(isStale(b));
+  renderAi(id, b);
   renderAttitude(b);
   renderBattery(id, b);
   renderLink(id, b);
@@ -231,6 +245,5 @@ export function initGauges(c) {
       last = n;
     }).observe(badge, { childList: true, characterData: true, subtree: true });
   }
-  window.addEventListener('weatherupdate', renderRain);
   renderGauges();
 }

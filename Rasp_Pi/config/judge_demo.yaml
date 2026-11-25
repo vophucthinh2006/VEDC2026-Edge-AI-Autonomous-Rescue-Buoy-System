@@ -1,0 +1,12 @@
+# The two-buoy demo for the judges, in a room: after config/boat_stm32.yaml and config/stand_demo.yaml
+# (the service: tools/install_service.sh --restart --overlay config/stand_demo.yaml --overlay config/judge_demo.yaml).
+# No GPS in the room: people are placed from this position. Nothing is steered by it, and the F407's own
+# frames still say NO_FIX. The dashboard shows it as assumed (web/js/features/demo.js): the same numbers there.
+demo:
+  assumed_position: [10.879264, 106.806386]   # used without a real fix ...
+  # ... and even with one while the dashboard's button is on, or this file exists (modules/demo_switch.py)
+  url: https://mliot-redgescue.vinh-vo28022005.workers.dev/api/demo
+  flag_file: ~/demo_gps
+camera:
+  max_target_distance_m: 10.0      # people within 10 m
+  max_standing_distance_m: 10.0

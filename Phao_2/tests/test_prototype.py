@@ -1,11 +1,12 @@
 import json
+import math
 from pathlib import Path
 import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"pi4"))
-from protocol import ack, NMEA, Claims, Relay, beacon
+from protocol import ack, NMEA, Claims, Relay, beacon, distance
 from main import Engine
 
 def checksum(body):
@@ -86,6 +87,59 @@ class PrototypeTests(unittest.TestCase):
         risk=e.next_frame(1)[0].split(",")[5]
         self.assertGreater(int(risk),0)  # dashboard alerts only on risk > 0
 
+    def test_edge_risk_is_reported_and_people_on_boats_are_not(self):
+        from types import SimpleNamespace as P
+        from camera import assess
+        self.assertEqual(assess([]),(0.0,0,None))
+        self.assertEqual(assess([P(on_boat=True,risk=0,confidence=.9)]),(0.0,0,None))
+        self.assertEqual(assess([P(on_boat=False,risk=1,confidence=.9),P(on_boat=False,risk=3,confidence=.5)])[:2],(.5,3))
+        e=Engine(config(),lambda *a,**k:None); e.detected(.5,1,3)
+        self.assertEqual(e.next_frame(1)[0].split(",")[5:7],["3","0.50"])
+
+    def test_indoor_position_from_the_assumed_place_and_the_camera(self):
+        from camera import ranged
+        cam={"horizontal_fov_deg":60,"vertical_fov_deg":47,"person_height_m":1.7}
+        bearing,metres=ranged((.3,.6,.8,.8),cam)
+        self.assertAlmostEqual(bearing,12); self.assertAlmostEqual(metres,1.7/(2*math.tan(math.radians(23.5))*.5))
+        self.assertIsNone(ranged((.3,.4,1.0,.6),cam)[1])
+        c=config(); c["assumed_position"]=[10.8835,106.7961]; c["assumed_heading_deg"]=90
+        e=Engine(c,lambda *a,**k:None); e.detected(.5,1,1,(0,5.0))
+        self.assertAlmostEqual(distance(e.target,(10.8835,106.7961)),5,places=1); self.assertGreater(e.target[1],106.7961)
+        far=Engine(c,lambda *a,**k:None); far.detected(.5,1,1,(0,12.0)); self.assertIsNone(far.pending)   # beyond 10 m
+        cut=Engine(c,lambda *a,**k:None); cut.detected(.5,1,1,(0,None)); self.assertEqual(cut.target,(10.8835,106.7961))
+
+    def test_a_real_fix_replaces_everything_assumed(self):
+        c=config(); c["assumed_position"]=[10.8835,106.7961]
+        real=(20.0,100.0)
+        e=Engine(c,lambda *a,**k:None); e.gps.position=real; e.gps.updated=1
+        e.detected(.5,1,1,(0,5.0)); self.assertAlmostEqual(distance(e.target,real),5,places=1)
+        cut=Engine(c,lambda *a,**k:None); cut.gps.position=real; cut.gps.updated=1
+        cut.detected(.5,1,1,(0,None)); self.assertIsNone(cut.pending)     # no range: not the demo point
+        self.assertEqual(cut.state,"DETECTED_NO_TARGET_POSITION")
+        old=Engine(c,lambda *a,**k:None); old.gps.position=real; old.gps.updated=1
+        old.detected(.5,10,1,(0,5.0)); self.assertAlmostEqual(distance(old.target,(10.8835,106.7961)),5,places=1)   # fix lost
+
+    def test_the_demo_switch_beats_a_real_fix(self):
+        c=config(); c["assumed_position"]=[10.8835,106.7961]
+        e=Engine(c,lambda *a,**k:None); e.gps.position=(20.0,100.0); e.gps.updated=1; e.demo=True
+        e.detected(.5,1,1,(0,5.0)); self.assertAlmostEqual(distance(e.target,(10.8835,106.7961)),5,places=1)
+        cut=Engine(c,lambda *a,**k:None); cut.gps.position=(20.0,100.0); cut.gps.updated=1; cut.demo=True
+        cut.detected(.5,1,1,(0,None)); self.assertEqual(cut.target,(10.8835,106.7961))
+
+    def test_diagnostics_go_last_and_every_ten_seconds(self):
+        e=Engine(config(),lambda *a,**k:None); e.fps=2.3; e.detected(.5,1)
+        self.assertTrue(e.next_frame(1)[0].startswith("ev=")); self.assertTrue(e.next_frame(1)[0].startswith("id="))
+        self.assertIsNone(e.next_frame(1)); e.pending=None      # a report waiting for its ACK comes first
+        self.assertEqual(e.next_frame(1),("dg=PHAO-02,n=stationary,s=-,w=0/0,a=1,d=1,k=0:0,f=23","diag"))
+        e.next_beacon=1e9
+        self.assertIsNone(e.next_frame(10.9)); self.assertEqual(e.next_frame(11)[1],"diag")
+
+    def test_fps_counts_the_last_ten_seconds(self):
+        from camera import rate
+        self.assertIsNone(rate([],5)); self.assertIsNone(rate([1.0],5))
+        self.assertAlmostEqual(rate([10+i*.5 for i in range(9)],14),2.0)
+        self.assertIsNone(rate([1.0,1.5],30))      # the detector stopped
+
     def test_relay_uplink_waits_out_shore_ack_window(self):
         events=[]; e=Engine(config(),lambda ev,**k: events.append((ev,k))); e.next_beacon=1e9
         e.receive(beacon("PHAO-01",1,None,0),0)
@@ -93,11 +147,11 @@ class PrototypeTests(unittest.TestCase):
         self.assertTrue(e.next_frame(2.0)[0].startswith("id=PHAO-01,"))
 
     def test_relay_uplink_dropped_when_shore_acks_origin(self):
-        events=[]; e=Engine(config(),lambda ev,**k: events.append((ev,k))); e.next_beacon=1e9
+        events=[]; e=Engine(config(),lambda ev,**k: events.append((ev,k))); e.next_beacon=e.next_diag=1e9
         e.receive(beacon("PHAO-01",1,None,0),0)
         ackf=checksum("ACK,PHAO-01,1,0,,")
         e.receive(ackf,0.1)
-        self.assertEqual(e.next_frame(0.2),(ackf,"relay"))  # downlink ACK still relayed promptly
+        self.assertEqual(e.next_frame(0.3),(ackf,"relay"))  # downlink ACK still relayed promptly
         self.assertIsNone(e.next_frame(2.0))
         self.assertIn(("RELAY_DROP",{"reason":"shore_acked","frame":beacon("PHAO-01",1,None,0)}),events)
 

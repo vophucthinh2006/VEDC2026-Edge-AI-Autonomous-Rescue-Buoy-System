@@ -13,6 +13,8 @@ const OSM_DIRECT = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const DEM_PROXY = '/tiles/dem/{z}/{x}/{y}.png';
 const DEM_DIRECT = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+// OSM draws tiles to zoom 19; past it they are stretched (blurry), so a rescue zone a few metres wide can be seen.
+export const MAX_ZOOM = 22;
 const BACKDROP_ZOOM = 13;
 const PREFETCH_KEY = 'basemap.prefetched';
 const PREFETCH = { radiusM: 3000, zMin: 11, zMax: 16, maxTiles: 500, gapMs: 150 };
@@ -47,9 +49,9 @@ let busy = 0;   // tiles of the visible map still loading: the prefetch waits fo
 export function addBaseMap(map) {
   fetch('/tiles/osm/0/0/0.png').then(r => { if (r.status === 404) { proxy.dead = true; detail?.redraw(); } }).catch(() => { /* offline: keep the proxy */ });
   // The coarse layer first, so it sits under the detail
-  new FallbackTiles(OSM_PROXY, { directUrl: OSM_DIRECT, minZoom: BACKDROP_ZOOM + 1, maxNativeZoom: BACKDROP_ZOOM, maxZoom: 19,
+  new FallbackTiles(OSM_PROXY, { directUrl: OSM_DIRECT, minZoom: BACKDROP_ZOOM + 1, maxNativeZoom: BACKDROP_ZOOM, maxZoom: MAX_ZOOM,
     className: 'basemap-backdrop', keepBuffer: 1 }).addTo(map);
-  detail = new FallbackTiles(OSM_PROXY, { directUrl: OSM_DIRECT, maxZoom: 19, keepBuffer: 4, attribution: ATTRIBUTION }).addTo(map);
+  detail = new FallbackTiles(OSM_PROXY, { directUrl: OSM_DIRECT, maxNativeZoom: 19, maxZoom: MAX_ZOOM, keepBuffer: 4, attribution: ATTRIBUTION }).addTo(map);
   detail.on('tileloadstart', () => { busy++; });
   detail.on('tileload tileerror tileabort', () => { busy = Math.max(0, busy - 1); });
   detail.on('load', () => { busy = 0; });

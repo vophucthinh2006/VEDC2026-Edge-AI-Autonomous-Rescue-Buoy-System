@@ -1,5 +1,8 @@
+import tempfile
 import unittest
+from pathlib import Path
 
+from modules.demo_switch import DemoSwitch
 from modules.mission import FOLLOW, HOME_HOLD, IDLE, PATROL, RETURN, Mission
 from modules.state_store import CRITICAL, HIGH, MEDIUM, SAFE, GpsState, HumanTarget, ImuState, LinkState, Snapshot, SysState
 from modules.waypoints import Route
@@ -391,6 +394,31 @@ class ReportTest(unittest.TestCase):
     def test_without_a_fix_the_position_is_zero(self):
         reports = self.reports((0.0, 0.8, 1.6), people=[(30.0, 6.0, MEDIUM)], fix=0)
         self.assertEqual([(r.lat, r.lon) for r in reports], [(0.0, 0.0)])
+
+    def test_indoors_the_assumed_position_places_people_but_steers_nothing(self):
+        self.mission.assumed = BOAT
+        reports = self.reports((0.0, 0.8, 1.6), people=[(0.0, 6.0, MEDIUM)], fix=0)
+        self.assertAlmostEqual(reports[0].lat, BOAT[0] + 6.0 / 111_320.0, places=6)
+        self.assertAlmostEqual(reports[0].lon, BOAT[1], places=6)
+        self.assertEqual(self.mission.step(snap(2.4, fix=0), 2.4).planned.gps.fix, 0)   # what the navigator steers by
+
+    def test_a_real_fix_replaces_the_assumed_position(self):
+        self.mission.assumed = (1.0, 2.0)
+        reports = self.reports((0.0, 0.8, 1.6), people=[(0.0, 6.0, MEDIUM)])
+        self.assertAlmostEqual(reports[0].lat, BOAT[0] + 6.0 / 111_320.0, places=6)
+
+    def test_the_demo_switch_beats_a_real_fix_and_steers_nothing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            flag = Path(folder) / "demo_gps"
+            self.mission.assumed, self.mission.demo_switch = (1.0, 2.0), DemoSwitch(str(flag), None)
+            flag.touch()
+            reports = self.reports((0.0, 0.8, 1.6), people=[(0.0, 6.0, MEDIUM)])
+            self.assertAlmostEqual(reports[0].lat, 1.0 + 6.0 / 111_320.0, places=6)
+            planned = self.mission.step(snap(2.4), 2.4).planned
+            self.assertEqual((planned.gps.lat_deg, planned.gps.lon_deg), BOAT)
+            flag.unlink()
+            self.mission.step(snap(4.0), 4.0)
+            self.assertFalse(self.mission._flag_on)
 
     def test_a_change_of_risk_while_following_is_reported_once_seen_twice(self):
         self.reports((0.0, 0.8, 1.6), people=[(0.0, 6.0, HIGH)])

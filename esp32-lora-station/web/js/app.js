@@ -15,6 +15,7 @@ import { initHold, onHoldMessage, revertHold, noteHold } from './features/hold.j
 import { initSearch, renderPlace, minimizeSearch } from './features/search.js';
 import { initFleet, renderFleet, onFleetDownlink, onTaskMessage, onRetMessage, onLinkMessage, onFormationMessage, sendReturn, retOf, formationRole } from './features/fleet.js';
 import { initGauges } from './features/gauges.js';
+import { initDemo, assumePosition, setDemo } from './features/demo.js';
 
 const $ = id => document.getElementById(id);
 const DEFAULT_VIEW = [10.762622, 106.660172];
@@ -624,7 +625,7 @@ function onBuoyMessage(m) {
   const prev = existed ? { fix: existed.fix, nav: existed.nav, victims: existed.victims, returning: isReturning(existed), routeDone: routeDone(id, existed.route) } : null;
   const b = existed || { hasPos: false, marker: null };
   const snapshot = (Number(m.age_s) || 0) > 0;   // bản phát lại lúc mở trang, không phải gói mới
-  readBuoy(b, m);
+  readBuoy(b, assumePosition(m));
   state.buoys.set(id, b);
   noteHold(id);
   if (!state.selected) state.selected = id;
@@ -714,6 +715,7 @@ function connect() {
     else if (m.type === 'alert') { onAlertMessage(m); renderDetail(); renderList(); }
     else if (m.type === 'lights') onLightsMessage(m);
     else if (m.type === 'hold') onHoldMessage(m);
+    else if (m.type === 'demo') setDemo(m.on);
     else if (m.type === 'diag') onDiagMessage(m);
     else if (m.type === 'task') onTaskMessage(m);
     else if (m.type === 'ret') onRetMessage(m);
@@ -732,6 +734,24 @@ async function sendLights(id, lights, prev) {
     toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không gửi được lệnh đèn');
   } catch { toast('Mất kết nối, chưa gửi được lệnh đèn'); }
   revertLights(id, prev);
+}
+
+async function sendDemo(on) {
+  if (MOCK) { setDemo(on); return; }
+  try {
+    const res = await jsonPost('/api/demo', { on });
+    if (res.ok) { setDemo((await res.json()).on); return; }
+    toast(res.status === 401 || res.status === 403 ? 'Phiên hết hạn hoặc không có quyền' : 'Không đổi được GPS giả định');
+  } catch { toast('Mất kết nối, chưa đổi được GPS giả định'); }
+}
+
+// The demo went on or off: the buoys go to their assumed places, or leave the map until a real fix
+function moveForDemo(on, places) {
+  for (const [id, b] of state.buoys) {
+    if (on && places[id]) { [b.lat, b.lon] = places[id]; b.hasPos = true; updateMarker(id); }
+    else if (!on && places[id] && b.fix !== 1) { b.hasPos = false; b.marker?.remove(); b.marker = null; }
+  }
+  renderList(); renderDetail();
 }
 
 async function sendHold(id, hold, prev) {
@@ -775,7 +795,7 @@ function enter(me) {
   $('role-name').textContent = isAdmin() ? 'Admin' : 'Khách';
   $('role-name').title = state.email || '';
   $('role-chip').hidden = false;
-  renderRoute(); renderDetail();
+  renderRoute(); renderDetail(); setDemo(false);
   connect();
   // Weather, rain and flooding on the map (docs/weather-map.md), once signed in: the Worker's /api/weather needs the session
   if (!weatherOn) {
@@ -865,6 +885,7 @@ async function boot() {
   applyTheme(store.get('theme', 'dark') === 'light');
   initTimeline();
   initTelemetry({ toast, routeLine: routeProgress, routeAhead });
+  initDemo({ onSet: sendDemo, onChange: moveForDemo });
   initVictims(map, { toast, onClear: clearVictims, onVictimAction: victimAction });
   intoDrawer('.map-legend', 'legend-slot');
   initLights({ onSet: sendLights });

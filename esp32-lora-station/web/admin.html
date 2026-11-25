@@ -59,15 +59,15 @@
 
       <!-- Gauges of the buoy picked: numbers and pictures, few words (js/features/gauges.js) -->
       <section id="gauges" aria-label="Thông số phao đang chọn" hidden>
-        <div class="g" id="g-rain" data-tone="idle" data-wet="false" style="--i:0">
-          <span class="g-k">Mưa 24 giờ</span>
-          <b class="g-v"><span id="gr-mm">--</span><small>mm</small></b>
-          <span class="g-sub" id="gr-prob" title="Khả năng mưa cao nhất"><i class="ph-fill ph-drop" aria-hidden="true"></i><span>--</span></span>
-          <svg class="g-art g-cloud" viewBox="0 0 70 58" aria-hidden="true">
-            <path class="cl" d="M18 38a11 11 0 0 1 1-22 15 15 0 0 1 28 2 10 10 0 0 1 4 20z"></path>
-            <path class="dr" d="M24 44l-3 8M34 44l-3 8M44 44l-3 8"></path>
+        <div class="g" id="g-ai" data-tone="idle" data-empty="true" style="--i:0">
+          <span class="g-k">AI nhận diện</span>
+          <b class="g-v"><span id="ga-fps">--</span><small>fps</small></b>
+          <span class="g-sub"><span id="ga-state">Chưa có dữ liệu</span><span id="ga-ms"></span></span>
+          <svg class="g-art g-eye" viewBox="0 0 70 58" aria-hidden="true">
+            <path d="M6 29q29-34 58 0q-29 34-58 0z"></path>
+            <circle cx="35" cy="29" r="9"></circle>
           </svg>
-          <div class="g-bars" id="gr-bars" aria-hidden="true"></div>
+          <div class="g-bars" id="ga-bars" aria-hidden="true"></div>
         </div>
         <div class="g" id="g-roll" data-tone="idle" style="--i:1">
           <span class="g-k">Lắc ngang</span>
@@ -145,6 +145,7 @@
       <div id="map-tools" role="toolbar" aria-label="Công cụ bản đồ">
         <button class="tool" id="btn-fit" type="button" aria-label="Xem tất cả" title="Xem tất cả"><i class="ph ph-arrows-out" aria-hidden="true"></i></button>
         <button class="tool" id="btn-follow" type="button" aria-label="Bám theo phao đang chọn" aria-pressed="false" title="Bám theo phao đang chọn"><i class="ph ph-crosshair" aria-hidden="true"></i></button>
+        <button class="tool" id="btn-demo" type="button" aria-label="GPS giả định (demo trong phòng)" aria-pressed="false" title="GPS giả định (demo trong phòng)" hidden><i class="ph ph-presentation" aria-hidden="true"></i></button>
       </div>
 
       <!-- Right: the rail of panels and the drawer it opens. On a phone: a bottom sheet. -->

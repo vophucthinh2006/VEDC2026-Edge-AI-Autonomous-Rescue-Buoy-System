@@ -30,25 +30,33 @@
 .g[data-empty="true"] :is(.g-art, .g-compass, .g-sig){ opacity:.35; filter:grayscale(1); }
 
 /* Old numbers: the IMU frame is late, or the whole buoy is silent. Said with a tag, not only a colour. */
-.g[data-stale="true"], #gauges[data-lost="true"] .g:not(#g-rain){ border-style:dashed; border-color:color-mix(in srgb, var(--warn) 55%, var(--glass-line)); }
-.g[data-stale="true"] .g-v, #gauges[data-lost="true"] .g:not(#g-rain) .g-v{ opacity:.6; }
-.g[data-stale="true"]::after, #gauges[data-lost="true"] .g:not(#g-rain)::after{
+.g[data-stale="true"], #gauges[data-lost="true"] .g{ border-style:dashed; border-color:color-mix(in srgb, var(--warn) 55%, var(--glass-line)); }
+.g[data-stale="true"] .g-v, #gauges[data-lost="true"] .g .g-v{ opacity:.6; }
+.g[data-stale="true"]::after, #gauges[data-lost="true"] .g::after{
   content:'số cũ'; position:absolute; top:10px; right:10px; z-index:2; padding:1px 7px; border-radius:var(--r-pill);
   background:var(--warn-bg); color:var(--warn); font-size:10.5px; font-weight:700; }
 
-/* ---- rain ---- */
-.g-cloud{ width:62px; height:52px; right:12px; top:10px; }
-.g-cloud .cl{ fill:var(--panel-3); stroke:var(--muted); stroke-width:2; }
-.g-cloud .dr{ stroke:var(--accent); stroke-width:2.4; stroke-linecap:round; stroke-dasharray:4 4; }
-#g-rain[data-wet="true"] .dr{ animation:drizzle .9s linear infinite; }
-#g-rain[data-wet="false"] .dr{ opacity:.25; }
-@keyframes drizzle{ to{ stroke-dashoffset:-16; } }
-#g-rain .g-v{ bottom:auto; top:34px; }
-#g-rain .g-sub{ bottom:auto; top:72px; color:var(--accent); }
+/* ---- AI ---- laid out as a grid, not by position: the words can never lie over the number or the picture */
+#gauges #g-ai{ container-type:inline-size; display:grid; grid-template:auto auto 1fr auto / minmax(0, 1fr) auto; column-gap:8px; align-content:start; min-width:176px; }
+#g-ai > .g-k{ grid-area:1 / 1; }
+#g-ai > .g-v{ grid-area:2 / 1; position:static; margin-top:4px; }
+#g-ai > .g-eye{ grid-area:1 / 2 / 3 / 3; position:static; align-self:center; width:52px; height:43px; }
+#g-ai > .g-sub{ grid-area:3 / 1 / 4 / 3; position:static; display:block; margin-top:5px; line-height:1.25; color:var(--accent); white-space:normal; text-wrap:balance; }
+#g-ai[data-tone="warn"] > .g-sub, #g-ai[data-tone="bad"] > .g-sub{ color:var(--c); }
+#g-ai > .g-bars{ grid-area:4 / 1 / 5 / 3; position:static; height:14px; }
+#ga-ms{ white-space:nowrap; }
+#g-ai[data-empty="true"] > .g-bars{ display:none; }                       /* off: its room goes to the words */
+#g-ai[data-stale="true"] > .g-eye, #gauges[data-lost="true"] #g-ai > .g-eye{ visibility:hidden; }   /* the "số cũ" tag stands there */
+@container (max-width:150px){ #ga-ms{ display:none; } }
+.g-eye path{ fill:var(--panel-3); stroke:var(--muted); stroke-width:2; }
+.g-eye circle{ fill:var(--accent); transform-origin:35px 29px; }
+#g-ai[data-on="true"] .g-eye circle{ animation:look 2.4s var(--ease-out) infinite; }
+@keyframes look{ 50%{ transform:scale(.7); } }
+@media (prefers-reduced-motion:reduce){ #g-ai[data-on="true"] .g-eye circle{ animation:none; } }
 .g-bars{ position:absolute; left:14px; right:14px; bottom:10px; height:16px; display:flex; align-items:flex-end; gap:2px; }
 .g-bars i{ flex:1; height:100%; border-radius:1.5px; background:var(--accent); transform-origin:bottom; transform:scaleY(.08);
   transition:transform var(--dur-4) var(--ease-out); }
-.g-bars i[data-wet="false"]{ opacity:.28; }
+.g-bars i[data-on="false"]{ opacity:.28; }
 
 /* ---- roll and pitch: the boat leans like the real one ---- */
 .g-track{ fill:none; stroke:var(--line-2); stroke-width:3; }
@@ -123,7 +131,7 @@ body:not([data-mode="monitor"]) #gauges .gh-read{ flex-direction:row; align-item
 body:not([data-mode="monitor"]) #gauges .gh-now b{ font-size:16px; }
 body:not([data-mode="monitor"]) #gauges .gh-pi b{ font-size:14px; }
 body:not([data-mode="monitor"]) #gauges .g::after{ display:none; }
-body:not([data-mode="monitor"]) #gauges #g-rain{ display:none; }
+body:not([data-mode="monitor"]) #gauges #g-ai{ display:none; }
 
 /* ---- Phone: the cards scroll sideways ---- */
 @media (max-width:600px), (max-width:820px) and (orientation:portrait){
@@ -133,13 +141,15 @@ body:not([data-mode="monitor"]) #gauges #g-rain{ display:none; }
   #gauges .g-wide{ flex-basis:236px; gap:10px; }
   .g-v{ font-size:24px; left:12px; bottom:10px; }
   .g-art{ width:56px; height:48px; right:6px; top:8px; }
-  .g-cloud{ width:44px; height:38px; }
   .g-ring{ width:46px; height:46px; top:10px; }
   .g-sig{ height:30px; top:14px; right:12px; } .g-sig i{ width:6px; }
   .g-sig i:nth-child(1){ height:8px; } .g-sig i:nth-child(2){ height:14px; } .g-sig i:nth-child(3){ height:21px; } .g-sig i:nth-child(4){ height:30px; }
   .g-compass{ width:72px; height:72px; }
   .gh-now b{ font-size:17px; } .gh-pi b{ font-size:14px; } .gh-read small{ font-size:11.5px; } .gh-off{ font-size:12px; }
-  #g-rain .g-v{ top:28px; } #g-rain .g-sub{ display:none; }
+  #gauges #g-ai{ flex-basis:148px; min-width:0; }
+  #g-ai > .g-eye{ width:36px; height:30px; }
+  #g-ai > .g-bars{ display:none; }
+  #g-ai[data-stale="true"]::after, #gauges[data-lost="true"] #g-ai::after{ top:34px; }
   #g-batt .g-v, #g-link .g-v{ bottom:26px; }
   .g-sub{ font-size:11px; left:12px; }
 }
