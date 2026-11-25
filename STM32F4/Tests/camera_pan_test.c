@@ -13,39 +13,53 @@ static void close_to(float actual, float expected, float tolerance) {
 int main(void) {
     camera_pan_t pan;
 
-    /* A 10 deg step, under the rate cap: the first tick moves KP * 10 * dt. */
+    /* A 30 deg jump (a person): the speed never changes more than ACCEL per tick nor passes MAX_RATE,
+       and it settles on the target, overshooting under 1 deg. */
     CameraPan_Init(&pan);
-    close_to(CameraPan_Step(&pan, 10.0f, DT), CAM_PAN_SMOOTH_KP * 10.0f * DT, 0.001f);
-
-    /* A 30 deg step: no jump, and it gets there without overshoot. */
-    CameraPan_Init(&pan);
-    float last = pan.angle_deg;
-    for (int i = 0; i < 100; i++) {
-        float angle = CameraPan_Step(&pan, 30.0f, DT);
-        assert(angle >= last && angle <= 30.0f);
-        last = angle;
+    float v_before = 0.0f, peak = 0.0f;
+    for (int i = 0; i < 200; i++) {
+        float before = pan.angle_deg;
+        CameraPan_Step(&pan, 30.0f, DT);
+        float v = (pan.angle_deg - before) / DT;
+        assert(fabsf(v - v_before) <= CAM_PAN_ACCEL_DPS2 * DT + 1e-3f);
+        assert(fabsf(v) <= CAM_PAN_MAX_RATE_DPS + 1e-3f);
+        peak = fmaxf(peak, pan.angle_deg);
+        v_before = v;
     }
-    close_to(pan.angle_deg, 30.0f, 0.1f);
+    close_to(pan.angle_deg, 30.0f, 0.05f);
+    assert(peak <= 31.0f);
 
-    /* A big jump is capped at the top rate. */
+    /* The Pi's 15 deg/s sweep in 0.75 deg steps every 50 ms (20 Hz): once caught up, every 10 ms tick
+       moves the same 0.15 deg, no tick standing still and none jumping: the 20 Hz jerk is gone. */
     CameraPan_Init(&pan);
-    close_to(CameraPan_Step(&pan, -160.0f, DT), -CAM_PAN_MAX_RATE_DPS * DT, 0.001f);
-
-    /* A late tick never carries it past the target. */
-    CameraPan_Init(&pan);
-    close_to(CameraPan_Step(&pan, 5.0f, 10.0f), 5.0f, 0.0001f);
-
-    /* Commands at 20 Hz along a 30 deg/s sweep: followed smoothly, about rate / KP behind. */
-    CameraPan_Init(&pan);
-    float target = 0.0f, biggest_tick = 0.0f;
-    for (int i = 0; i < 300; i++) {
-        if (i % 5 == 0) target = 30.0f * (float)i * DT;   /* a new CAM packet every 50 ms */
+    float target = 0.0f, smallest = 1e9f, largest = 0.0f;
+    for (int i = 0; i < 400; i++) {
+        if (i % 5 == 0) target = 15.0f * (float)i * DT;
         float before = pan.angle_deg;
         CameraPan_Step(&pan, target, DT);
-        biggest_tick = fmaxf(biggest_tick, fabsf(pan.angle_deg - before));
+        if (i >= 150) {                                   /* after 1.5 s */
+            float step = pan.angle_deg - before;
+            smallest = fminf(smallest, step);
+            largest = fmaxf(largest, step);
+        }
     }
-    assert(biggest_tick < 1.0f);                                 /* < 1 deg per 10 ms tick: no jumps */
-    close_to(target - pan.angle_deg, 30.0f / CAM_PAN_SMOOTH_KP, 1.5f);   /* plus up to one 1.5 deg packet step */
+    assert(smallest >= 0.15f * 0.7f && largest <= 0.15f * 1.3f);
+    close_to(pan.angle_deg, target, 1.0f);                /* on the targets, not a steady lag behind */
+
+    /* The targets stop: so does the servo, past the last one by under 3 deg, and it comes back to it. */
+    float stop = pan.angle_deg + 0.75f;
+    for (int i = 0; i < 300; i++) CameraPan_Step(&pan, stop, DT);
+    close_to(pan.angle_deg, stop, 0.05f);
+    CameraPan_Init(&pan);
+    for (int i = 0; i < 200; i++) CameraPan_Step(&pan, 0.75f * (float)(i / 5), DT);   /* 15 deg/s for 2 s */
+    float last_target = 0.75f * (float)(199 / 5), over = 0.0f;
+    for (int i = 0; i < 300; i++) over = fmaxf(over, CameraPan_Step(&pan, last_target, DT) - last_target);
+    assert(over < 3.0f);
+    close_to(pan.angle_deg, last_target, 0.05f);
+
+    /* A stalled loop (a 10 s tick) moves it no more than a 0.1 s one could. */
+    CameraPan_Init(&pan);
+    assert(fabsf(CameraPan_Step(&pan, 5.0f, 10.0f)) <= CAM_PAN_ACCEL_DPS2 * 0.1f * 0.1f + 1e-3f);
 
     /* Pan targets past +-90 deg stop at the limit, and its pulses stay in the limits' pulses. */
     CameraPan_Init(&pan);

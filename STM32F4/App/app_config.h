@@ -187,6 +187,11 @@
    KP 10 /s settles a step in about 0.3 s and trails a 30 deg/s sweep by 3 deg. */
 #define CAM_PAN_SMOOTH_KP          10.0f   /* per second, both axes */
 #define CAM_PAN_MAX_RATE_DPS       180.0f
+/* Pan only: it runs at the speed the Pi's targets move and changes speed at most ACCEL, so a 20 Hz
+   stream of targets turns into steady motion instead of 20 small jerks a second. */
+#define CAM_PAN_ACCEL_DPS2         300.0f  /* 0 to 15 deg/s in 50 ms; 0 to 180 in 0.6 s */
+#define CAM_PAN_FF_MAX_DPS         60.0f   /* the fastest target speed it follows ahead */
+#define CAM_PAN_FF_STALE_S         0.15f   /* no new target this long: they stopped (3 packets at 20 Hz) */
 #define CAM_TILT_MAX_RATE_DPS      60.0f
 /* Last guard in Actuators_WriteServo: the SG90's own travel. The rudders keep SERVO_MIN/MAX_US. */
 #define CAM_SERVO_MIN_US           500U
