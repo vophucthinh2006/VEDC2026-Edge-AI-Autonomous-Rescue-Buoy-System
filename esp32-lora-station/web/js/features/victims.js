@@ -2,10 +2,10 @@
 // và cảnh báo lật phao / xác nhận nhận đồ cứu hộ.
 // Máy chủ đã bỏ bản phao gửi lặp và gộp báo cáo của mọi phao cách nhau dưới 6 m thành một người; phao báo đầu là
 // chủ (docs/victim-claim.md). Viền chấm theo màu phao chủ; admin đánh dấu đã cứu, nhả, hoặc giao cho phao khác.
-import { tellVictim } from './demo.js';
 import { state, RISKS, LORA_GOOD_M, LORA_WEAK_M } from '../state.js';
 import { hm, fmtAgo } from '../util/format.js';
 import { distM } from '../util/geo.js';
+import { tellVictim } from './demo.js';
 import { log, logPast } from './timeline.js';
 import { colorOf } from './fleet.js';
 
