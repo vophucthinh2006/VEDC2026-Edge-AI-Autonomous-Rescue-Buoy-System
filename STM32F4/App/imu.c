@@ -91,6 +91,7 @@ bool IMU_Read(bno055_euler_t *out) {
 
     if (BNO055_ReadCalibStatus(&hbno055, &bno055_calib) == BNO055_OK) {
         out->calibration = bno055_calib.sys;
+        out->mag_calibration = bno055_calib.mag;
 
         /* Snapshot the offsets the first time the sensor reports a complete
            calibration, so the operator can dump and commit a new profile. */

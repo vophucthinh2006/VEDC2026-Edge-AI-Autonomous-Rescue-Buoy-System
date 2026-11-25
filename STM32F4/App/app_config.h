@@ -47,11 +47,15 @@
 /* Heading reference. East magnetic declination and a clockwise sensor
    mounting correction are positive. Calibrate both values on the finished
    boat before a water run. */
-/* The bow is the BNO055's -x axis. Measured 2026-10-20 with the bow pointed north by a phone
-   compass, indoors: the sensor read 191.2 deg (180 for -x, the rest the indoor field and the phone).
-   Measure again on the water, away from steel: point the bow north, read Tools/heading_monitor.py,
-   set this to 360 - yaw. */
-#define IMU_MOUNTING_OFFSET_DEG    168.8f
+/* The bow is the BNO055's +x axis, its port side +y (remounted). Measured 2026-11-22 indoors, the
+   magnetometer calibrated in the boat (mag 3/3, profile in Modules/BNO055/bno055_calib_profile.h),
+   bow to a phone compass at four headings: offset = phone - sensor heading came out 114.1 (W, 280),
+   79.2 (N, 10), 82.2 (E, 100), 89.8 (S, 188); this is their mean. Left over: -23 deg facing west,
+   +12 north, +9 east, +1 south: the boat's own field (motors, pack) or the room. The old 168.8 (bow
+   -x, 2026-10-20) read about 100 deg off. Measure again on the water, away from steel, at four
+   headings, and set the mean of phone - (yaw - this). Roll and pitch read with their signs reversed
+   since the remount (only their size is used). */
+#define IMU_MOUNTING_OFFSET_DEG    91.2f
 #define MAGNETIC_DECLINATION_DEG   0.0f
 /* Gyro Z to a clockwise turn rate. BNO055 flat, Z up: gyro Z is positive
    anticlockwise, hence -1. Check on the desk: turn the sensor clockwise
