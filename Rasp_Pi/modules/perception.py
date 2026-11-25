@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, radians, sin, tan
+from math import cos, radians, sin, sqrt, tan
 
 from modules.lidar_ld14 import LidarPoint
 from utils.geometry import median, signed_angle_deg
@@ -153,9 +153,13 @@ class SweepPattern:
     boat keeps moving.
     """
 
-    def __init__(self, limit_deg: float, rate_deg_s: float) -> None:
+    def __init__(self, limit_deg: float, rate_deg_s: float, accel_deg_s2: float = 0.0) -> None:
+        """accel_deg_s2 > 0 (camera.scan.sweep_accel_deg_s2): the speed ramps up from each end and down
+        into the next, instead of turning back at full speed; 0 keeps the plain triangle."""
         self.limit, self.rate = abs(float(limit_deg)), abs(float(rate_deg_s))
+        self.accel = abs(float(accel_deg_s2))
         self._angle, self._direction, self._at = 0.0, -1.0, 0.0
+        self._speed = 0.0   # eased sweep only: its speed now
         self._turns = 0     # ends reached since start(): RasterSweep changes rows on them
 
     @property
@@ -166,7 +170,7 @@ class SweepPattern:
         """Begin (or resume) from where the camera points, heading for the nearer end first."""
         self._angle = max(-self.limit, min(self.limit, float(pan_deg)))
         self._direction = 1.0 if self._angle > 0 else -1.0
-        self._at, self._turns = now, 0
+        self._at, self._turns, self._speed = now, 0, 0.0
         return self._angle
 
     def usable(self, _now: float) -> bool:
@@ -174,6 +178,8 @@ class SweepPattern:
 
     def frame_done(self, now: float) -> float:
         """Advance to `now` and return the angle to command."""
+        if self.accel > 0.0:
+            return self._eased(now)
         travel = self.rate * max(0.0, now - self._at)
         self._at = now
         while travel > 0.0:
@@ -184,6 +190,24 @@ class SweepPattern:
             self._angle = self.limit * self._direction
             self._direction, travel = -self._direction, travel - room
             self._turns += 1
+        return self._angle
+
+    def _eased(self, now: float) -> float:
+        """Trapezoid speed in 10 ms steps: up at accel from an end, rate in between, and never faster
+        than it can still stop at the next end (sqrt(2 accel room)); there it turns from rest."""
+        left = max(0.0, now - self._at)
+        self._at = now
+        while left > 1e-9:
+            dt = min(0.01, left)
+            left -= dt
+            room = self.limit - self._angle if self._direction > 0 else self._angle + self.limit
+            self._speed = min(self._speed + self.accel * dt, self.rate, sqrt(2.0 * self.accel * room))
+            move = min(self._speed * dt, room)
+            self._angle += self._direction * move
+            if room - move <= 1e-6:
+                self._angle = self.limit * self._direction
+                self._direction, self._speed = -self._direction, 0.0
+                self._turns += 1
         return self._angle
 
 
@@ -197,8 +221,9 @@ class RasterSweep(SweepPattern):
     Same interface as SweepPattern, frame_done still returns the pan; tilt_deg is the row. Frames are
     unusable for settle_s after a row change, while the tilt servo travels (F407 CAM_TILT_MAX_RATE_DPS)."""
 
-    def __init__(self, limit_deg: float, rate_deg_s: float, rows_deg: list[float], settle_s: float = 0.6) -> None:
-        super().__init__(limit_deg, rate_deg_s)
+    def __init__(self, limit_deg: float, rate_deg_s: float, rows_deg: list[float], settle_s: float = 0.6,
+                 accel_deg_s2: float = 0.0) -> None:
+        super().__init__(limit_deg, rate_deg_s, accel_deg_s2)
         self.rows = [float(r) for r in rows_deg] or [0.0]
         self.settle_s = float(settle_s)
         self._row_changed_at = -1e9
@@ -229,9 +254,9 @@ def make_scan(scan: dict | None) -> ScanPattern | SweepPattern | None:
     mode = str(scan.get("mode", "step")).lower()
     if mode == "raster":
         return RasterSweep(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"], scan.get("tilt_rows_deg", [0, 20]),
-                           scan.get("tilt_settle_s", 0.6))
+                           scan.get("tilt_settle_s", 0.6), scan.get("sweep_accel_deg_s2", 0.0))
     if mode == "sweep":
-        return SweepPattern(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"])
+        return SweepPattern(scan["sweep_limit_deg"], scan["sweep_rate_deg_s"], scan.get("sweep_accel_deg_s2", 0.0))
     return ScanPattern(scan["angles_deg"], scan["settle_s"], scan["dwell_frames"])
 
 

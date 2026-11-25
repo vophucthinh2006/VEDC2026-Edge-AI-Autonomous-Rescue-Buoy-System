@@ -65,6 +65,44 @@ class RasterSweepTest(unittest.TestCase):
         self.assertEqual(track_pan(-40.0, -40.0, 0.5, 2.0, 45.0), -45.0)       # the pan as before
 
 
+class EasedSweepTest(unittest.TestCase):
+    """sweep_accel_deg_s2: the pan slows into each end and speeds up out of it (it looked jerky)."""
+
+    def samples(self, sweep, seconds, dt=0.05):
+        sweep.start(0.0, 0.0)
+        return [sweep.frame_done(t * dt) for t in range(1, int(seconds / dt) + 1)]
+
+    def test_full_speed_between_the_ends_eased_at_them(self):
+        dt = 0.05
+        angles = self.samples(SweepPattern(45, 15, 30), 30.0, dt)
+        speeds = [(b - a) / dt for a, b in zip(angles, angles[1:])]
+        accels = [(b - a) / dt for a, b in zip(speeds, speeds[1:])]
+        self.assertAlmostEqual(max(abs(s) for s in speeds), 15.0, places=3)        # the rate in the middle
+        # About accel, read off 50 ms frames (a turn falls inside one): the triangle shows 30 / 0.05 = 600
+        triangle = self.samples(SweepPattern(45, 15), 30.0, dt)
+        triangle_speeds = [(b - a) / dt for a, b in zip(triangle, triangle[1:])]
+        self.assertGreater(max(abs(b - a) / dt for a, b in zip(triangle_speeds, triangle_speeds[1:])), 500.0)
+        self.assertLessEqual(max(abs(a) for a in accels), 30.0 * 1.5)
+        self.assertAlmostEqual(min(angles), -45.0, delta=0.05)                    # and it still reaches both ends
+        self.assertAlmostEqual(max(angles), 45.0, delta=0.05)                     # (between two 50 ms frames)
+        middle = [abs(s) for a, s in list(zip(angles, speeds))[20:] if abs(a) < 30.0]   # after the start from rest
+        self.assertAlmostEqual(min(middle), 15.0, places=3)                       # full speed in the middle
+
+    def test_turns_still_count_for_the_raster_rows(self):
+        sweep = RasterSweep(45, 15, [0, 20], accel_deg_s2=30)
+        sweep.start(0.0, 0.0)
+        rows = set()
+        for t in range(1, 600):
+            pan = sweep.frame_done(t * 0.05)
+            rows.add(sweep.tilt_deg)
+            self.assertLessEqual(abs(pan), 45.0)
+        self.assertEqual(rows, {0.0, 20.0})
+        self.assertGreaterEqual(sweep._turns, 4)       # 30 s: 2 turns a 13 s round, the eased one included
+
+    def test_zero_accel_is_the_old_triangle(self):
+        self.assertEqual(self.samples(SweepPattern(45, 15, 0), 10.0), self.samples(SweepPattern(45, 15), 10.0))
+
+
 @unittest.skipIf(VisionWorker is None, "OpenCV not installed")
 class GimbalVisionTest(unittest.TestCase):
     def setUp(self):
