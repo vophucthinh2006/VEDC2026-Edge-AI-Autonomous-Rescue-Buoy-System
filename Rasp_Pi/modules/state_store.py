@@ -125,6 +125,8 @@ class Snapshot:
     speed_limit: float | None = None             # set by the mission while the boat leads a formation: its top speed
     # $SKP: people another boat looks after or already rescued (docs/victim-claim.md), (lat, lon, when heard)
     skips: tuple[tuple[float, float, float], ...] = ()
+    assumed_position: tuple[float, float] | None = None   # the boat indoors, by config (follow.boat_position)
+    assumed_forced: bool = False                          # ... even with a real fix: the demo switch
 
 
 class StateStore:
