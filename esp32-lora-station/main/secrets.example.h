@@ -6,6 +6,9 @@
 // Mang thu hai (tuy chon), chi dung khi khong thay mang tren:
 // #define WIFI_SSID_2        "wifi-du-phong"
 // #define WIFI_PASSWORD_2    "mat-khau-2"
+// Mang thu ba (tuy chon):
+// #define WIFI_SSID_3        "wifi-du-phong-2"
+// #define WIFI_PASSWORD_3    "mat-khau-3"
 
 // Địa chỉ Worker sau khi deploy (xem cloud/README hoặc README.md), luôn là https
 #define CLOUD_INGEST_URL   "https://mliot-redgescue.<tai-khoan>.workers.dev/api/ingest"

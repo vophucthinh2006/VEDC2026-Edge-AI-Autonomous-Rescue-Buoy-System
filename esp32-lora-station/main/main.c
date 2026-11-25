@@ -130,11 +130,14 @@ static const char *duong_mang(void) {
 
 // ---------------------------------------------------------------- WiFi Station
 // Không chặn app_main: LoRa vẫn chạy khi chưa có WiFi, gói nhận được xếp hàng chờ gửi.
-// Các mạng theo thứ tự ưu tiên (secrets.h): WIFI_SSID, rồi WIFI_SSID_2 nếu có.
+// Các mạng theo thứ tự ưu tiên (secrets.h): WIFI_SSID, rồi WIFI_SSID_2, WIFI_SSID_3 nếu có.
 static const struct { const char *ssid, *pass; } wifi_mang[] = {
     { WIFI_SSID, WIFI_PASSWORD },
 #ifdef WIFI_SSID_2
     { WIFI_SSID_2, WIFI_PASSWORD_2 },
+#endif
+#ifdef WIFI_SSID_3
+    { WIFI_SSID_3, WIFI_PASSWORD_3 },
 #endif
 };
 #define WIFI_SO_MANG (sizeof(wifi_mang) / sizeof(wifi_mang[0]))
