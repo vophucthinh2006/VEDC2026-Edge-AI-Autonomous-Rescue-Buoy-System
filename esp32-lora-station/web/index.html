@@ -72,7 +72,7 @@
 
       <div class="h-tiles">
         <div class="h-tile" title="Phao cứu hộ đang hoạt động trong 5 km"><i class="ph ph-lifebuoy" aria-hidden="true"></i><b id="a-buoys">0</b><span>phao gần nhà</span></div>
-        <div class="h-tile t-people" title="Người được phát hiện trong 5 km"><i class="ph ph-user-focus" aria-hidden="true"></i><b id="a-people">0</b><span>được phát hiện</span></div>
+        <div class="h-tile t-people" title="Vùng cứu hộ trong 5 km"><i class="ph ph-user-focus" aria-hidden="true"></i><b id="a-people">0</b><span>vùng cứu hộ</span></div>
         <div class="h-tile t-aid" title="Người đã được cứu hoặc nhận đồ cứu trợ trong 5 km"><i class="ph ph-hand-heart" aria-hidden="true"></i><b id="a-aid">0</b><span>đã được giúp</span></div>
         <div class="h-tile" id="a-near-tile" title="Phao gần nhà nhất"><i id="a-near-arrow" class="ph-fill ph-navigation-arrow h-arrow" aria-hidden="true"></i><b><span id="a-near">--</span><small id="a-near-unit"></small></b><span id="a-near-dir">phao gần nhất</span></div>
       </div>
@@ -96,7 +96,7 @@
     </section>
 
     <section id="people-card" class="g-card" aria-labelledby="people-title" hidden style="--i:1">
-      <h2 id="people-title">Người được phát hiện gần nhà</h2>
+      <h2 id="people-title">Vùng cứu hộ gần nhà</h2>
       <ul id="near-list" class="g-people"></ul>
     </section>
 
@@ -104,7 +104,7 @@
       <h2 id="overall-title">Toàn vùng cứu hộ</h2>
       <div class="g-stats">
         <div class="c-buoy"><b id="s-buoys">-</b><span>phao liên lạc</span></div>
-        <div class="c-people"><b id="s-people">-</b><span>người phát hiện</span></div>
+        <div class="c-people"><b id="s-people">-</b><span>lần phát hiện</span></div>
         <div class="c-aid"><b id="s-aid">-</b><span>được giúp</span></div>
       </div>
       <p id="s-updated" class="g-hint"></p>
@@ -128,18 +128,18 @@
     </section>
 
     <footer class="g-foot">
-      <p>Vị trí người được phát hiện do camera trên phao ước lượng, có thể lệch vài mét.</p>
+      <p>Vùng cứu hộ có tâm là vị trí người do camera trên phao ước lượng; vòng tròn bán kính khoảng 10 m bao sai số đó.</p>
       <a href="/admin"><i class="ph ph-lock-key" aria-hidden="true"></i>Trạm điều hành (dành cho người điều khiển)</a>
     </footer>
   </div>
 
   <div class="g-mapwrap">
-    <div id="map" aria-label="Bản đồ phao cứu hộ và người được phát hiện"></div>
+    <div id="map" aria-label="Bản đồ phao cứu hộ và các vùng cứu hộ"></div>
     <button id="map-home" class="g-maptool" type="button" aria-label="Về quê nhà trên bản đồ" title="Về quê nhà" hidden><i class="ph ph-house-line" aria-hidden="true"></i></button>
     <div class="g-legend" aria-hidden="true">
       <span class="lg-home-row" hidden><i class="lg-home"></i>Nhà bạn</span>
       <span><i class="lg-buoy"></i>Phao</span>
-      <span><i class="lg-person"></i>Người cần cứu</span>
+      <span><i class="lg-person"></i>Vùng cứu hộ</span>
       <span><i class="lg-station"></i>Trạm bờ</span>
     </div>
   </div>

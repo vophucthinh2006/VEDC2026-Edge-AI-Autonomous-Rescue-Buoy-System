@@ -1,8 +1,8 @@
-// Người phao phát hiện (chấm màu theo mức nguy hiểm), khối "Người cần cứu" ở cột trái,
+// Vùng cứu hộ quanh người phao phát hiện (tâm = vị trí ước lượng, vòng ZONE_M màu theo mức nguy hiểm), khối "Vùng cứu hộ" ở cột trái,
 // và cảnh báo lật phao / xác nhận nhận đồ cứu hộ.
 // Máy chủ đã bỏ bản phao gửi lặp và gộp báo cáo của mọi phao cách nhau dưới 6 m thành một người; phao báo đầu là
 // chủ (docs/victim-claim.md). Viền chấm theo màu phao chủ; admin đánh dấu đã cứu, nhả, hoặc giao cho phao khác.
-import { state, RISKS, LORA_GOOD_M, LORA_WEAK_M } from '../state.js';
+import { state, RISKS, ZONE_M, LORA_GOOD_M, LORA_WEAK_M } from '../state.js';
 import { hm, fmtAgo } from '../util/format.js';
 import { distM } from '../util/geo.js';
 import { log, logPast } from './timeline.js';
@@ -14,7 +14,8 @@ const LIST_MAX = 3;   // rows shown before "Xem thêm"
 const $ = id => document.getElementById(id);
 const dotLayer = L.layerGroup();
 const alertLayer = L.layerGroup();
-const dots = new Map();      // vid -> circleMarker
+const dots = new Map();      // vid -> circleMarker (centre)
+const zones = new Map();     // vid -> L.circle, ZONE_M around the centre
 const victims = new Map();   // vid -> latest victim record
 let map = null;
 let toast = () => {};
@@ -37,10 +38,11 @@ function victimPopup(v) {
   const box = document.createElement('div');
   box.className = 'map-pop';
   const h = document.createElement('b');
-  h.textContent = 'Người cần cứu: ' + RISKS[v.risk].name;
+  h.textContent = 'Vùng cứu hộ: ' + RISKS[v.risk].name;
   h.style.color = RISKS[v.risk].color;
   const dl = document.createElement('dl');
   row(dl, 'Độ tin cậy', Math.round(v.conf * 100) + '%');
+  row(dl, 'Bán kính', `~${ZONE_M} m quanh vị trí ước lượng`);
   row(dl, 'Thấy lần cuối', `${timeText(v.last_at)} (${fmtAgo(v.last_at)})`);
   if (v.status) row(dl, 'Trạng thái', STATUS_TEXT[v.status] + (ownerOf(v) ? ` · ${ownerOf(v)}` : ''));
   else row(dl, 'Phao báo', v.buoy);
@@ -65,7 +67,7 @@ function adminActions(v) {
   const others = [...state.buoys.keys()].filter(id => id !== ownerOf(v) && state.buoys.get(id).link !== 'mavlink').sort();
   if (others.length) {
     const pick = document.createElement('select');
-    pick.setAttribute('aria-label', 'Phao nhận người này');
+    pick.setAttribute('aria-label', 'Phao nhận vùng này');
     for (const id of others) pick.add(new Option(id, id));
     bar.appendChild(pick);
     button('Giao', '', () => onAction(v.vid, 'assign', pick.value));
@@ -78,9 +80,14 @@ function putVictim(v) {
   victims.set(v.vid, v);
   // Viền theo màu phao chủ; đã cứu: nhạt đi, viền trắng
   const owner = ownerOf(v), rescued = v.status === 'rescued';
-  const style = { radius: 7 + v.risk, color: rescued || !owner ? '#F8FAFC' : colorOf(owner), weight: owner && !rescued ? 3 : 2,
+  const style = { radius: 5, color: rescued || !owner ? '#F8FAFC' : colorOf(owner), weight: owner && !rescued ? 3 : 2,
     dashArray: v.status === 'released' ? '3 3' : null, fillColor: RISKS[v.risk].color, fillOpacity: rescued ? .35 : .95 };
   const m = dots.get(v.vid);
+  const ring = { radius: ZONE_M, color: RISKS[v.risk].color, weight: 2, opacity: rescued ? .4 : .9,
+    dashArray: v.status === 'released' ? '6 4' : null, fillColor: RISKS[v.risk].color, fillOpacity: rescued ? .06 : .18 };
+  const z = zones.get(v.vid);
+  if (z) z.setLatLng([v.lat, v.lon]).setStyle(ring).setPopupContent(() => victimPopup(v));
+  else zones.set(v.vid, L.circle([v.lat, v.lon], ring).bindPopup(() => victimPopup(v), { className: 'pop' }).addTo(dotLayer));
   if (m) m.setLatLng([v.lat, v.lon]).setStyle(style).setRadius(style.radius).setPopupContent(() => victimPopup(v));
   else dots.set(v.vid, L.circleMarker([v.lat, v.lon], style).bindPopup(() => victimPopup(v), { className: 'pop' }).addTo(dotLayer));
 }
@@ -118,7 +125,7 @@ function noteCapsize(a) {
 const ordered = () => [...victims.values()].sort((a, b) =>
   (a.status === 'rescued') - (b.status === 'rescued') || b.risk - a.risk || b.last_at - a.last_at);
 
-// The "Người cần cứu" block in the left column
+// The "Vùng cứu hộ" block in the left column
 function renderVictims() {
   const list = $('victim-list');
   const all = ordered();
@@ -149,14 +156,14 @@ function renderVictims() {
     if (n > 1) sub.title = `${n} phao thấy: ${seenBy(v).join(', ')}`;
     const go = document.createElement('i'); go.className = 'ph ph-arrow-right'; go.setAttribute('aria-hidden', 'true');
     btn.append(dot, main, sub, go);
-    btn.setAttribute('aria-label', `${RISKS[v.risk].name}, tin cậy ${Math.round(v.conf * 100)}%, ${who}${n > 1 ? `, ${n} phao thấy` : ''}, ${fmtAgo(v.last_at)}. Xem trên bản đồ`);
+    btn.setAttribute('aria-label', `Vùng cứu hộ ${RISKS[v.risk].name.toLowerCase()}, tin cậy ${Math.round(v.conf * 100)}%, ${who}${n > 1 ? `, ${n} phao thấy` : ''}, ${fmtAgo(v.last_at)}. Xem trên bản đồ`);
     btn.addEventListener('click', () => flyTo(v.vid));
     li.appendChild(btn);
     list.appendChild(li);
   }
   const more = $('victims-more');
   more.hidden = all.length <= LIST_MAX;
-  more.textContent = showAll ? 'Thu gọn' : `Xem thêm ${all.length - LIST_MAX} người`;
+  more.textContent = showAll ? 'Thu gọn' : `Xem thêm ${all.length - LIST_MAX} vùng`;
 }
 
 function flyTo(vid) {
@@ -166,19 +173,19 @@ function flyTo(vid) {
   map.once('moveend', () => m.openPopup());
 }
 
-// People within `radiusM` of a point (address search)
+// Rescue zones whose centre is within `radiusM` of a point (address search)
 export function victimsNear(p, radiusM) {
   return [...victims.values()].filter(v => distM(p, v) <= radiusM);
 }
 
 // Dòng nhật ký của một người hay một cảnh báo: [loại, chữ, lúc, id]. Cùng một hàm cho sự kiện vừa đến và cho ảnh
 // chụp lúc mở trang, nên tải lại trang không thêm dòng trùng (timeline.js so theo id).
-const foundRow = v => ['victim', `${v.buoy} phát hiện người, mức ${RISKS[v.risk].name.toLowerCase()}`, v.first_at, `v${v.vid}@${v.first_at}:found`];
+const foundRow = v => ['victim', `${v.buoy} đánh dấu vùng cứu hộ, mức ${RISKS[v.risk].name.toLowerCase()}`, v.first_at, `v${v.vid}@${v.first_at}:found`];
 function statusRow(v, before) {
   const id = `v${v.vid}@${v.first_at}:${v.status}@${v.status_at}`;
-  if (v.status === 'rescued') return ['rescue', `Người của ${ownerOf(v) || v.buoy} đã được cứu`, v.status_at, id];
-  if (v.status === 'released') return ['claim', `Người của ${before || v.buoy} được nhả: phao khác thấy sẽ nhận`, v.status_at, id];
-  if (v.status === 'claimed' && v.owner !== v.buoy) return ['claim', `${v.owner} nhận người${v.status_by ? ' (admin giao)' : ''}`, v.status_at, id];
+  if (v.status === 'rescued') return ['rescue', `Vùng cứu hộ của ${ownerOf(v) || v.buoy}: đã cứu`, v.status_at, id];
+  if (v.status === 'released') return ['claim', `Vùng cứu hộ của ${before || v.buoy} được nhả: phao khác thấy sẽ nhận`, v.status_at, id];
+  if (v.status === 'claimed' && v.owner !== v.buoy) return ['claim', `${v.owner} nhận vùng cứu hộ${v.status_by ? ' (admin giao)' : ''}`, v.status_at, id];
   return null;   // claimed by the first boat to see them: the "found" row says it
 }
 function alertRow(a) {
@@ -186,14 +193,14 @@ function alertRow(a) {
   if (a.type === 'T') return ['capsize', `${a.buoy} bị lật`, a.at, id];
   if (a.type === 'C') return ['rescue', `${a.buoy}: người gặp nạn đã nhận đồ cứu hộ`, a.at, id];
   if (a.type === 'E') return ['leader', `${a.replaces} mất liên lạc: ${a.buoy} lên dẫn đầu đội hình, nhận phần lộ trình còn lại`, a.at, id];
-  if (a.type === 'V' && RISKS[a.risk]) return ['victim', `${a.buoy} phát hiện người, mức ${RISKS[a.risk].name.toLowerCase()} (phao chưa có GPS)`, a.at, id];
+  if (a.type === 'V' && RISKS[a.risk]) return ['victim', `${a.buoy} phát hiện người, mức ${RISKS[a.risk].name.toLowerCase()} (phao chưa có GPS, chưa đánh dấu được vùng)`, a.at, id];
   return null;
 }
 
 // Ảnh chụp toàn bộ lúc mở trang, hoặc sau khi admin xoá chấm: vẽ lại, không báo; những gì máy chủ còn giữ vào lại
 // nhật ký (không tính là mới), kể cả trên trình duyệt chưa từng mở trang này
 export function onVictimsSnapshot(m) {
-  dotLayer.clearLayers(); dots.clear(); victims.clear(); alertLayer.clearLayers();
+  dotLayer.clearLayers(); dots.clear(); zones.clear(); victims.clear(); alertLayer.clearLayers();
   for (const v of m.victims || []) {
     putVictim(v);
     if (!RISKS[v.risk]) continue;
@@ -219,18 +226,18 @@ export function onVictimMessage(m) {
   renderVictims();
   if (m.new || !before) {
     log(...foundRow(v));
-    toast(`${v.buoy} phát hiện người (${RISKS[v.risk].name})`, 'bad');
+    toast(`${v.buoy} đánh dấu vùng cứu hộ (${RISKS[v.risk].name})`, 'bad');
     return;
   }
   // Nhận nạn nhân: một phao khác thấy cùng người (nó đi tiếp), người đã được cứu, được nhả, đổi chủ
   if (seenBy(v).length > was.seen) {
     const boat = seenBy(v).at(-1);
-    log('claim', `${boat} cũng thấy người của ${ownerOf(v) || v.buoy}: đi tiếp, không dừng`, v.last_at, `v${v.vid}@${v.first_at}:seen:${boat}`);
+    log('claim', `${boat} cũng thấy vùng cứu hộ của ${ownerOf(v) || v.buoy}: đi tiếp, không dừng`, v.last_at, `v${v.vid}@${v.first_at}:seen:${boat}`);
   }
   if (v.status !== was.status || v.owner !== was.owner) {
     const s = statusRow(v, was.owner);
     if (s) log(...s);
-    if (v.status === 'rescued') toast('Đã cứu một người', 'ok');
+    if (v.status === 'rescued') toast('Đã cứu xong một vùng cứu hộ', 'ok');
   }
 }
 
@@ -274,6 +281,7 @@ function legendControl() {
     const el = (cls, color) => { const i = document.createElement('i'); i.className = cls; if (color) i.style.background = color; i.setAttribute('aria-hidden', 'true'); return i; };
     for (const r of RISKS) item(el('dot', r.color), r.name);
     item(el('lg-buoy'), 'Phao');
+    item(el('zone'), `Vùng cứu hộ (~${ZONE_M} m), màu theo mức:`);
     item(el('lg-leader'), 'Dẫn đầu đội hình');
     item(el('lg-follower'), 'Theo sau trong đội hình');
     item(el('lg-station'), 'Trạm bờ');
@@ -297,7 +305,7 @@ export function initVictims(leafletMap, { toast: t, onClear, onVictimAction }) {
   dotLayer.addTo(map);
   legendControl().addTo(map);
   $('btn-clear-victims').addEventListener('click', () => {
-    if (confirm('Xoá mọi người cần cứu và cảnh báo lật trên bản đồ? Mọi người đang xem cùng bị xoá.')) onClear();
+    if (confirm('Xoá mọi vùng cứu hộ và cảnh báo lật trên bản đồ? Mọi người đang xem cùng bị xoá.')) onClear();
   });
   $('victims-more').addEventListener('click', () => { showAll = !showAll; renderVictims(); });
   renderVictims();

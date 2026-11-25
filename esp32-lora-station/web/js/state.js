@@ -20,6 +20,8 @@ export const RISKS = [
   { name: 'Cao', color: '#F97316' },
   { name: 'Nguy kịch', color: '#EF4444' },
 ];
+// A find is shown as a rescue zone: centre = the estimated position, this radius covers GPS + camera range error
+export const ZONE_M = 10;
 const SIGNAL_LATE_SEC = 12;       // two missed 5 s beacons: signal drops one level
 
 export const state = {

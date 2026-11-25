@@ -2,7 +2,7 @@
 // home on the map, then read in plain words what the buoys near it are doing and who has been found
 // there. Nothing here commands anything; the console for the people running the buoys is /admin (js/app.js).
 // The data is the Hub's WebSocket stream, the same as the console's, read with the same rules (state.js).
-import { state, readBuoy, buoyStatus, stationStatus, RISKS, LORA_GOOD_M, LORA_WEAK_M } from './state.js';
+import { state, readBuoy, buoyStatus, stationStatus, RISKS, ZONE_M, LORA_GOOD_M, LORA_WEAK_M } from './state.js';
 import { distM, bearingDeg, compassWord } from './util/geo.js';
 import { addBaseMap, prefetchAround } from './util/basemap.js';
 import { fmtDist, fmtAgo, hm } from './util/format.js';
@@ -206,10 +206,10 @@ function rescueStatus(v) {
 
 function personPopup(v) {
   const box = el('div', 'g-pop');
-  const h = el('b', '', 'Người cần cứu');
+  const h = el('b', '', 'Vùng cứu hộ');
   const risk = el('span', 'g-risk', 'Mức nguy hiểm: ' + RISKS[v.risk].name.toLowerCase());
   risk.style.setProperty('--c', RISKS[v.risk].color);
-  box.append(h, risk, el('span', '', `Phát hiện lúc ${hm(new Date(v.first_at))}, thấy lần cuối ${fmtAgo(v.last_at)}`),
+  box.append(h, risk, el('span', '', `Bán kính ~${ZONE_M} m quanh vị trí phao ước lượng`), el('span', '', `Phát hiện lúc ${hm(new Date(v.first_at))}, thấy lần cuối ${fmtAgo(v.last_at)}`),
     el('span', '', `Phao ${v.buoy} báo về`));
   const st = rescueStatus(v);
   if (st) { const pill = el('span', 'g-pill', st.text); pill.dataset.tone = st.tone; box.append(pill); }
@@ -218,7 +218,8 @@ function personPopup(v) {
 
 // Markers are kept and moved, not redrawn: a popup open on a person stays open while beacons come in
 const buoyMarkers = new Map();     // id -> { marker, tone }
-const personMarkers = new Map();   // vid -> circleMarker
+const personMarkers = new Map();   // vid -> circleMarker (zone centre)
+const zoneMarkers = new Map();     // vid -> L.circle, ZONE_M around it
 let coverAt = '';
 
 function drawMap() {
@@ -235,9 +236,14 @@ function drawMap() {
     had.marker.setLatLng([b.lat, b.lon]).setTooltipContent(tip);
     if (had.tone !== say.tone) { had.marker.setIcon(buoyIcon(id, b)); had.tone = say.tone; }
   }
-  for (const [vid, m] of personMarkers) if (!victims.has(vid)) { m.remove(); personMarkers.delete(vid); }
+  for (const [vid, m] of personMarkers) if (!victims.has(vid)) { m.remove(); personMarkers.delete(vid); zoneMarkers.get(vid)?.remove(); zoneMarkers.delete(vid); }
   for (const v of victims.values()) {
-    const style = { radius: 8 + v.risk, color: '#FFFFFF', weight: 2.5, fillColor: RISKS[v.risk].color, fillOpacity: 1 };
+    const ring = { radius: ZONE_M, color: RISKS[v.risk].color, weight: 2, fillColor: RISKS[v.risk].color, fillOpacity: v.status === 'rescued' ? .06 : .2 };
+    const z = zoneMarkers.get(v.vid);
+    if (z) z.setLatLng([v.lat, v.lon]).setStyle(ring);
+    else zoneMarkers.set(v.vid, L.circle([v.lat, v.lon], ring)
+      .bindPopup(() => personPopup(victims.get(v.vid) || v), { className: 'g-popup' }).addTo(personLayer));
+    const style = { radius: 5, color: '#FFFFFF', weight: 2, fillColor: RISKS[v.risk].color, fillOpacity: 1 };
     const m = personMarkers.get(v.vid);
     if (m) m.setLatLng([v.lat, v.lon]).setStyle(style).setRadius(style.radius);
     else personMarkers.set(v.vid, L.circleMarker([v.lat, v.lon], style)
@@ -306,8 +312,8 @@ function drawArea() {
   // The ring: the most urgent thing first
   let tone, text;
   const need = open.filter(v => v.risk >= 1);   // "An toàn": found, not in danger
-  if (need.some(v => v.risk >= 3)) { tone = 'bad'; text = 'Có người nguy kịch'; }
-  else if (need.length) { tone = 'warn'; text = need.length > 1 ? `${need.length} người cần cứu` : 'Có người cần cứu'; }
+  if (need.some(v => v.risk >= 3)) { tone = 'bad'; text = 'Có vùng cứu hộ nguy kịch'; }
+  else if (need.length) { tone = 'warn'; text = need.length > 1 ? `${need.length} vùng cứu hộ` : 'Có vùng cứu hộ'; }
   else if (active.length) { tone = 'ok'; text = searching ? 'Phao đang tìm kiếm' : 'Có phao gần nhà'; }
   else { tone = 'idle'; text = nearest ? 'Chưa có phao gần nhà' : 'Chưa có phao báo về'; }
   const st = $('a-status');
@@ -423,7 +429,7 @@ function drawPeople(p, people) {
     b.append(dot, text);
     const st = rescueStatus(v);
     if (st) { const pill = el('span', 'g-pill', st.short); pill.dataset.tone = st.tone; pill.title = st.text; b.append(pill); }
-    b.setAttribute('aria-label', `Mức ${RISKS[v.risk].name.toLowerCase()}, cách nhà ${fmtDist(distM(p, v))}, thấy lần cuối ${fmtAgo(v.last_at)}${st ? ', ' + st.text.toLowerCase() : ''}. Xem trên bản đồ`);
+    b.setAttribute('aria-label', `Vùng cứu hộ mức ${RISKS[v.risk].name.toLowerCase()}, cách nhà ${fmtDist(distM(p, v))}, thấy lần cuối ${fmtAgo(v.last_at)}${st ? ', ' + st.text.toLowerCase() : ''}. Xem trên bản đồ`);
     b.addEventListener('click', () => map.flyTo([v.lat, v.lon], 17, { duration: .6 }));
     li.append(b);
     return li;
@@ -447,9 +453,9 @@ function feedItems() {
   const claimsKnown = [...victims.values()].some(v => v.status);
   for (const v of victims.values()) {
     items.push({ at: v.first_at, tone: 'bad', ic: 'ph-user-focus', pos: v,
-      text: `${v.buoy} thấy một người, mức ${RISKS[v.risk].name.toLowerCase()}` });
+      text: `${v.buoy} đánh dấu vùng cứu hộ, mức ${RISKS[v.risk].name.toLowerCase()}` });
     if (v.status === 'rescued') items.push({ at: v.status_at, tone: 'ok', ic: 'ph-hand-heart', pos: v,
-      text: `Người do ${v.buoy} thấy đã được cứu${v.owner && v.owner !== v.buoy ? ` (phao ${v.owner})` : ''}` });
+      text: `Vùng cứu hộ do ${v.buoy} đánh dấu: đã cứu${v.owner && v.owner !== v.buoy ? ` (phao ${v.owner})` : ''}` });
   }
   for (const a of alerts) {
     const pos = Number.isFinite(a.lat) && Number.isFinite(a.lon) ? a : null;

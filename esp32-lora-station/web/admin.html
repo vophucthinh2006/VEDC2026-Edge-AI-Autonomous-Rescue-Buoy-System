@@ -152,7 +152,7 @@
         <button id="sheet-handle" type="button" aria-expanded="true" aria-controls="drawer"><span>Thu gọn</span></button>
         <nav id="rail" aria-label="Ngăn thông tin">
           <button type="button" class="rail-btn" data-panel="people" aria-pressed="false" aria-controls="drawer">
-            <i class="ph ph-lifebuoy" aria-hidden="true"></i><span>Cần cứu</span>
+            <i class="ph ph-lifebuoy" aria-hidden="true"></i><span>Vùng cứu</span>
             <span id="victims-count" class="count bad badge" hidden>0</span>
           </button>
           <button type="button" class="rail-btn" data-panel="detail" aria-pressed="false" aria-controls="drawer">
@@ -182,12 +182,12 @@
 
           <!-- Monitor mode: one of these at a time, picked on the rail -->
           <div class="panel" id="panel-monitor">
-            <section id="victims" data-panel="people" aria-label="Người cần cứu">
+            <section id="victims" data-panel="people" aria-label="Vùng cứu hộ">
               <div class="sec-head">
                 <button id="btn-clear-victims" class="link-btn admin-only" type="button" hidden>Xoá hết</button>
               </div>
               <ul id="victim-list"></ul>
-              <p id="victims-empty" class="quiet"><i class="ph ph-check-circle" aria-hidden="true"></i>Chưa phát hiện ai cần cứu</p>
+              <p id="victims-empty" class="quiet"><i class="ph ph-check-circle" aria-hidden="true"></i>Chưa có vùng cứu hộ nào</p>
               <button id="victims-more" class="link-btn" type="button" hidden></button>
             </section>
 
@@ -269,7 +269,7 @@
             <div id="log-view" data-panel="log" hidden>
               <div id="tl-head">
                 <div id="tl-groups" class="seg" role="group" aria-label="Loại sự kiện">
-                  <button type="button" data-g="people" aria-pressed="true">Người gặp nạn <span class="count">0</span></button>
+                  <button type="button" data-g="people" aria-pressed="true">Vùng cứu hộ <span class="count">0</span></button>
                   <button type="button" data-g="ops" aria-pressed="false">Tàu &amp; lệnh <span class="count">0</span></button>
                 </div>
                 <button id="tl-clear" type="button" class="link-btn">Xoá nhật ký</button>
