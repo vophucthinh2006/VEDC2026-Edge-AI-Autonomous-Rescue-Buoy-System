@@ -12,6 +12,7 @@ import argparse
 import logging
 import signal
 import threading
+from dataclasses import replace
 from pathlib import Path
 from time import monotonic, sleep
 
@@ -19,6 +20,7 @@ from modules.ai_vision import VisionWorker
 from modules.announcer import Announcer
 from modules.bt_manual import BluetoothManual
 from modules.drive_log import DriveLog
+from modules.heading_bias import HeadingBias
 from modules.lidar_serial import SerialLidar
 from modules.mission import Mission
 from modules.navigation import BapfNavigator, NavCommand
@@ -92,6 +94,8 @@ def main() -> int:
     navigator = BapfNavigator(config["vehicle"], config["planner"])
     # The fence is the pool's: a route from the dashboard keeps it (Route(..., route.geofence) below).
     safety = SafetyArbiter(config["vehicle"], route.inside_fence)
+    heading_bias = HeadingBias(config["vehicle"].get("heading_bias"))
+    last_mode = "STOP"
     sequence = 0
     txd_sequence = 0
     lora_rev = 0          # route sent from the dashboard over LoRa now running, 0 = the file's
@@ -111,9 +115,11 @@ def main() -> int:
     scan = config["camera"].get("scan", {})
     # camera.tilt_enabled: the pan-tilt gimbal. The phone's W sweep is then the AUTO one, over the rows too.
     tilt_on = bool(config["camera"].get("tilt_enabled", False))
-    manual_sweep = (RasterSweep(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15), scan.get("tilt_rows_deg", [0, 20]))
+    accel = scan.get("sweep_accel_deg_s2", 0.0)   # eased turns at the ends, as the AUTO sweep
+    manual_sweep = (RasterSweep(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15), scan.get("tilt_rows_deg", [0, 20]),
+                                scan.get("tilt_settle_s", 0.6), accel)
                     if tilt_on and str(scan.get("mode", "")).lower() == "raster"
-                    else SweepPattern(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15)))
+                    else SweepPattern(scan.get("sweep_limit_deg", 45), scan.get("sweep_rate_deg_s", 15), accel))
     manual_pan: dict[str, float | None] = {"deg": 0.0, "tilt": float(config["camera"].get("tilt_home_deg", 10.0)) if tilt_on else None}
     cam_sequence = 0
 
@@ -198,6 +204,12 @@ def main() -> int:
             if snapshot.human_target and now - snapshot.human_target.timestamp > config["vehicle"]["target_timeout_s"]:
                 state.update_human_target(None)
                 snapshot = state.snapshot()
+            # The compass's bias from the GPS course on straight runs (modules/heading_bias.py): the mission and
+            # the navigator work in true headings; $NAV gets the IMU's frame back (+ bias) for the F407's PID.
+            bias = heading_bias.update(now, snapshot.imu.yaw_deg, snapshot.gps.course_deg, snapshot.gps.speed_mps,
+                                       snapshot.gps.fix, last_mode == "BACK")
+            if bias:
+                snapshot = replace(snapshot, imu=replace(snapshot.imu, yaw_deg=(snapshot.imu.yaw_deg - bias) % 360.0))
             lora = uart.lora_route
             if lora is not None and lora.rev != lora_rev:
                 # The dashboard's route replaces the file's, from its first point; the pool's geofence stays.
@@ -247,7 +259,9 @@ def main() -> int:
                 # The admin pressed DỪNG PHAO: the F407 keeps the motors off whatever comes; say so too, so
                 # the viewer and the log show why the boat stands. The route and the mission carry on.
                 command = NavCommand("STOP", 0.0, command.heading_deg, "dashboard_hold")
-            uart.send("NAV", sequence, command.mode, f"{command.speed_mps:.2f}", heading_tenths(command.heading_deg), config["vehicle"]["nav_ttl_ms"])
+            last_mode = command.mode
+            uart.send("NAV", sequence, command.mode, f"{command.speed_mps:.2f}", heading_tenths((command.heading_deg + bias) % 360.0),
+                      config["vehicle"]["nav_ttl_ms"])
             # 4th field: the LoRa route revision running, so the STM32 stops resending it (docs/lora-route-downlink.md);
             # then the mission and the waypoint gone to, which the F407 sends on to the dashboard with the reason,
             # and the detector's frames a second x10 ("-" while it is off: no route, or no camera)
@@ -257,7 +271,7 @@ def main() -> int:
             wp = mission.route.current   # the waypoint itself; planned.waypoint is the aim point along the leg
             run_log.write(snapshot, now, mission.state, 0, cmd_mode=command.mode, cmd_speed_mps=f"{command.speed_mps:.2f}",
                           cmd_heading_deg=f"{command.heading_deg:.1f}", reason=command.reason, wp_index=mission.waypoint_field,
-                          wp_lat=f"{wp[0]:.7f}" if wp else "", wp_lon=f"{wp[1]:.7f}" if wp else "")
+                          wp_lat=f"{wp[0]:.7f}" if wp else "", wp_lon=f"{wp[1]:.7f}" if wp else "", heading_bias_deg=f"{bias:.1f}")
             goal = planned.waypoint
             target_bearing = bearing_deg(snapshot.gps.lat_deg, snapshot.gps.lon_deg, *goal) if goal else command.heading_deg
             state.update_steering(command.heading_deg, target_bearing)

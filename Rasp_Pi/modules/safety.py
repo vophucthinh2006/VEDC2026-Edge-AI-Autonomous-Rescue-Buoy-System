@@ -24,6 +24,10 @@ class SafetyArbiter:
         # the STM32F407 built with BENCH_IGNORE_IMU: the heading is then the last one the IMU read.
         if self.v.get("imu_required", True) and (not snapshot.imu.imu_ok or now - snapshot.imu.timestamp > self.v["imu_stale_s"]):
             return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "imu_stale")
+        # Right after power-up the BNO055's compass is 0/3 until the boat is turned about; its heading was
+        # then off by some 36 deg (2026-11-22). AUTO waits for 2; the phone's MANUAL does not need it.
+        if proposed.mode == "AUTO" and snapshot.imu.mag_calib < self.v.get("min_mag_calib", 2):
+            return NavCommand("STOP", 0.0, snapshot.imu.yaw_deg, "compass_calibrating")
         # BACK (backing off an obstacle, navigation.py) drives too: the same LiDAR and fence checks, no GPS one.
         driven = proposed.mode in ("AUTO", "BACK")
         if driven and self.v.get("lidar_required", True) and now - snapshot.scan_timestamp > self.v["lidar_stale_s"]:

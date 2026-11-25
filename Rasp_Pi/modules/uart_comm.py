@@ -61,7 +61,9 @@ class Stm32Uart(threading.Thread):
         try:
             if packet.command == "IMU" and len(packet.fields) >= 6:
                 _, pitch, roll, yaw, ok, overturned = packet.fields[:6]
-                self._state.update_imu(float(pitch), float(roll), float(yaw), bool(int(ok)), bool(int(overturned)))
+                # Firmware from 2026-11-22 adds the compass's calibration 0..3 (safety.py compass_calibrating).
+                mag = int(packet.fields[6]) if len(packet.fields) >= 7 else 3
+                self._state.update_imu(float(pitch), float(roll), float(yaw), bool(int(ok)), bool(int(overturned)), mag)
             elif packet.command == "GPS" and len(packet.fields) >= 7:
                 _, lat, lon, quality, hdop, speed, course = packet.fields[:7]
                 # GGA fix quality from the F407, as the fix type the rest of the Pi code expects.
