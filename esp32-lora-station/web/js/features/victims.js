@@ -2,10 +2,10 @@
 // và cảnh báo lật phao / xác nhận nhận đồ cứu hộ.
 // Máy chủ đã bỏ bản phao gửi lặp và gộp báo cáo của mọi phao cách nhau dưới 6 m thành một người; phao báo đầu là
 // chủ (docs/victim-claim.md). Viền chấm theo màu phao chủ; admin đánh dấu đã cứu, nhả, hoặc giao cho phao khác.
+import { tellVictim } from './demo.js';
 import { state, RISKS, ZONE_M, LORA_GOOD_M, LORA_WEAK_M } from '../state.js';
 import { hm, fmtAgo } from '../util/format.js';
 import { distM } from '../util/geo.js';
-import { tellVictim } from './demo.js';
 import { log, logPast } from './timeline.js';
 import { colorOf } from './fleet.js';
 
@@ -42,8 +42,8 @@ function victimPopup(v) {
   h.textContent = 'Vùng cứu hộ: ' + RISKS[v.risk].name;
   h.style.color = RISKS[v.risk].color;
   const dl = document.createElement('dl');
-  row(dl, 'Độ tin cậy', Math.round(v.conf * 100) + '%');
   row(dl, 'Bán kính', `~${ZONE_M} m quanh vị trí ước lượng`);
+  row(dl, 'Độ tin cậy', Math.round(v.conf * 100) + '%');
   row(dl, 'Thấy lần cuối', `${timeText(v.last_at)} (${fmtAgo(v.last_at)})`);
   if (v.status) row(dl, 'Trạng thái', STATUS_TEXT[v.status] + (ownerOf(v) ? ` · ${ownerOf(v)}` : ''));
   else row(dl, 'Phao báo', v.buoy);
@@ -83,12 +83,12 @@ function putVictim(v) {
   const owner = ownerOf(v), rescued = v.status === 'rescued';
   const style = { radius: 5, color: rescued || !owner ? '#F8FAFC' : colorOf(owner), weight: owner && !rescued ? 3 : 2,
     dashArray: v.status === 'released' ? '3 3' : null, fillColor: RISKS[v.risk].color, fillOpacity: rescued ? .35 : .95 };
-  const m = dots.get(v.vid);
   const ring = { radius: ZONE_M, color: RISKS[v.risk].color, weight: 2, opacity: rescued ? .4 : .9,
     dashArray: v.status === 'released' ? '6 4' : null, fillColor: RISKS[v.risk].color, fillOpacity: rescued ? .06 : .18 };
   const z = zones.get(v.vid);
   if (z) z.setLatLng([v.lat, v.lon]).setStyle(ring).setPopupContent(() => victimPopup(v));
   else zones.set(v.vid, L.circle([v.lat, v.lon], ring).bindPopup(() => victimPopup(v), { className: 'pop' }).addTo(dotLayer));
+  const m = dots.get(v.vid);
   if (m) m.setLatLng([v.lat, v.lon]).setStyle(style).setRadius(style.radius).setPopupContent(() => victimPopup(v));
   else dots.set(v.vid, L.circleMarker([v.lat, v.lon], style).bindPopup(() => victimPopup(v), { className: 'pop' }).addTo(dotLayer));
 }
@@ -224,6 +224,7 @@ export function onVictimMessage(m) {
   const before = victims.get(v.vid);
   const was = before && { status: before.status, owner: before.owner, seen: seenBy(before).length, risk: before.risk };
   putVictim(v);
+  tellVictim(v, was);
   renderVictims();
   if (m.new || !before) {
     log(...foundRow(v));
@@ -232,7 +233,6 @@ export function onVictimMessage(m) {
   }
   // Nhận nạn nhân: một phao khác thấy cùng người (nó đi tiếp), người đã được cứu, được nhả, đổi chủ
   if (seenBy(v).length > was.seen) {
-  tellVictim(v, was);
     const boat = seenBy(v).at(-1);
     log('claim', `${boat} cũng thấy vùng cứu hộ của ${ownerOf(v) || v.buoy}: đi tiếp, không dừng`, v.last_at, `v${v.vid}@${v.first_at}:seen:${boat}`);
   }
@@ -281,9 +281,9 @@ function legendControl() {
     const body = document.createElement('div'); body.className = 'b';
     const item = (mark, text) => { const d = document.createElement('div'); d.append(mark, text); body.appendChild(d); };
     const el = (cls, color) => { const i = document.createElement('i'); i.className = cls; if (color) i.style.background = color; i.setAttribute('aria-hidden', 'true'); return i; };
+    item(el('zone'), `Vùng cứu hộ (~${ZONE_M} m), màu theo mức:`);
     for (const r of RISKS) item(el('dot', r.color), r.name);
     item(el('lg-buoy'), 'Phao');
-    item(el('zone'), `Vùng cứu hộ (~${ZONE_M} m), màu theo mức:`);
     item(el('lg-leader'), 'Dẫn đầu đội hình');
     item(el('lg-follower'), 'Theo sau trong đội hình');
     item(el('lg-station'), 'Trạm bờ');
