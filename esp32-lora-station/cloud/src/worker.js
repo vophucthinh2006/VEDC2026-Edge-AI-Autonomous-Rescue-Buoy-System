@@ -112,6 +112,10 @@ export function sanitizeFloodLevel(m) {
   return {};
 }
 
+function sanitizeDemo(m) {
+  return m && typeof m === "object" && typeof m.on === "boolean" ? { on: m.on } : null;
+}
+
 function sanitizeHold(m) {
   if (!m || typeof m !== "object" || typeof m.id !== "string") return null;
   const id = m.id.replace(/[^\w.\-]/g, "").slice(0, 31);
@@ -264,7 +268,9 @@ export default {
     }
 
     // ---- Bật/tắt đèn phao, dừng phao, về bờ, lệnh cả đội, xóa chấm người: admin (hoặc token ADMIN_API_TOKEN) ----
-    const COMMANDS = { "/api/lights": [sanitizeLights, "lights"], "/api/hold": [sanitizeHold, "hold"], "/api/flood-level": [sanitizeFloodLevel, "flood-level"],
+    // The buoys' Pis ask whether the judges' demo is on: one public yes or no, nothing else
+    if (path === "/api/demo" && request.method === "GET") return hub().fetch("https://hub/demo");
+    const COMMANDS = { "/api/lights": [sanitizeLights, "lights"], "/api/hold": [sanitizeHold, "hold"], "/api/demo": [sanitizeDemo, "demo"], "/api/flood-level": [sanitizeFloodLevel, "flood-level"],
       "/api/return": [sanitizeReturn, "return"], "/api/fleet": [sanitizeFleet, "fleet"] };
     // Admin về một người (docs/victim-claim.md): đã cứu, nhả cho phao khác, giao cho một phao
     const victimPath = path.match(/^\/api\/victims\/(\d+)$/);

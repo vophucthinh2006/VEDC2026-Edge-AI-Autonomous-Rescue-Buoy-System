@@ -438,3 +438,15 @@ test("a formation sends the route to the leader, places to the followers, and a 
     Date.now = realNow;
   }
 });
+
+test("the judges' demo switch is told to the page, kept, and turns itself off", async () => {
+  const { hub, sent, store } = makeHub();
+  assert.deepEqual(await call(hub, "GET", "/demo"), { type: "demo", on: false });
+  await call(hub, "PUT", "/demo", { on: true, by: "admin@example.com" });
+  assert.deepEqual(sent.at(-1), { type: "demo", on: true });
+  assert.equal((await call(makeHub(store).hub, "GET", "/demo")).on, true);
+  store.set("demo", { on: true, by: null, at: Date.now() - 3 * 3600 * 1000 - 1 });
+  assert.equal((await call(makeHub(store).hub, "GET", "/demo")).on, false);
+  await call(hub, "PUT", "/demo", { on: false });
+  assert.equal((await call(hub, "GET", "/demo")).on, false);
+});
